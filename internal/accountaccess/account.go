@@ -49,15 +49,24 @@ func (a Account) KeyDiscoverySupported() bool {
 	return false
 }
 
+type SystemAccess string
+
+const (
+	AccessRoot         SystemAccess = "root"
+	AccessPassword     SystemAccess = "password"
+	AccessPasswordless SystemAccess = "passwordless"
+	AccessReview       SystemAccess = "review"
+	AccessUnavailable  SystemAccess = "unavailable"
+)
+
 type Inventory struct {
-	Accounts []Account `json:"accounts"`
+	Accounts []Account               `json:"accounts"`
+	Access   map[string]SystemAccess `json:"access"`
 }
 
 type Detail struct {
 	Account       Account        `json:"account"`
 	Groups        []string       `json:"groups"`
 	GroupsProblem string         `json:"groups_problem,omitempty"`
-	SudoListing   string         `json:"sudo_listing"`
-	SudoProblem   string         `json:"sudo_problem,omitempty"`
 	Source        sshkeys.Source `json:"source"`
 }

@@ -1,12 +1,13 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/charmbracelet/x/ansi"
+	"github.com/virtualprivatenode/vpn/internal/accountaccess"
 	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
@@ -75,12 +76,18 @@ type SSHKeysScreen struct {
 	ctx     *ScreenContext
 	request uint64
 
-	keys      []app.SSHKey
-	keyCursor int
-	loadErr   error
-	loaded    bool
-	focusZone int
-	btnIdx    int
+	keys          []app.SSHKey
+	keyCursor     int
+	loadErr       error
+	loaded        bool
+	focusZone     int
+	btnIdx        int
+	information   bool
+	detail        *app.AccountDetails
+	detailErr     error
+	detailRequest uint64
+	accountRef    accountaccess.Ref
+	scroll        int
 }
 
 func NewSSHKeysScreen(
@@ -112,12 +119,16 @@ func (s *SSHKeysScreen) HandleKey(
 
 	case "right":
 		if s.focusZone == sshZoneButtons &&
-			s.btnIdx < 2 {
+			s.btnIdx < 3 {
 			s.btnIdx++
 		}
 		return s, nil
 
 	case "up":
+		if s.scroll > 0 {
+			s.scroll--
+			return s, nil
+		}
 		if s.focusZone == sshZoneKeys {
 			if s.keyCursor > 0 {
 				s.keyCursor--
@@ -133,10 +144,15 @@ func (s *SSHKeysScreen) HandleKey(
 		return s, nil
 
 	case "down", "tab":
+		if keyStr == "down" && s.information && (len(s.keys) == 0 || (s.focusZone == sshZoneKeys && s.keyCursor == len(s.keys)-1)) {
+			s.scroll++
+			return s, nil
+		}
 		if s.focusZone == sshZoneButtons {
 			if len(s.keys) > 0 {
 				s.focusZone = sshZoneKeys
 				s.keyCursor = 0
+				s.scroll = 0
 			}
 			return s, nil
 		}
@@ -148,6 +164,7 @@ func (s *SSHKeysScreen) HandleKey(
 		return s, nil
 
 	case "shift+tab":
+		s.scroll = 0
 		if s.focusZone == sshZoneKeys {
 			s.focusZone = sshZoneButtons
 			s.btnIdx = 0
@@ -170,6 +187,11 @@ func (s *SSHKeysScreen) HandleKey(
 				return s.openPasswordAuthTab()
 			case 2:
 				return s.openChangePasswordTab()
+			case 3:
+				s.information, s.scroll = !s.information, 0
+				if s.information {
+					return s, s.readInformation()
+				}
 			}
 			return s, nil
 		}
@@ -183,8 +205,20 @@ func (s *SSHKeysScreen) HandleMsg(
 ) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tabActivatedMsg:
-		return s, tea.Batch(
-			s.refresh(), fetchSSHPasswordAuthCmd())
+		var info tea.Cmd
+		if s.information {
+			info = s.readInformation()
+		}
+		return s, tea.Batch(s.refresh(), fetchSSHPasswordAuthCmd(), info)
+	case accountDetailMsg:
+		if msg.owner != s || msg.request != s.detailRequest {
+			return s, nil
+		}
+		s.detailErr = msg.err
+		if msg.err == nil {
+			s.detail = &msg.detail
+		}
+		return s, nil
 	case sshKeysListMsg:
 		if msg.owner != s || msg.request != s.request {
 			return s, nil
@@ -215,6 +249,16 @@ func (s *SSHKeysScreen) HandleMsg(
 		return s, nil
 	}
 	return s, nil
+}
+
+func (s *SSHKeysScreen) readInformation() tea.Cmd {
+	s.detailRequest++
+	request, access, ref := s.detailRequest, s.ctx.accountAccess(), s.accountRef
+	s.detail, s.detailErr = nil, nil
+	return func() tea.Msg {
+		detail, err := access.Inspect(ref)
+		return accountDetailMsg{owner: s, request: request, detail: detail, err: err}
+	}
 }
 
 func (s *SSHKeysScreen) View(w, h int) string {
@@ -310,7 +354,7 @@ func (s *SSHKeysScreen) viewList(w, h int) string {
 	headerLines = append(headerLines, "")
 	headerLines = append(headerLines,
 		centerPad(
-			theme.Header.Render("SSH Keys"), w))
+			theme.Header.Render("vpn"), w))
 	headerLines = append(headerLines, "")
 	headerLines = append(headerLines,
 		renderButtons(
@@ -318,6 +362,7 @@ func (s *SSHKeysScreen) viewList(w, h int) string {
 				"Add Key",
 				"Password Auth",
 				"Change Password",
+				"Account information",
 			},
 			s.btnIdx, onButtons, w))
 	headerLines = append(headerLines, "")
@@ -335,7 +380,7 @@ func (s *SSHKeysScreen) viewList(w, h int) string {
 			pwAuthLabel)
 	headerLines = append(headerLines, "")
 
-	headerH := len(headerLines)
+	headerH := len(strings.Split(strings.Join(headerLines, "\n"), "\n"))
 	header := strings.Join(headerLines, "\n")
 
 	// ── Scrollable body ────────────────────────
@@ -357,84 +402,37 @@ func (s *SSHKeysScreen) viewList(w, h int) string {
 			" "+theme.Dim.Render(
 				"Press enter to add a key"))
 	} else {
-		midLines = append(midLines,
-			" "+theme.Label.Render(fmt.Sprintf(
-				"Authorized Keys (%d)",
-				len(s.keys))))
-		midLines = append(midLines, "")
-
-		hdrStyle := theme.TableHeader
-		sepStyle := theme.TableDim
-
-		typeW := 16
-		fpW := 28
-		commentW := w - typeW - fpW - 4
-		if commentW < 10 {
-			commentW = 10
-		}
-
-		hdr := " " +
-			hdrStyle.Render(pad("Type", typeW)) +
-			hdrStyle.Render(
-				pad("Fingerprint", fpW)) +
-			hdrStyle.Render(
-				fmt.Sprintf("%-*s", commentW,
-					"Comment"))
-		midLines = append(midLines, hdr)
-		midLines = append(midLines,
-			" "+sepStyle.Render(
-				strings.Repeat("─", w-2)))
-
-		onList := isFocused &&
-			s.focusZone == sshZoneKeys
-		selStyle := theme.NavActive
-
+		body := newPane(w)
+		body.lines = nil
+		widths := accountKeyWidths(w)
+		accountTableRow(body, []string{"Name", "Type", "Status"}, widths, theme.TableHeader, " ")
 		for i, k := range s.keys {
-			keyType := k.Type
-			if len(keyType) > typeW-1 {
-				keyType = keyType[:typeW-2] + ".."
+			style, marker := theme.Value, " "
+			selected := s.focusZone == sshZoneKeys && s.keyCursor == i
+			if selected && isFocused {
+				style, marker = theme.NavActive, "▸"
 			}
-			typeStr := pad(keyType, typeW)
-
-			fp := k.Fingerprint
-			if len(fp) > fpW-1 {
-				fp = fp[:fpW-4] + "..."
+			name := k.Comment
+			if name == "" {
+				name = "SSH key"
 			}
-			fpStr := pad(fp, fpW)
-
-			comment := theme.PlainText(k.Comment)
-			if comment == "" {
-				comment = "(no comment)"
-			}
-			if len(comment) > commentW-1 {
-				comment = comment[:commentW-4] +
-					"..."
-			}
-			commentStr := fmt.Sprintf("%-*s",
-				commentW, comment)
-
-			isSelected := onList && s.keyCursor == i
-
-			marker := " "
-			if isSelected {
-				marker = theme.NavActive.Render("▸")
-				cursorLine = len(midLines)
-				midLines = append(midLines,
-					marker+
-						selStyle.Render(typeStr)+
-						selStyle.Render(fpStr)+
-						selStyle.Render(
-							commentStr))
-			} else {
-				midLines = append(midLines,
-					marker+
-						theme.Value.Render(
-							typeStr)+
-						theme.Dim.Render(fpStr)+
-						theme.Dim.Render(
-							commentStr))
+			accountTableRow(body, []string{ansi.Truncate(theme.PlainText(name), widths[0], "…"), k.Type, "Configured"}, widths, style, marker)
+			if selected {
+				cursorLine = len(body.lines) - 1
 			}
 		}
+		midLines = append(midLines, body.lines...)
+	}
+	if s.information {
+		body := newPane(w)
+		if s.detailErr != nil {
+			accountText(body, theme.Warning, s.detailErr.Error())
+		} else if s.detail == nil {
+			body.dim("Reading account information...")
+		} else {
+			renderAccountInformation(body, s.detail)
+		}
+		midLines = append(midLines, body.lines...)
 	}
 
 	midContent := strings.Join(midLines, "\n")
@@ -445,11 +443,7 @@ func (s *SSHKeysScreen) viewList(w, h int) string {
 		vpH = 1
 	}
 
-	vpRendered := renderViewport(
-		midContent, w, vpH, cursorLine,
-		len(midLines),
-		isFocused &&
-			s.focusZone == sshZoneKeys)
+	vpRendered := renderAccountViewport(midContent, w, vpH, cursorLine, &s.scroll)
 
 	return header + "\n" + vpRendered
 }

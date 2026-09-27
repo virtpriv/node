@@ -22,7 +22,7 @@ import (
 // and scrollable service list with hotkey actions.
 //
 // Buttons are dynamic; only actionable buttons appear:
-//   Update Packages, SSH Keys and Accounts (always),
+//   Update Packages and Accounts (always),
 //   Update Node (when available), Reboot (when required).
 //
 // Confirms are screen-owned: svcConfirm and sysConfirm
@@ -40,7 +40,6 @@ type sysBtn int
 
 const (
 	sysBtnUpdatePkg sysBtn = iota
-	sysBtnSSHKeys
 	sysBtnAccounts
 	sysBtnUpdateNode
 	sysBtnReboot
@@ -243,15 +242,6 @@ func (s *SystemHomeScreen) HandleKey(
 				}
 			case sysBtnAccounts:
 				return s, openAccountsCmd(s.ctx)
-			case sysBtnSSHKeys:
-				screen := NewSSHKeysScreen(s.ctx)
-				return s, func() tea.Msg {
-					return openTabMsg{
-						Kind:   tabSSHKeys,
-						Label:  "SSH Keys",
-						Screen: screen,
-					}
-				}
 			case sysBtnUpdateNode:
 				screen := NewSelfUpdateScreen(
 					s.ctx)
@@ -791,7 +781,7 @@ func (s *SystemHomeScreen) updateInstallable() bool {
 }
 
 func (s *SystemHomeScreen) buttonActions() []sysBtn {
-	actions := []sysBtn{sysBtnUpdatePkg, sysBtnSSHKeys, sysBtnAccounts}
+	actions := []sysBtn{sysBtnUpdatePkg, sysBtnAccounts}
 	if s.hasUpdate() && s.updateInstallable() {
 		actions = append(actions, sysBtnUpdateNode)
 	}
@@ -804,7 +794,6 @@ func (s *SystemHomeScreen) buttonActions() []sysBtn {
 
 var sysBtnLabel = map[sysBtn]string{
 	sysBtnUpdatePkg:  "Update Packages",
-	sysBtnSSHKeys:    "SSH Keys",
 	sysBtnAccounts:   "Accounts",
 	sysBtnUpdateNode: "Update Node",
 	sysBtnReboot:     "Reboot",

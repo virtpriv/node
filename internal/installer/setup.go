@@ -43,9 +43,8 @@ type InstallOptions struct {
 	// Network from --testnet4 or --signet ("" = mainnet for a pristine host,
 	// or keep the interrupted lifecycle's recorded answer).
 	Network string
-	// Unattended runs with no TUI and no prompts (ruling iv/vii:
-	// keys auto-copied from enumeration, password randomly
-	// generated and printed once — the image path's fallback).
+	// Unattended runs without a TUI or prompts and generates a login password.
+	// SSH keys are configured by the owner after installation.
 	Unattended bool
 	// UntilBake runs only PhaseBake steps (image build
 	// pipeline, ruling iv). Requires Unattended. The run ends

@@ -47,7 +47,28 @@ func ReadLocalAccounts() (accountaccess.Inventory, error) {
 	}
 	defer o.root.Close()
 	accounts, err := o.accounts()
-	return accountaccess.Inventory{Accounts: accounts}, err
+	if err != nil {
+		return accountaccess.Inventory{}, err
+	}
+	// Bound the whole inventory, including hosts with slow policy lookups.
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	access := make(map[string]accountaccess.SystemAccess)
+	for _, a := range accounts {
+		if !a.KeyDiscoverySupported() {
+			continue
+		}
+		if a.UID == 0 {
+			access[a.Name] = accountaccess.AccessRoot
+			continue
+		}
+		listing, err := observeAccountSudo(ctx, a.Name)
+		access[a.Name] = accountaccess.AccessUnavailable
+		if err == nil {
+			access[a.Name] = summarizeAccountSudo(listing, a.Name)
+		}
+	}
+	return accountaccess.Inventory{Accounts: accounts, Access: access}, nil
 }
 
 // ReadLocalAccount accepts a local identity, never a caller-selected path or
@@ -70,14 +91,7 @@ func ReadLocalAccount(ref accountaccess.Ref) (accountaccess.Detail, error) {
 	if err != nil {
 		detail.GroupsProblem = err.Error()
 	}
-	if a.UID == 0 {
-		detail.SudoListing = "UID 0 has root authority."
-	} else {
-		detail.SudoListing, err = observeAccountSudo(a.Name)
-		if err != nil {
-			detail.SudoProblem = err.Error()
-		}
-	}
+
 	return detail, nil
 }
 
@@ -254,8 +268,8 @@ func (w *accountOutput) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func observeAccountSudo(name string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func observeAccountSudo(parent context.Context, name string) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "/usr/bin/sudo", "-n", "-ll", "-U", name)
 	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=C"}

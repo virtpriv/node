@@ -633,7 +633,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshSSHKeysMsg:
 		var cmds []tea.Cmd
 		for _, tab := range m.tabs {
-			if screen, ok := tab.Screen.(*SSHKeysScreen); ok {
+			switch screen := tab.Screen.(type) {
+			case *SSHKeysScreen:
+				cmds = append(cmds, screen.refresh())
+			case *AccountsScreen:
 				cmds = append(cmds, screen.refresh())
 			}
 		}
@@ -973,6 +976,7 @@ func (m Model) closeTab(
 
 	// Closing a parent also removes its child tabs in the same section.
 	// Future asynchronous results will no longer reach the removed screens.
+	descendants := m.tabDescendantKinds(closingTab)
 	shouldRemove := func(t openTab) bool {
 		if t.Section != closingTab.Section {
 			return false
@@ -981,9 +985,7 @@ func (m Model) closeTab(
 			t.Index == closingTab.Index && t.Key == closingTab.Key {
 			return true
 		}
-		// Cascade: remove children whose Parent is
-		// the closing tab's kind.
-		if t.Parent == closingTab.Kind {
+		if descendants[t.Parent] {
 			return true
 		}
 		return false
@@ -1171,12 +1173,31 @@ func (m Model) sshTabBusy(tab openTab) bool {
 	if sshAccessBusy(tab.Screen) {
 		return true
 	}
+	descendants := m.tabDescendantKinds(tab)
 	for _, child := range m.tabs {
-		if child.Section == tab.Section && child.Parent == tab.Kind && sshAccessBusy(child.Screen) {
+		if child.Section == tab.Section && descendants[child.Parent] && sshAccessBusy(child.Screen) {
 			return true
 		}
 	}
 	return false
+}
+
+// Parent links are by tab kind. Follow all levels so closing Accounts cannot
+// orphan a key operation underneath vpn.
+func (m Model) tabDescendantKinds(parent openTab) map[tabKind]bool {
+	kinds := map[tabKind]bool{parent.Kind: true}
+	for range len(m.tabs) {
+		changed := false
+		for _, tab := range m.tabs {
+			if tab.Section == parent.Section && kinds[tab.Parent] && !kinds[tab.Kind] {
+				kinds[tab.Kind], changed = true, true
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	return kinds
 }
 
 func syncthingBusy(screen Screen) bool {

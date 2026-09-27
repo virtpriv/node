@@ -136,7 +136,7 @@ manager. Installation enables password SSH specifically for `vpn`, including
 when the provider disabled password login globally. Use that password for your
 first SSH login as `vpn`. Installation does not discover, accept or copy SSH
 keys. After login, you can import an existing account's key from **System →
-Accounts** or add a key directly from **System → SSH Keys**. Unattended
+Accounts** or add a key directly from **System → Accounts → vpn**. Unattended
 installation generates a password and displays it at completion; save it for
 your first login.
 
@@ -148,7 +148,7 @@ The shell and sudo remain available when the TUI or root helper is unavailable.
 If automatic TUI startup gets stuck, an explicit SSH command can bypass it:
 `ssh -t vpn@YOUR_SERVER /bin/bash --noprofile --norc`.
 
-To change the account password, use **System → SSH Keys → Change Login Password**.
+To change the account password, use **System → Accounts → vpn → Change Password**.
 The TUI opens Debian's native `passwd` prompts as `vpn`, without sudo: enter the
 current password, then the new password twice. Debian's password policy applies
 to replacements. The TUI resumes when the command finishes. This password is
@@ -160,16 +160,17 @@ review a key before importing it into `vpn`. The source account is retained,
 and keys already configured for `vpn` need no import. The list shows `vpn`
 and supported login accounts, plus root as a protected system account whose
 keys can also be imported. This screen does not remove accounts or change
-their access. **Technical details** contains local groups, observed sudo
-rules, account IDs and paths. Only conventional `.ssh/authorized_keys` files
-are inspected for root, `vpn` and accounts using common interactive shells.
+their access. The account table summarizes observed sudo policy; unfamiliar
+or mixed policies need review, and failed observations show as unavailable.
+**Account information** expands local groups, account IDs and paths in place.
+Only conventional `.ssh/authorized_keys` files are inspected for root, `vpn` and accounts using common interactive shells.
 Custom key paths, SSH certificates and provider-managed access
 are not inventoried. Restricted key entries are excluded without removing their
 options, and incomplete observations are reported. Key discovery runs only
 when inspecting accounts after installation.
 
 After testing a new SSH connection with your key, you can disable password SSH
-for `vpn` from **System → SSH Keys**. The existing login banner confirms a vpn
+for `vpn` from **System → Accounts → vpn**. The existing login banner confirms a vpn
 SSH login, which may use a password; it does not verify a specific replacement
 key or sudo access. Root SSH is disabled, but the root account is retained.
 The installation handoff opens the TUI through a separate pseudo-terminal;

@@ -220,24 +220,32 @@ func TestSSHBusyTabsSurviveCloseParentAndReplacement(t *testing.T) {
 	ctx, _ := sshScreenContext(t)
 	for _, screen := range []Screen{&ChangePasswordScreen{ctx: ctx, step: changePwStepWorking}, &SSHKeyAddScreen{ctx: ctx, step: sshAddStepWorking}, &SSHKeyDetailScreen{ctx: ctx, step: sshKeyDetailStepWorking}, &SSHPasswordAuthScreen{ctx: ctx, step: sshPwAuthStepWorking}} {
 		parent := NewSSHKeysScreen(ctx)
-		m := Model{nav: NewNavSidebar(), screenCtx: ctx, state: ctx.State, tabs: []openTab{{Kind: tabSSHKeys, Section: secSystem, Screen: parent}, {Kind: tabSSHKeyAdd, Section: secSystem, Parent: tabSSHKeys, Screen: screen}}}
+		m := Model{nav: NewNavSidebar(), screenCtx: ctx, state: ctx.State, tabs: []openTab{{Kind: tabAccounts, Section: secSystem, Screen: NewAccountsScreen(ctx)}, {Kind: tabSSHKeys, Section: secSystem, Parent: tabAccounts, Screen: parent}, {Kind: tabSSHKeyAdd, Section: secSystem, Parent: tabSSHKeys, Screen: screen}}}
 		m.nav.ActiveItem = secSystem
-		for _, index := range []int{1, 2} {
+		for _, index := range []int{1, 2, 3} {
 			updated, _ := m.closeTab(index)
 			m = updated.(Model)
-			if len(m.tabs) != 2 {
+			if len(m.tabs) != 3 {
 				t.Fatal("busy child discarded")
 			}
 		}
 		updated, _ := m.Update(openTabMsg{Kind: tabSSHKeys, Screen: NewSSHKeysScreen(ctx), Replace: true})
 		m = updated.(Model)
-		if m.tabs[0].Screen != parent {
+		if m.tabs[1].Screen != parent {
 			t.Fatal("busy parent replaced")
 		}
 		updated, _ = m.Update(closeSSHScreenMsg{screen: screen})
 		m = updated.(Model)
-		if len(m.tabs) != 2 {
+		if len(m.tabs) != 3 {
 			t.Fatal("owned close discarded pending operation")
+		}
+		if add, ok := screen.(*SSHKeyAddScreen); ok {
+			updated, _ = m.Update(sshKeyAddMsg{owner: add, attempt: add.attempt})
+			m = updated.(Model)
+			updated, _ = m.closeTab(1)
+			if len(updated.(Model).tabs) != 0 {
+				t.Fatal("closing Accounts left orphaned key tabs after completion")
+			}
 		}
 	}
 }

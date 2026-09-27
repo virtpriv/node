@@ -68,23 +68,23 @@ func (a *AccountAccess) Close() {
 	a.workers.Wait()
 }
 
-func (a *AccountAccess) List() ([]accountaccess.Account, error) {
+func (a *AccountAccess) List() (accountaccess.Inventory, error) {
 	ctx, done, err := a.begin()
 	if err != nil {
-		return nil, err
+		return accountaccess.Inventory{}, err
 	}
 	defer done()
 	var reply accountaccess.Inventory
 	if err := a.call(ctx, helper.VerbReadAccounts, nil, &reply); err != nil {
-		return nil, err
+		return accountaccess.Inventory{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return accountaccess.Inventory{}, err
 	}
 	if reply.Accounts == nil {
-		return nil, errors.New("helper returned an incomplete account inventory")
+		return accountaccess.Inventory{}, errors.New("helper returned an incomplete account inventory")
 	}
-	return reply.Accounts, nil
+	return reply, nil
 }
 
 func (a *AccountAccess) readDetail(ctx context.Context, ref accountaccess.Ref) (accountaccess.Detail, error) {
