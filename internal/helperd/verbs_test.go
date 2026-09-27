@@ -55,6 +55,8 @@ func TestServiceActionDeadlineCoversLNDStopAndNotifiedStart(t *testing.T) {
 // list too.
 func TestVerbMenuIsExactlyTheRuledSet(t *testing.T) {
 	want := []string{
+		helper.VerbReadAccounts,
+		helper.VerbReadAccount,
 		helper.VerbServiceAction,
 		helper.VerbReboot,
 		helper.VerbDirSize,
@@ -67,7 +69,7 @@ func TestVerbMenuIsExactlyTheRuledSet(t *testing.T) {
 		helper.VerbSelfUpdate,
 		helper.VerbUpgradeP2PToHybrid,
 		helper.VerbSyncthingInstall,
-		// Live-read verbs have no parameters or mutation. The verification
+		// Live-read verbs have no mutation. Account detail accepts an identity. The verification
 		// verb also has no parameters but may clear its private marker. They
 		// serve the live-read display facts (onion addresses,
 		// the Syncthing device ID, the SSH password-auth

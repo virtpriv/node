@@ -327,5 +327,9 @@ func renderButtons(
 					Render(label))
 		}
 	}
-	return " " + strings.Join(parts, "  ")
+	// Join complete button blocks so a wrapped label cannot split the row.
+	for i := 1; i < len(parts); i++ {
+		parts[i] = lipgloss.NewStyle().PaddingLeft(2).Render(parts[i])
+	}
+	return lipgloss.NewStyle().PaddingLeft(1).Render(lipgloss.JoinHorizontal(lipgloss.Top, parts...))
 }

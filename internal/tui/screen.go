@@ -73,6 +73,7 @@ type ScreenContext struct {
 	walletGeneration    uint64 // Scopes retained observations; routine reads do not change it.
 	HelperWorkflows     *app.HelperWorkflows
 	SSHAccess           *app.SSHAccess
+	AccountAccess       accountAccess
 	sshAuthRevision     uint64
 	Cfg                 *config.AppConfig
 	State               *RuntimeState

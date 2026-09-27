@@ -13,16 +13,13 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/sshkeys"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
 type wizardPhase int
 
 const (
-	wzAccess wizardPhase = iota
-	wzPaste
-	wzPassword
+	wzPassword wizardPhase = iota
 	wzHardware
 	wzSteps
 	wzDone
@@ -50,21 +47,9 @@ type wizardModel struct {
 	phase         wizardPhase
 	width, height int
 
-	keys     []sshkeys.Key
-	selected []bool
-	cursor   int // 0..len(keys)-1 = key rows; len(keys) = button row
-	btnIdx   int // 0 = Continue, 1 = Paste a key
-	accErr   string
-
-	pasteInput textinput.Model
-	pasteFocus int // 0 = input, 1 = buttons
-	pasteBtn   int // 0 = Back, 1 = Add key
-	pasteErr   string
-
 	pwInput   textinput.Model
 	pwConfirm textinput.Model
 	pwFocus   int // 0 = new, 1 = confirm, 2 = buttons
-	pwBtn     int // 0 = Back, 1 = Continue
 	pwErr     string
 
 	dbIdx   int
@@ -79,12 +64,6 @@ type wizardModel struct {
 
 func newWizardModel(info installer.InstallView, session installSession) wizardModel {
 	m := wizardModel{info: info, session: session, steps: info.Steps}
-	m.keys = installer.DedupeKeys(m.info.Sources)
-	m.selected = make([]bool, len(m.keys))
-	for i := range m.selected {
-		m.selected[i] = true
-	}
-	m.pasteInput = newWizardInput("ssh-ed25519 AAAA... comment", 1000, 56)
 	m.pwInput = newWizardPasswordInput()
 	m.pwConfirm = newWizardPasswordInput()
 	for i, v := range info.DBCacheChoices {
@@ -94,7 +73,7 @@ func newWizardModel(info installer.InstallView, session installSession) wizardMo
 	}
 	switch {
 	case m.info.NeedIdentity:
-		m.phase = wzAccess
+		m.enterPasswordScreen()
 	case m.info.NeedHardware:
 		m.phase = wzHardware
 	default:
@@ -103,30 +82,14 @@ func newWizardModel(info installer.InstallView, session installSession) wizardMo
 	return m
 }
 
-func newWizardInput(
-	placeholder string, limit, width int,
-) textinput.Model {
-	ti := textinput.New()
-	ti.Placeholder = placeholder
-	ti.CharLimit = limit
-	ti.SetWidth(width)
-	ti.Prompt = "  "
-	s := textinput.DefaultStyles(theme.IsDark())
-	ti.SetStyles(s)
-	return ti
-}
-
 func newWizardPasswordInput() textinput.Model {
-	ti := newWizardInput("", 128, 40)
+	ti := textinput.New()
+	ti.CharLimit = 128
+	ti.SetWidth(40)
+	ti.Prompt = "  "
+	ti.SetStyles(textinput.DefaultStyles(theme.IsDark()))
 	ti.EchoMode = textinput.EchoPassword
 	return ti
-}
-
-func pasteFirstLine(content string) string {
-	if idx := strings.IndexByte(content, '\n'); idx >= 0 {
-		content = content[:idx]
-	}
-	return strings.TrimSpace(content)
 }
 
 func (m wizardModel) Init() tea.Cmd {
@@ -194,10 +157,6 @@ func (m wizardModel) Update(
 			return m, tea.Quit
 		}
 		switch m.phase {
-		case wzAccess:
-			return m.updateAccess(msg)
-		case wzPaste:
-			return m.updatePaste(msg)
 		case wzPassword:
 			return m.updatePassword(msg)
 		case wzHardware:
@@ -216,11 +175,7 @@ func (m wizardModel) Update(
 func (m wizardModel) handlePaste(
 	msg tea.PasteMsg,
 ) (tea.Model, tea.Cmd) {
-	switch {
-	case m.phase == wzPaste && m.pasteFocus == 0:
-		m.pasteInput.SetValue(pasteFirstLine(msg.Content))
-		m.pasteErr = ""
-	case m.phase == wzPassword && m.pwFocus < 2:
+	if m.phase == wzPassword && m.pwFocus < 2 {
 		input := &m.pwInput
 		if m.pwFocus == 1 {
 			input = &m.pwConfirm
@@ -237,218 +192,12 @@ func (m wizardModel) handlePaste(
 	return m, nil
 }
 
-func (m wizardModel) updateAccess(
-	msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	last := len(m.keys) // index of the button row
-	switch msg.String() {
-	case "up", "shift+tab":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-	case "down", "tab":
-		if m.cursor < last {
-			m.cursor++
-		}
-	case "left":
-		if m.cursor == last && m.btnIdx > 0 {
-			m.btnIdx--
-		}
-	case "right":
-		if m.cursor == last && m.btnIdx < 1 {
-			m.btnIdx++
-		}
-	case "space":
-		if m.cursor < len(m.keys) {
-			m.selected[m.cursor] = !m.selected[m.cursor]
-			m.accErr = ""
-		}
-	case "enter":
-		if m.cursor < len(m.keys) {
-			m.selected[m.cursor] = !m.selected[m.cursor]
-			m.accErr = ""
-			return m, nil
-		}
-		if m.btnIdx == 1 {
-			m.pasteErr = ""
-			m.pasteInput.SetValue("")
-			m.pasteFocus = 0
-			m.pasteBtn = 1
-			m.pasteInput.Focus()
-			m.phase = wzPaste
-			return m, nil
-		}
-		var chosen []sshkeys.Key
-		for i, k := range m.keys {
-			if m.selected[i] {
-				chosen = append(chosen, k)
-			}
-		}
-		m.input.Keys = chosen
-		m.enterPasswordScreen()
-		return m, nil
-	}
-	return m, nil
-}
-
 func (m *wizardModel) enterPasswordScreen() {
 	m.pwFocus = 0
-	m.pwBtn = 1
 	m.pwErr = ""
 	m.pwInput.Focus()
 	m.pwConfirm.Blur()
 	m.phase = wzPassword
-}
-
-func (m wizardModel) viewAccess(p *wizPane) {
-	p.header("Identity and access")
-	p.blank()
-	p.text("This node's admin user is '" + paths.AdminUser +
-		"'. Every SSH login as " + paths.AdminUser +
-		" opens the node TUI.")
-	p.blank()
-
-	if len(m.keys) == 0 {
-		p.text("No SSH keys were found on this box.")
-	} else {
-		p.text("SSH keys found on this box. Confirmed keys " +
-			"are copied to " + paths.AdminUser + ":")
-	}
-	p.blank()
-
-	for i, k := range m.keys {
-		mark := "[ ]"
-		if m.selected[i] {
-			mark = "[x]"
-		}
-		cur := "  "
-		if m.cursor == i {
-			cur = "> "
-		}
-		line := fmt.Sprintf("%s%s %s", cur, mark, k.Fingerprint)
-		sty := theme.Value
-		if m.cursor == i {
-			sty = theme.Action
-		}
-		p.line(" " + sty.Render(line))
-		detail := "      " + k.Type
-		if k.Comment != "" {
-			detail += " (" + k.Comment + ")"
-		}
-		detail += "  [" + m.keySourceNames(k.Fingerprint) + "]"
-		p.dim(detail)
-	}
-	for _, s := range m.info.Sources {
-		if s.Excluded > 0 {
-			p.dim(fmt.Sprintf(
-				"   %d provider control line(s) in %s excluded,"+
-					" not copied", s.Excluded, s.Path))
-		}
-	}
-	if m.accErr != "" {
-		p.blank()
-		p.warn(m.accErr)
-	}
-	p.blank()
-	p.buttons([]string{"Continue", "Paste a key"},
-		m.btnIdx, m.cursor == len(m.keys))
-	p.blank()
-	p.hint("up/down: move   space: toggle key   " +
-		"left/right: choose button   enter: select")
-}
-
-func (m wizardModel) keySourceNames(fingerprint string) string {
-	var names []string
-	for _, s := range m.info.Sources {
-		for _, k := range s.Keys {
-			if k.Fingerprint == fingerprint {
-				names = append(names, s.User)
-				break
-			}
-		}
-	}
-	if len(names) == 0 {
-		return "pasted"
-	}
-	return strings.Join(names, ", ")
-}
-
-func (m wizardModel) updatePaste(
-	msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "up", "shift+tab":
-		if m.pasteFocus == 1 {
-			m.pasteFocus = 0
-			m.pasteInput.Focus()
-		}
-		return m, nil
-	case "down", "tab":
-		if m.pasteFocus == 0 {
-			m.pasteFocus = 1
-			m.pasteInput.Blur()
-		}
-		return m, nil
-	case "left":
-		if m.pasteFocus == 1 && m.pasteBtn > 0 {
-			m.pasteBtn--
-			return m, nil
-		}
-	case "right":
-		if m.pasteFocus == 1 && m.pasteBtn < 1 {
-			m.pasteBtn++
-			return m, nil
-		}
-	case "enter":
-		if m.pasteFocus == 1 && m.pasteBtn == 0 {
-			m.phase = wzAccess
-			return m, nil
-		}
-		line := strings.TrimSpace(m.pasteInput.Value())
-		info, err := sshkeys.Parse(line)
-		if err != nil {
-			m.pasteErr = "Not a valid public key line: " +
-				err.Error()
-			return m, nil
-		}
-		for i, k := range m.keys {
-			if k.Fingerprint == info.Fingerprint {
-				m.selected[i] = true
-				m.phase = wzAccess
-				return m, nil
-			}
-		}
-		m.keys = append(m.keys, info)
-		m.selected = append(m.selected, true)
-		m.phase = wzAccess
-		m.cursor = len(m.keys) - 1
-		return m, nil
-	}
-	if m.pasteFocus == 0 {
-		var cmd tea.Cmd
-		m.pasteInput, cmd = m.pasteInput.Update(tea.Msg(msg))
-		return m, cmd
-	}
-	return m, nil
-}
-
-func (m wizardModel) viewPaste(p *wizPane) {
-	p.header("Paste a public key")
-	p.blank()
-	p.text("Paste one authorized_keys line (type, key data, " +
-		"optional comment). It is validated before use.")
-	p.blank()
-	p.line(" " + m.pasteInput.View())
-	if m.pasteErr != "" {
-		p.blank()
-		p.warn(m.pasteErr)
-	}
-	p.blank()
-	p.buttons([]string{"Back", "Add key"},
-		m.pasteBtn, m.pasteFocus == 1)
-	p.blank()
-	p.hint("up/down: input or buttons   " +
-		"left/right: choose button   enter: select")
 }
 
 func (m wizardModel) updatePassword(
@@ -467,24 +216,10 @@ func (m wizardModel) updatePassword(
 			m.syncPwFocus()
 		}
 		return m, nil
-	case "left":
-		if m.pwFocus == 2 && m.pwBtn > 0 {
-			m.pwBtn--
-			return m, nil
-		}
-	case "right":
-		if m.pwFocus == 2 && m.pwBtn < 1 {
-			m.pwBtn++
-			return m, nil
-		}
 	case "enter":
 		if m.pwFocus < 2 {
 			m.pwFocus++
 			m.syncPwFocus()
-			return m, nil
-		}
-		if m.pwBtn == 0 {
-			m.phase = wzAccess
 			return m, nil
 		}
 		if m.pwInput.Value() != m.pwConfirm.Value() {
@@ -534,11 +269,10 @@ func (m *wizardModel) syncPwFocus() {
 func (m wizardModel) viewPassword(p *wizPane) {
 	p.header("Login password")
 	p.blank()
-	p.text("Set the password for '" + paths.AdminUser + "'. " +
-		"Installation enables password SSH for this account. " +
-		"The same password authorizes sudo for server maintenance. " +
-		"SSH keys are optional. After testing key login, you can " +
-		"disable password SSH from System, SSH Keys.")
+	p.text("Set the password for '" + paths.AdminUser + "', your node's owner account. " +
+		"Use it for your first SSH login and for sudo maintenance. " +
+		"After installation, you can import existing SSH keys from System, Accounts " +
+		"or add a key from System, SSH Keys.")
 	p.blank()
 	p.text("Use a password manager: generate it, store it " +
 		"there first. Minimum " +
@@ -558,11 +292,9 @@ func (m wizardModel) viewPassword(p *wizPane) {
 		p.warn(m.pwErr)
 	}
 	p.blank()
-	p.buttons([]string{"Back", "Continue"},
-		m.pwBtn, m.pwFocus == 2)
+	p.buttons([]string{"Continue"}, 0, m.pwFocus == 2)
 	p.blank()
-	p.hint("up/down: move   left/right: choose button   " +
-		"enter: select   paste works in both fields")
+	p.hint("up/down: move   enter: select   ctrl+c: exit   paste works in both fields")
 }
 
 func (m wizardModel) hwButtons() []string {
@@ -775,8 +507,7 @@ func (m wizardModel) viewDone(p *wizPane) {
 	p.blank()
 	renderStepRows(p, m.steps)
 	p.blank()
-	p.text("Your everyday way into the node, from any " +
-		"terminal:")
+	p.text("Connect as vpn with your installation password:")
 	p.line(" " + theme.Action.Render("   "+m.sshTarget()))
 	p.blank()
 	p.text("Press Enter to open the node TUI as user '" +
@@ -853,10 +584,6 @@ func (m wizardModel) View() tea.View {
 	p := &wizPane{width: bw}
 
 	switch m.phase {
-	case wzAccess:
-		m.viewAccess(p)
-	case wzPaste:
-		m.viewPaste(p)
 	case wzPassword:
 		m.viewPassword(p)
 	case wzHardware:

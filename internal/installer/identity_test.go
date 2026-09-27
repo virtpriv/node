@@ -1,91 +1,10 @@
-// internal/installer/identity_test.go
-
 package installer
 
 import (
+	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"strings"
 	"testing"
-
-	"github.com/virtualprivatenode/vpn/internal/loginpassword"
-	"github.com/virtualprivatenode/vpn/internal/sshkeys"
 )
-
-const (
-	testKeyA = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB alice@laptop"
-	testKeyB = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC bob@desktop"
-	// The wild cloud-init decoy shape: an options prefix with a
-	// forced command ahead of real key material.
-	testDecoy = `no-port-forwarding,no-agent-forwarding,` +
-		`command="echo 'Please login as the user \"admin\" ` +
-		`rather than the user \"root\".'" ` +
-		`ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB provisioning`
-)
-
-// ── classifyAuthorizedKeys ───────────────────────────────
-
-func TestClassifyAuthorizedKeysPlain(t *testing.T) {
-	keys, excluded := classifyAuthorizedKeys(
-		testKeyA + "\n" + testKeyB + "\n")
-	if len(keys) != 2 || excluded != 0 {
-		t.Fatalf("got %d keys %d excluded, want 2/0",
-			len(keys), excluded)
-	}
-	if keys[0].Comment != "alice@laptop" {
-		t.Errorf("comment: got %q", keys[0].Comment)
-	}
-}
-
-// The decoy trap (IA-3-E context, ruling vii): a forced-command
-// provider line must be EXCLUDED and COUNTED — never copied
-// verbatim, never silently dropped.
-func TestClassifyAuthorizedKeysExcludesDecoy(t *testing.T) {
-	keys, excluded := classifyAuthorizedKeys(
-		testDecoy + "\n" + testKeyA + "\n")
-	if len(keys) != 1 {
-		t.Fatalf("got %d keys, want 1", len(keys))
-	}
-	if keys[0].Comment != "alice@laptop" {
-		t.Errorf("wrong key survived: %+v", keys[0])
-	}
-	if excluded != 1 {
-		t.Errorf("excluded: got %d, want 1", excluded)
-	}
-}
-
-func TestClassifyAuthorizedKeysSkipsNoise(t *testing.T) {
-	keys, excluded := classifyAuthorizedKeys(
-		"# a comment\n\n   \n" + testKeyA + "\n" +
-			"complete garbage line\n")
-	if len(keys) != 1 {
-		t.Errorf("got %d keys, want 1", len(keys))
-	}
-	// Garbage without key material is noise, not an exclusion —
-	// counting it would overstate what was on the box.
-	if excluded != 0 {
-		t.Errorf("excluded: got %d, want 0", excluded)
-	}
-}
-
-// ── DedupeKeys ───────────────────────────────────────────
-
-func TestDedupeKeys(t *testing.T) {
-	a, _ := sshkeys.Parse(testKeyA)
-	b, _ := sshkeys.Parse(testKeyB)
-	sources := []KeySource{
-		{User: "root", Keys: []sshkeys.Key{a, b}},
-		{User: "debian", Keys: []sshkeys.Key{a}}, // duplicate
-	}
-	out := DedupeKeys(sources)
-	if len(out) != 2 {
-		t.Fatalf("got %d keys, want 2", len(out))
-	}
-	if out[0].Fingerprint != a.Fingerprint ||
-		out[1].Fingerprint != b.Fingerprint {
-		t.Error("order not first-seen")
-	}
-}
-
-// ── generateAdminPassword ────────────────────────────────
 
 func TestGenerateAdminPassword(t *testing.T) {
 	pw := generateAdminPassword()
@@ -108,12 +27,5 @@ func TestGenerateAdminPassword(t *testing.T) {
 	pw2 := generateAdminPassword()
 	if pw == pw2 {
 		t.Error("two generated passwords identical")
-	}
-}
-
-func TestClassifyAuthorizedKeysReportsMalformedKeys(t *testing.T) {
-	keys, excluded := classifyAuthorizedKeys("ssh-ed25519 YQ== malformed\nssh-dss YQ== obsolete\n" + testKeyA + "\n")
-	if len(keys) != 1 || excluded != 2 {
-		t.Fatalf("got %d keys and %d exclusions", len(keys), excluded)
 	}
 }

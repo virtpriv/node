@@ -5,55 +5,18 @@ import (
 	"fmt"
 	"os"
 	"os/user"
-	"strings"
 
-	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/sshkeys"
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
-// CreateOperatorAccess creates the operator account and installs confirmed keys
-// during an admitted base installation. Password and sudo provisioning remain
-// separate so installer can record successful password application first.
-func CreateOperatorAccess(keys []sshkeys.Key) error {
+// CreateOperatorAccount creates the owner during an admitted base installation.
+// SSH keys are added explicitly by the owner after installation.
+func CreateOperatorAccount() error {
 	if os.Geteuid() != 0 {
 		return errors.New("initial operator access requires root")
 	}
-	for _, key := range keys {
-		if _, err := sshkeys.Parse(key.RawLine); err != nil {
-			return fmt.Errorf("invalid confirmed SSH key: %w", err)
-		}
-	}
-	if err := ensureOperatorAccount(user.Lookup, system.RunRoot); err != nil {
-		return err
-	}
-
-	if len(keys) == 0 {
-		logger.Install("admin access: no SSH keys configured (password login)")
-		return nil
-	}
-
-	sshDir := paths.AdminHome + "/.ssh"
-	if err := system.RunRoot("mkdir", "-p", sshDir); err != nil {
-		return fmt.Errorf("mkdir %s: %w", sshDir, err)
-	}
-	var b strings.Builder
-	for _, key := range keys {
-		b.WriteString(key.RawLine)
-		b.WriteString("\n")
-	}
-	if err := system.WriteFileRoot(paths.AuthorizedKeysFile, []byte(b.String()), 0600); err != nil {
-		return fmt.Errorf("write authorized_keys: %w", err)
-	}
-	if err := system.RunRoot("chown", "-R", paths.AdminUser+":"+paths.AdminUser, sshDir); err != nil {
-		return err
-	}
-	if err := system.RunRoot("chmod", "700", sshDir); err != nil {
-		return err
-	}
-	logger.Install("admin access: %d key(s) written for %s", len(keys), paths.AdminUser)
-	return nil
+	return ensureOperatorAccount(user.Lookup, system.RunRoot)
 }
 
 // Keep lookup and creation together: failure to observe an account is not proof

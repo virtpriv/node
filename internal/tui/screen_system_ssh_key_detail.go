@@ -163,7 +163,7 @@ func (s *SSHKeyDetailScreen) viewDetail(
 	k := s.keyInfo
 	p := newPane(w)
 
-	comment := k.Comment
+	comment := theme.PlainText(k.Comment)
 	if comment == "" {
 		comment = "(no comment)"
 	}
@@ -173,7 +173,7 @@ func (s *SSHKeyDetailScreen) viewDetail(
 	p.labelLine("Fingerprint:")
 	p.monoWrap(k.Fingerprint)
 	if k.Comment != "" {
-		p.field("Comment:     ", k.Comment)
+		p.field("Comment:     ", theme.PlainText(k.Comment))
 	}
 
 	p.appendError(s.removeErr)
@@ -230,7 +230,7 @@ func (s *SSHKeyDetailScreen) viewConfirm(
 ) string {
 	p := newPane(w)
 
-	comment := s.keyInfo.Comment
+	comment := theme.PlainText(s.keyInfo.Comment)
 	if comment == "" {
 		comment = "this key"
 	}
@@ -241,7 +241,7 @@ func (s *SSHKeyDetailScreen) viewConfirm(
 	p.labelLine("Fingerprint:")
 	p.monoWrap(s.keyInfo.Fingerprint)
 	if s.keyInfo.Comment != "" {
-		p.field("Comment:     ", s.keyInfo.Comment)
+		p.field("Comment:     ", theme.PlainText(s.keyInfo.Comment))
 	}
 
 	p.blank()

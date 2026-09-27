@@ -58,9 +58,7 @@ func TestWizardPasswordPastePreservesOrRejects(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m, session := wizardFixture()
-			m.phase = wzPassword
 			for focus := 0; focus < 2; focus++ {
-				m.pwFocus = focus
 				var cmd tea.Cmd
 				m, cmd = updateWizard(t, m, tea.PasteMsg{Content: tc.value})
 				if cmd != nil || session.starts != 0 {
@@ -77,9 +75,11 @@ func TestWizardPasswordPastePreservesOrRejects(t *testing.T) {
 				} else if input.Value() != "" || m.pwErr == "" {
 					t.Fatal("altered input was not rejected and cleared")
 				}
+				m, cmd = updateWizard(t, m, enter())
+				if cmd != nil || session.starts != 0 {
+					t.Fatal("input navigation scheduled installation")
+				}
 			}
-			m.pwFocus = 2
-			m.pwBtn = 1
 			m, cmd := updateWizard(t, m, enter())
 			if tc.want != "" {
 				if m.phase != wzSteps || cmd == nil {
@@ -102,9 +102,7 @@ func TestWizardPasswordPastePreservesOrRejects(t *testing.T) {
 
 func TestWizardPasswordMinimumMismatchAndRecovery(t *testing.T) {
 	m, session := wizardFixture()
-	m.phase = wzPassword
 	m.pwFocus = 2
-	m.pwBtn = 1
 	for _, values := range [][2]string{{"abcdefghijklmno", "abcdefghijklmno"}, {"abcdefghijklmnop", "abcdefghijklmnopX"}} {
 		m.pwInput.SetValue(values[0])
 		m.pwConfirm.SetValue(values[1])
@@ -219,20 +217,7 @@ func TestWizardCompletionChoiceAndEarlyExit(t *testing.T) {
 	}
 }
 
-func TestWizardResumeScreensAndObservationFailure(t *testing.T) {
-	for _, tc := range []struct {
-		identity, hardware bool
-		phase              wizardPhase
-	}{{true, true, wzAccess}, {false, true, wzHardware}, {false, false, wzSteps}} {
-		m, session := wizardFixture()
-		info := m.info
-		info.NeedIdentity = tc.identity
-		info.NeedHardware = tc.hardware
-		m = newWizardModel(info, session)
-		if m.phase != tc.phase {
-			t.Fatal("resume requested the wrong input screen")
-		}
-	}
+func TestWizardObservationFailureRefusesHandoff(t *testing.T) {
 	m, _ := wizardFixture()
 	m.phase = wzSteps
 	m, cmd := updateWizard(t, m, wizardProgressMsg{ok: false})
@@ -253,17 +238,5 @@ func assertQuit(t *testing.T, cmd tea.Cmd) {
 	msg := cmd()
 	if _, ok := msg.(tea.QuitMsg); !ok {
 		t.Fatalf("exit command returned %T, want tea.QuitMsg", msg)
-	}
-}
-
-func TestWizardAllowsPasswordOnlyOwnerAccess(t *testing.T) {
-	m, session := wizardFixture()
-	m.phase = wzAccess
-	m.keys = nil
-	m.cursor = 0
-	m.btnIdx = 0
-	m, cmd := updateWizard(t, m, enter())
-	if m.phase != wzPassword || m.accErr != "" || cmd != nil || session.starts != 0 {
-		t.Fatal("password-only setup did not reach password choice")
 	}
 }

@@ -44,13 +44,16 @@ const (
 	// root-private pending marker. It accepts no caller-chosen state.
 	VerbVerifyAdminLogin = "verify-admin-login"
 
-	// Read-only verbs: no parameters, no mutation, a typed
-	// result. They exist for display facts the TUI needs
+	// Read-only verbs: no mutation, a typed
+	// result. read-account accepts only a local account identity.
+	// They exist for display facts the TUI needs
 	// at human cadence (screen entry) whose truth lives in
 	// root-readable places and can change outside any
-	// operation of ours — keeping a copy of such a fact
+	// operation of ours. Keeping a copy of such a fact
 	// would risk rendering it confidently wrong, so no copy
 	// exists and the screens ask here instead.
+	VerbReadAccounts             = "read-accounts"
+	VerbReadAccount              = "read-account"
 	VerbReadNodeAddresses        = "read-node-addresses"
 	VerbReadSSHAuth              = "read-ssh-auth"
 	VerbReadWalletState          = "read-wallet-state"

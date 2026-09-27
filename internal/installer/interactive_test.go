@@ -10,7 +10,6 @@ import (
 
 	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/loginpassword"
-	"github.com/virtualprivatenode/vpn/internal/sshkeys"
 )
 
 func interactiveFixture(t *testing.T, steps []InstallStep, complete func() error) (*InstallSession, InteractiveInput) {
@@ -177,12 +176,10 @@ func TestInteractiveInputValidationAndRetry(t *testing.T) {
 	s.needHardware = true
 	writeErr := errors.New("cache decision not saved")
 	s.persistDBCache = func(int) error { writes++; return writeErr }
-	input.Keys = nil // Password SSH makes initial keys optional.
 	input.DBCacheMB = 512
 	for _, invalid := range []InteractiveInput{
-		{Keys: input.Keys, DBCacheMB: 512},
-		{Keys: []sshkeys.Key{{RawLine: "ssh-ed25519 YQ=="}}, Password: input.Password, DBCacheMB: 512},
-		{Keys: input.Keys, Password: input.Password, DBCacheMB: 999},
+		{DBCacheMB: 512},
+		{Password: input.Password, DBCacheMB: 999},
 	} {
 		if err := s.Start(invalid); err == nil {
 			t.Fatal("invalid decisions accepted")

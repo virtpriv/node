@@ -33,7 +33,7 @@ func TestRebootHiddenCompletionRetryAndDuplicateAdmission(t *testing.T) {
 	m.sectionScreens[secSystem] = s
 	m.screenCtx.Status = &app.StatusSnapshot{Reboot: freshStatus(true)}
 	m.statusScope = m.currentStatusScope()
-	s.btnIdx = 2
+	s.btnIdx = slices.Index(s.buttonActions(), sysBtnReboot)
 	m.sectionScreens[secAddons] = NewAddonsHomeScreen(m.screenCtx)
 	press := func(code rune) tea.Cmd { return statusUpdate(&m, tea.KeyPressMsg{Code: code}) }
 	press(tea.KeyEnter)
@@ -127,9 +127,9 @@ func TestRebootRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 	m.focusContent()
 	s := NewSystemHomeScreen(m.screenCtx)
 	m.sectionScreens[secSystem] = s
-	s.btnIdx = 2
 	m.statusScope = m.currentStatusScope()
 	m.screenCtx.Status = &app.StatusSnapshot{Reboot: freshStatus(true), Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
+	s.btnIdx = slices.Index(s.buttonActions(), sysBtnReboot)
 	before, beforeDone := startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
 	statusUpdate(&m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	confirm := statusUpdate(&m, tea.KeyPressMsg{Code: 'y'})

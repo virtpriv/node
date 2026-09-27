@@ -57,6 +57,7 @@ const (
 	tabAutoUnlock                       // Auto-unlock configuration flow
 	tabWalletCreate                     // Wallet creation flow
 	tabNodeInfo                         // Receive channel / node info screen
+	tabAccounts                         // Local accounts and key import
 	tabSSHKeys                          // SSH key management
 	tabSSHKeyDetail                     // SSH key detail (per-key)
 	tabSSHKeyAdd                        // SSH key add flow
@@ -324,6 +325,9 @@ func Show(
 		}
 		if m.screenCtx.Fees != nil {
 			m.screenCtx.Fees.Close()
+		}
+		if m.screenCtx.AccountAccess != nil {
+			m.screenCtx.AccountAccess.Close()
 		}
 		if m.screenCtx.SSHVerification != nil {
 			m.screenCtx.SSHVerification.Close()

@@ -30,7 +30,7 @@ func TestParseRejectsMalformedAndUnsupportedKeys(t *testing.T) {
 	valid := publicKey(t)
 	fields := strings.Fields(valid)
 	data, _ := base64.StdEncoding.DecodeString(fields[1])
-	for _, line := range []string{"ssh-ed25519 YQ==", "ssh-ed25519 !!!", "ssh-rsa " + fields[1], "ssh-ed25519 " + base64.StdEncoding.EncodeToString(append(data, 0)), "ssh-dss " + fields[1], "command=\"false\" " + valid, valid + "\n" + valid, "ssh-ed25519-cert-v01@openssh.com " + fields[1]} {
+	for _, line := range []string{valid + " " + strings.Repeat("x", 8192), "ssh-ed25519 YQ==", "ssh-ed25519 !!!", "ssh-rsa " + fields[1], "ssh-ed25519 " + base64.StdEncoding.EncodeToString(append(data, 0)), "ssh-dss " + fields[1], "command=\"false\" " + valid, valid + "\n" + valid, "ssh-ed25519-cert-v01@openssh.com " + fields[1]} {
 		if _, err := Parse(line); err == nil {
 			t.Errorf("accepted %q", line)
 		}

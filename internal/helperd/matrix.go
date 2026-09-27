@@ -141,11 +141,13 @@ var freshness = map[string]string{
 // the menu, so retiring a verb without a replacement story is
 // a red test too.
 var liveReadFacts = map[string]string{
-	"onion-addresses":     helper.VerbReadNodeAddresses,
-	"syncthing-device-id": helper.VerbReadNodeAddresses,
-	"ssh-password-auth":   helper.VerbReadSSHAuth,
-	"wallet-existence":    helper.VerbReadWalletState,
-	"key-verification":    helper.VerbReadKeyVerificationState,
+	"local-accounts":       helper.VerbReadAccounts,
+	"local-account-access": helper.VerbReadAccount,
+	"onion-addresses":      helper.VerbReadNodeAddresses,
+	"syncthing-device-id":  helper.VerbReadNodeAddresses,
+	"ssh-password-auth":    helper.VerbReadSSHAuth,
+	"wallet-existence":     helper.VerbReadWalletState,
+	"key-verification":     helper.VerbReadKeyVerificationState,
 }
 
 // restage refreshes every fact the given verb invalidates.

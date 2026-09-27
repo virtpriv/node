@@ -43,9 +43,8 @@ type InstallOptions struct {
 	// Network from --testnet4 or --signet ("" = mainnet for a pristine host,
 	// or keep the interrupted lifecycle's recorded answer).
 	Network string
-	// Unattended runs with no TUI and no prompts (ruling iv/vii:
-	// keys auto-copied from enumeration, password randomly
-	// generated and printed once — the image path's fallback).
+	// Unattended runs without a TUI or prompts and generates a login password.
+	// SSH keys are configured by the owner after installation.
 	Unattended bool
 	// UntilBake runs only PhaseBake steps (image build
 	// pipeline, ruling iv). Requires Unattended. The run ends
@@ -416,16 +415,9 @@ func printGeneratedPassword(password string) error {
 	return nil
 }
 
-// fillUnattendedDecisions supplies the wizard answers for
-// --unattended: every enumerated (non-decoy) key is copied — the
-// spiritual successor of the script's cascade, from enumeration
-// instead of guessing — and the password is randomly generated
-// (ruling vii: random survives ONLY here) and printed at the
-// end. dbcache takes the hardware recommendation.
-//
-// Initial installation establishes owner password SSH even without copied keys.
+// fillUnattendedDecisions prepares a generated password and hardware defaults.
+// Password delivery follows the applied/pending-marker contract.
 func fillUnattendedDecisions(dec *InstallDecisions) error {
-	dec.Keys = DedupeKeys(EnumerateKeySources())
 	if err := fillGeneratedPassword(dec); err != nil {
 		return err
 	}

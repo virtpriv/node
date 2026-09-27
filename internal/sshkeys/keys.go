@@ -23,7 +23,7 @@ type Key struct {
 	RawLine     string
 }
 
-// RecognizedType includes obsolete types so installer inventory can report exclusions.
+// RecognizedType includes obsolete types so account inspection can report exclusions.
 func RecognizedType(t string) bool {
 	switch t {
 	case "ssh-rsa", "ssh-ed25519", "ssh-dss", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521", "sk-ssh-ed25519@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com":
@@ -39,6 +39,10 @@ func Parse(line string) (Key, error) {
 	line = strings.TrimSuffix(line, "\n")
 	line = strings.TrimSuffix(line, "\r")
 	line = strings.Trim(line, " \t")
+	// sshd(8) limits an authorized_keys line to 8 KiB.
+	if len(line) > 8<<10 {
+		return Key{}, errors.New("public key line exceeds the 8 KiB OpenSSH limit")
+	}
 	if strings.ContainsAny(line, "\r\n") {
 		return Key{}, errors.New("enter one public key")
 	}

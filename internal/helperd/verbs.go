@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/virtualprivatenode/vpn/internal/accountaccess"
 	"github.com/virtualprivatenode/vpn/internal/autounlock"
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/helper"
@@ -47,6 +48,8 @@ type verbDef struct {
 }
 
 var verbs = map[string]verbDef{
+	helper.VerbReadAccounts: {time.Minute, verbReadAccounts},
+	helper.VerbReadAccount:  {time.Minute, verbReadAccount},
 	// LND uses its upstream readiness notification and permits up to 20
 	// minutes for an ordinary start. Keep the helper connection above the
 	// longest supported service start plus its graceful-stop allowance.
@@ -75,6 +78,8 @@ var verbs = map[string]verbDef{
 }
 
 var (
+	readLocalAccounts      = host.ReadLocalAccounts
+	readLocalAccount       = host.ReadLocalAccount
 	loadSystemConfig       = config.Load
 	setupAutoUnlock        = host.SetupAutoUnlock
 	disableAutoUnlock      = host.DisableAutoUnlock
@@ -363,4 +368,22 @@ func verbSyncthingInstall(ctx *verbCtx, params json.RawMessage) (any, error) {
 	return nil, installSyncthing(func() error {
 		return restageFacts(helper.VerbSyncthingInstall)
 	}, ctx.emitStep)
+}
+
+func verbReadAccounts(_ *verbCtx, params json.RawMessage) (any, error) {
+	if err := rejectParams(params); err != nil {
+		return nil, err
+	}
+	return readLocalAccounts()
+}
+
+func verbReadAccount(_ *verbCtx, params json.RawMessage) (any, error) {
+	var ref accountaccess.Ref
+	if err := decode(params, &ref); err != nil {
+		return nil, err
+	}
+	if err := ref.Validate(); err != nil {
+		return nil, err
+	}
+	return readLocalAccount(ref)
 }

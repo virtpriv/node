@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/virtualprivatenode/vpn/internal/loginpassword"
-	"github.com/virtualprivatenode/vpn/internal/sshkeys"
 )
 
 func TestOwnerSudoFollowsConfirmedPasswordAndDeliveryMarker(t *testing.T) {
@@ -24,7 +23,7 @@ func TestOwnerSudoFollowsConfirmedPasswordAndDeliveryMarker(t *testing.T) {
 			password, _ := loginpassword.New("initial test password")
 			dec := &InstallDecisions{Password: password, GeneratedPassword: password.Text()}
 			ops := identityAccessOps{
-				create: func([]sshkeys.Key) error { return record("create") },
+				create: func() error { return record("create") },
 				password: func(got loginpassword.Password) error {
 					if got.Text() != password.Text() {
 						t.Fatal("changed initial password")
