@@ -77,6 +77,10 @@ func (m *Model) activateTab() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case nodeUpdateMsg:
+		return m.routeNodeUpdate(msg.owner, msg)
+	case nodeUpdateTick:
+		return m.routeNodeUpdate(msg.owner, msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -713,6 +717,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	}
+	return m, nil
+}
+
+func (m Model) routeNodeUpdate(owner *NodeUpdateScreen, msg tea.Msg) (tea.Model, tea.Cmd) {
+	for _, tab := range m.tabs {
+		if tab.Screen == owner {
+			_, cmd := owner.HandleMsg(msg)
+			return m, cmd
+		}
+	}
+	// A closed or replaced screen cannot restart polling or alter a new review.
 	return m, nil
 }
 

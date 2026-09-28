@@ -23,7 +23,7 @@ import (
 //
 // Buttons are dynamic; only actionable buttons appear:
 //   Update Packages and Accounts (always),
-//   Update Node (when available), Reboot (when required).
+//   Node Updates (always, including saved recovery), Reboot (when required).
 //
 // Confirms are screen-owned: svcConfirm and sysConfirm
 // live here. When active, they intercept all keys and
@@ -243,12 +243,12 @@ func (s *SystemHomeScreen) HandleKey(
 			case sysBtnAccounts:
 				return s, openAccountsCmd(s.ctx)
 			case sysBtnUpdateNode:
-				screen := NewSelfUpdateScreen(
+				screen := NewNodeUpdateScreen(
 					s.ctx)
 				return s, func() tea.Msg {
 					return openTabMsg{
-						Kind:   tabSelfUpdate,
-						Label:  "Updating",
+						Kind:   tabNodeUpdates,
+						Label:  "Updates",
 						Screen: screen,
 					}
 				}
@@ -339,15 +339,6 @@ func (s *SystemHomeScreen) View(
 	if s.hasUpdate() {
 		updateText := "Update available: v" +
 			s.ctx.LatestVersion
-		if !s.updateInstallable() {
-			// Cross-major (or unparseable) release: announced,
-			// never one-click installed — the release notes come
-			// first. The helper refuses it independently; this
-			// is the rendering half of the same gate.
-			updateText = "Major release v" +
-				s.ctx.LatestVersion +
-				" available — see the release notes"
-		}
 		headerLines = append(headerLines,
 			centerPad(
 				lipgloss.NewStyle().
@@ -765,26 +756,14 @@ func (s *SystemHomeScreen) serviceBindings() []key.Binding {
 // ── Helpers ─────────────────────────────────────────────
 
 func (s *SystemHomeScreen) hasUpdate() bool {
-	return s.ctx.LatestVersion != "" &&
-		s.ctx.LatestVersion != s.ctx.Version
-}
-
-// updateInstallable reports whether the available update may be
-// installed from here: same major version only. A cross-major
-// release is a read-the-release-notes event; the Update Node
-// action does not exist for it (and the root helper refuses it
-// independently — this check is rendering, not the gate).
-func (s *SystemHomeScreen) updateInstallable() bool {
-	same, err := release.SameMajor(
-		s.ctx.Version, s.ctx.LatestVersion)
-	return err == nil && same
+	newer, err := release.Newer(s.ctx.Version, s.ctx.LatestVersion)
+	return release.IsStable(s.ctx.LatestVersion) && err == nil && newer
 }
 
 func (s *SystemHomeScreen) buttonActions() []sysBtn {
-	actions := []sysBtn{sysBtnUpdatePkg, sysBtnAccounts}
-	if s.hasUpdate() && s.updateInstallable() {
-		actions = append(actions, sysBtnUpdateNode)
-	}
+	// Saved updates must remain reachable without release discovery, including
+	// after a reboot, failed startup, or a completed VPN binary replacement.
+	actions := []sysBtn{sysBtnUpdatePkg, sysBtnAccounts, sysBtnUpdateNode}
 	if s.rebootPending != nil || s.rebootAccepted ||
 		(s.ctx.Status != nil && s.ctx.Status.Reboot.Value) {
 		actions = append(actions, sysBtnReboot)
@@ -795,7 +774,7 @@ func (s *SystemHomeScreen) buttonActions() []sysBtn {
 var sysBtnLabel = map[sysBtn]string{
 	sysBtnUpdatePkg:  "Update Packages",
 	sysBtnAccounts:   "Accounts",
-	sysBtnUpdateNode: "Update Node",
+	sysBtnUpdateNode: "Node Updates",
 	sysBtnReboot:     "Reboot",
 }
 

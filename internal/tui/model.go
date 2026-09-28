@@ -53,7 +53,7 @@ const (
 	tabChannelHistory                   // channel history view
 	tabSyncthingInstall                 // Syncthing install flow
 	tabP2PUpgrade                       // P2P mode upgrade flow
-	tabSelfUpdate                       // Self-update flow
+	tabNodeUpdates                      // Node update flow
 	tabAutoUnlock                       // Auto-unlock configuration flow
 	tabWalletCreate                     // Wallet creation flow
 	tabNodeInfo                         // Receive channel / node info screen
@@ -252,6 +252,7 @@ func NewModel(
 		nav: NewNavSidebar(),
 	}
 	m.screenCtx = &ScreenContext{
+		NodeUpdates:     app.NewNodeUpdates(),
 		Syncthing:       app.NewSyncthing(),
 		HelperWorkflows: app.NewHelperWorkflows(component.SyncthingVersion),
 		Cfg:             cfg,
@@ -355,6 +356,9 @@ func Show(
 			m.screenCtx.WalletCreation.Close()
 		}
 		m.screenCtx.HelperWorkflows.Close()
+		if updater, ok := m.screenCtx.NodeUpdates.(*app.NodeUpdates); ok {
+			updater.Close()
+		}
 		m.screenCtx.Syncthing.Close()
 		if m.screenCtx.LndClient != nil {
 			m.screenCtx.LndClient.Close()

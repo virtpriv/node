@@ -8,8 +8,6 @@ func helperProgress(screen Screen) *InstallProgressScreen {
 		return s.progress
 	case *P2PUpgradeScreen:
 		return s.progress
-	case *SelfUpdateScreen:
-		return s.progress
 	}
 	return nil
 }

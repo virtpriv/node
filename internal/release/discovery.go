@@ -13,7 +13,9 @@ import (
 )
 
 type githubRelease struct {
-	TagName string `json:"tag_name"`
+	TagName    string `json:"tag_name"`
+	Draft      bool   `json:"draft"`
+	Prerelease bool   `json:"prerelease"`
 }
 
 const versionCacheMaxAge = 24 * time.Hour
@@ -36,14 +38,23 @@ func CheckLatestVersion() string {
 		return ""
 	}
 
-	var release githubRelease
-	if err := json.Unmarshal([]byte(output), &release); err != nil {
-		return ""
-	}
-
-	version := strings.TrimPrefix(release.TagName, "v")
+	version := stableReleaseVersion([]byte(output))
 	if version != "" {
 		writeVersionCache(version)
+	}
+	return version
+}
+
+// GitHub's latest endpoint normally excludes prereleases. Check the tag too so
+// a candidate accidentally published as stable cannot enter normal discovery.
+func stableReleaseVersion(data []byte) string {
+	var r githubRelease
+	if err := json.Unmarshal(data, &r); err != nil || r.Draft || r.Prerelease {
+		return ""
+	}
+	version, ok := strings.CutPrefix(r.TagName, "v")
+	if !ok || !IsStable(version) {
+		return ""
 	}
 	return version
 }
@@ -60,7 +71,11 @@ func readVersionCache() string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(data))
+	version := strings.TrimSpace(string(data))
+	if !IsStable(version) {
+		return ""
+	}
+	return version
 }
 
 func writeVersionCache(version string) {

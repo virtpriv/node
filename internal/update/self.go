@@ -1,4 +1,3 @@
-// Package update coordinates VPN binary updates independently of installation.
 package update
 
 import (

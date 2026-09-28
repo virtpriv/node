@@ -48,8 +48,13 @@ type verbDef struct {
 }
 
 var verbs = map[string]verbDef{
-	helper.VerbReadAccounts: {time.Minute, verbReadAccounts},
-	helper.VerbReadAccount:  {time.Minute, verbReadAccount},
+	helper.VerbPrepareUpdate: {45 * time.Minute, verbPrepareUpdate},
+	helper.VerbStartUpdate:   {time.Minute, verbStartUpdate},
+	helper.VerbUpdateStatus:  {time.Minute, verbUpdateStatus},
+	helper.VerbResumeUpdate:  {time.Minute, verbResumeUpdate},
+	helper.VerbCancelUpdate:  {time.Minute, verbCancelUpdate},
+	helper.VerbReadAccounts:  {time.Minute, verbReadAccounts},
+	helper.VerbReadAccount:   {time.Minute, verbReadAccount},
 	// LND uses its upstream readiness notification and permits up to 20
 	// minutes for an ordinary start. Keep the helper connection above the
 	// longest supported service start plus its graceful-stop allowance.
@@ -324,8 +329,15 @@ func verbSelfUpdate(ctx *verbCtx, params json.RawMessage) (any, error) {
 	if err := decode(params, &p); err != nil {
 		return nil, err
 	}
-	// Enforce the existing version policy independently of TUI admission.
-	// SameMajor validates both strings before the target reaches a release URL.
+	// Reject older and equal releases before any download or mutation, even
+	// when a stale or independently written client submits them directly.
+	newer, err := release.Newer(ctx.version, p.Version)
+	if err != nil {
+		return nil, err
+	}
+	if !newer {
+		return nil, fmt.Errorf("v%s is not newer than running v%s", p.Version, ctx.version)
+	}
 	same, err := release.SameMajor(ctx.version, p.Version)
 	if err != nil {
 		return nil, err

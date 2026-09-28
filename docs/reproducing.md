@@ -16,6 +16,55 @@ Reproducibility is a goal of the Virtual Private Node project. The
 intent is that anyone can recreate the exact binary published in the
 GitHub releases.
 
+## Current release packaging
+
+For v0.7.0 and later, use the Go version pinned in `go.mod` and run the release
+command from the repository root.
+
+(local PC)
+
+```sh
+GOTOOLCHAIN=local go run ./cmd/release 0.7.0
+```
+
+Substitute the version being released. The command checks the exact compiler
+version, builds for Linux amd64 with CGO disabled, creates the archive and
+checksums, and signs locally with the VPN release key. GPG must be installed
+and that key available in your local keyring. Signing can prompt through your
+normal GPG setup. Verification uses an isolated keyring and the same pinned
+signer policy as the updater.
+
+Output is `release/0.7.0/`, containing `vpn-0.7.0-amd64.tar.gz`, `SHA256SUMS`
+and `SHA256SUMS.asc`. The archive contains the executable `vpn`. Existing
+version directories are refused, so earlier signed releases stay intact.
+An ordinary failure removes only the new incomplete directory. After a forced
+termination, inspect any leftover directory before removing it and retrying.
+Never replace files already published under a release tag.
+
+Versions must be canonical `MAJOR.MINOR.PATCH` or `MAJOR.MINOR.PATCH-rc.N`,
+where N is a positive integer without leading zeros. RCs use the same packaging
+and signing process as stable releases. Archive member metadata is fixed so
+local timestamps and user/group IDs do not change its checksum; GPG signatures
+have their own creation timestamps.
+
+Node updates additionally require a tested plan as the second argument.
+
+(local PC)
+
+```sh
+GOTOOLCHAIN=local go run ./cmd/release VERSION path/to/tested-update-plan.json
+```
+
+The command validates the plan against the build's component pins and supported
+host operations, then includes those exact bytes as `update.json` in the signed
+archive. See [managed updates](updating.md) for the release contract and
+required integration validation. The tool prepares files locally; publication
+on GitHub is a separate step.
+
+This packaging contract matches the VPN updater. Reproduction against the
+published v0.7.0 artifact still needs release verification. The v0.6.3 recipe
+and its known limitations below remain historical reference.
+
 Because the project is a single statically-linked Go binary with no
 bundled runtime, reproducibility is straightforward compared to
 projects that bundle a JVM or native installers.

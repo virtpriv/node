@@ -219,7 +219,7 @@ five sections plus a dark/light theme toggle:
 - **Wallet** — send and receive Lightning payments; payment history
 - **On-Chain** — send and receive on-chain; UTXO coin control; transaction history with anchor sweep detection
 - **Add-On** — install and manage Syncthing (channel backup)
-- **System** — service status and logs; local account inspection and public-key import; SSH key management and password auth toggle; auto-unlock configuration; P2P mode upgrade; self-update
+- **System** — service status and logs; local account inspection and public-key import; SSH key management and password auth toggle; auto-unlock configuration; P2P mode upgrade; [managed node updates](docs/updating.md)
 
 System service actions keep their confirmed target while you navigate. Completion
 means systemd reported `active` after Start or Restart, or `inactive` after Stop.

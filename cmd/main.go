@@ -16,6 +16,7 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/tui"
 	installui "github.com/virtualprivatenode/vpn/internal/tui/install"
+	"github.com/virtualprivatenode/vpn/internal/update"
 )
 
 var version = "dev"
@@ -34,6 +35,17 @@ func main() {
 	}
 
 	switch cmd {
+	case cmdUpdateLaunch, cmdUpdateWorker:
+		var err error
+		if cmd == cmdUpdateLaunch {
+			err = update.Launch()
+		} else {
+			err = update.RunWorker(version)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "vpn update: %v\n", err)
+			os.Exit(1)
+		}
 	case cmdInstall:
 		if err := installer.RunInstall(opts, installui.Run); err != nil {
 			fmt.Fprintf(os.Stderr, "\n  Failed: %v\n", err)
@@ -174,6 +186,8 @@ const (
 	cmdPublishLNDBackup
 	cmdVersion
 	cmdHelp
+	cmdUpdateLaunch
+	cmdUpdateWorker
 )
 
 // parseArgs maps the command line to a command. Pure —
@@ -186,6 +200,14 @@ func parseArgs(
 		return cmdConsole, opts, nil
 	}
 	switch args[0] {
+	case "update-launch", "update-worker":
+		if len(args) != 1 {
+			return 0, opts, fmt.Errorf("%s takes no arguments", args[0])
+		}
+		if args[0] == "update-launch" {
+			return cmdUpdateLaunch, opts, nil
+		}
+		return cmdUpdateWorker, opts, nil
 	case "install":
 		var networkFlag string
 		for _, a := range args[1:] {

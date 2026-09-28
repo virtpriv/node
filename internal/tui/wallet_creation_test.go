@@ -155,7 +155,7 @@ func TestWalletDelayedDoneAndTerminalFailure(t *testing.T) {
 	}
 	_, done := s.HandleKey("enter", tea.KeyPressMsg{})
 	other := NewWalletCreateScreen(m.screenCtx)
-	m.tabs = append(m.tabs, openTab{Kind: tabSelfUpdate, Section: secSystem, Screen: other})
+	m.tabs = append(m.tabs, openTab{Kind: tabNodeUpdates, Section: secSystem, Screen: other})
 	m.activeTab = 1
 	deliverWallet(t, &m, done())
 	deliverWallet(t, &m, done())

@@ -63,6 +63,11 @@ const (
 	// terminator, and feed the TUI's step renderer.
 	VerbPackageUpdate      = "package-update"
 	VerbSelfUpdate         = "self-update"
+	VerbPrepareUpdate      = "prepare-update"
+	VerbStartUpdate        = "start-update"
+	VerbUpdateStatus       = "update-status"
+	VerbResumeUpdate       = "resume-update"
+	VerbCancelUpdate       = "cancel-update"
 	VerbUpgradeP2PToHybrid = "upgrade-p2p-to-hybrid"
 	VerbSyncthingInstall   = "syncthing-install"
 )
@@ -143,11 +148,25 @@ type RebuildSSHConfigParams struct {
 }
 
 // SelfUpdateParams: update the vpn binary to a release version.
-// Validated root-side: strict version shape, and same-major
+// Validated root-side: canonical stable version, strictly newer, and same-major
 // only (a cross-major release requires reading its release
 // notes; the helper refuses it no matter what a client asks).
 type SelfUpdateParams struct {
 	Version string `json:"version"`
+}
+
+// PrepareUpdateParams selects a release for verification and review.
+type PrepareUpdateParams struct {
+	Version string `json:"version"`
+}
+
+// UpdateApproval binds start/retry to root-verified release bytes, not a mutable
+// latest-version hint or a caller-provided execution plan.
+type UpdateApproval struct {
+	Token string `json:"token"`
+}
+type UpdateResumeParams struct {
+	ID string `json:"id"`
 }
 
 // NodeAddressesResult is the read-node-addresses answer: the
