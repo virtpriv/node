@@ -29,6 +29,7 @@ type NodeUpdateScreen struct {
 	review       *protocol.Review
 	status       protocol.Status
 	err          error
+	statusErr    error
 	busy         string
 	button       int
 	attempt      uint64
@@ -62,7 +63,9 @@ func (s *NodeUpdateScreen) request(kind string) tea.Cmd {
 		return nil
 	}
 	s.busy = kind
-	s.err = nil
+	if kind != "status" {
+		s.err = nil
+	}
 	s.attempt++
 	attempt := s.attempt
 	client := s.ctx.NodeUpdates
@@ -115,7 +118,14 @@ func (s *NodeUpdateScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 			return s, nil
 		}
 		s.busy = ""
-		s.err = m.err
+		if m.kind == "status" {
+			s.statusErr = m.err
+		} else {
+			s.err = m.err
+			if m.err == nil {
+				s.statusErr = nil
+			}
+		}
 		if m.err == nil {
 			if m.kind == "prepare" {
 				s.review = &m.review
@@ -201,6 +211,7 @@ func (s *NodeUpdateScreen) HandleKey(k string, msg tea.KeyPressMsg) (Screen, tea
 			return s, emitCloseTab
 		case "Cancel":
 			s.review = nil
+			s.err = nil
 			s.selectStable()
 			s.button = 0
 			return s, s.request("status")
@@ -229,6 +240,7 @@ func (s *NodeUpdateScreen) HandleKey(k string, msg tea.KeyPressMsg) (Screen, tea
 				return s, nil
 			}
 			s.busy = "unlock"
+			s.err = nil
 			s.attempt++
 			attempt := s.attempt
 			status := s.status
@@ -243,6 +255,7 @@ func (s *NodeUpdateScreen) HandleKey(k string, msg tea.KeyPressMsg) (Screen, tea
 func (s *NodeUpdateScreen) handleReleaseKey(k string, msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	cancel := func() (Screen, tea.Cmd) {
 		s.releaseInput = nil
+		s.err = nil
 		s.button = 0
 		return s, s.request("status")
 	}
@@ -358,6 +371,10 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 	if s.err != nil {
 		p.blank()
 		p.line(theme.Warning.Render(s.err.Error()))
+	}
+	if s.statusErr != nil {
+		p.blank()
+		p.line(theme.Warning.Render(s.statusErr.Error()))
 	}
 	p.blank()
 	p.dim("You can close this screen and return to the saved update.")

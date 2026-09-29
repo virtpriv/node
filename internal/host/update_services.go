@@ -60,7 +60,13 @@ func ObserveUpdateVersions(vpn string, cfg *config.AppConfig) (protocol.Versions
 		if err := files.Check(p, false); err != nil {
 			return v, err
 		}
-		out, err := system.RunRootOutputWithTimeout(10*time.Second, p, "--version")
+		var out string
+		var err error
+		if c == protocol.Syncthing {
+			out, err = syncthingVersion()
+		} else {
+			out, err = system.RunRootOutputWithTimeout(10*time.Second, p, "--version")
+		}
 		if err != nil {
 			return v, fmt.Errorf("read %s version: %w", c, err)
 		}

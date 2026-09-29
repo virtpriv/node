@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -50,18 +51,20 @@ type nodeUpdateClientStub struct {
 	starts            int
 	resumed           string
 	status            protocol.Status
+	prepareErr        error
+	statusErr         error
 }
 
 func (s *nodeUpdateClientStub) Prepare(v string) (protocol.Review, error) {
 	s.prepared = v
-	return protocol.Review{Token: strings.Repeat("b", 64), Digest: strings.Repeat("a", 64), Manifest: protocol.Manifest{Version: v}}, nil
+	return protocol.Review{Token: strings.Repeat("b", 64), Digest: strings.Repeat("a", 64), Manifest: protocol.Manifest{Version: v}}, s.prepareErr
 }
 func (s *nodeUpdateClientStub) Start(id string) (protocol.Status, error) {
 	s.started = id
 	s.starts++
 	return protocol.Status{ID: id, Active: true, Running: true}, nil
 }
-func (s *nodeUpdateClientStub) Status() (protocol.Status, error) { return s.status, nil }
+func (s *nodeUpdateClientStub) Status() (protocol.Status, error) { return s.status, s.statusErr }
 func (s *nodeUpdateClientStub) Resume(id string) (protocol.Status, error) {
 	s.resumed = id
 	return s.status, nil
@@ -124,6 +127,49 @@ func TestCandidateRequiresExplicitSelection(t *testing.T) {
 	s.HandleMsg(cmd())
 	if client.prepared != "0.7.1-rc.1" || s.review == nil || client.starts != 0 {
 		t.Fatal("explicit candidate selection did not require review before installation")
+	}
+}
+
+func TestNodeUpdateReviewFailureSurvivesStatusRefresh(t *testing.T) {
+	failure := errors.New("cannot read installed component version")
+	client := &nodeUpdateClientStub{prepareErr: failure}
+	s := NewNodeUpdateScreen(&ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0-rc.1"})
+	cmd := reviewSelectedRelease(t, s, "v0.7.0-rc.2")
+	_, poll := s.HandleMsg(cmd())
+	if poll == nil {
+		t.Fatal("failed preparation stopped background status polling")
+	}
+	if s.review != nil || !strings.Contains(s.View(100, 40), failure.Error()) {
+		t.Fatal("failed preparation did not show its error instead of a review")
+	}
+	// A status outage and recovery must preserve the action failure and polling.
+	outage := errors.New("helper status unavailable")
+	for _, statusErr := range []error{nil, outage, nil} {
+		client.statusErr = statusErr
+		_, cmd := s.HandleMsg(nodeUpdateTick{owner: s})
+		if cmd == nil || !strings.Contains(s.View(100, 40), failure.Error()) {
+			t.Fatal("starting a background check hid the preparation failure")
+		}
+		_, poll = s.HandleMsg(cmd())
+		if poll == nil {
+			t.Fatal("status response stopped background status polling")
+		}
+		view := s.View(100, 40)
+		if !strings.Contains(view, failure.Error()) {
+			t.Fatal("status refresh erased the preparation failure")
+		}
+		if strings.Contains(view, outage.Error()) != (statusErr != nil) {
+			t.Fatal("status error did not track the outage and recovery")
+		}
+	}
+	client.prepareErr = nil
+	cmd = pressNodeUpdateAction(t, s, "Review update")
+	if strings.Contains(s.View(100, 40), failure.Error()) {
+		t.Fatal("explicit retry kept the previous preparation failure")
+	}
+	s.HandleMsg(cmd())
+	if s.review == nil || s.review.Manifest.Version != "0.7.0-rc.2" || client.starts != 0 {
+		t.Fatal("successful retry did not return to review without installation")
 	}
 }
 
