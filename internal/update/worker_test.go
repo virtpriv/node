@@ -134,3 +134,37 @@ func TestCommitRequiresLiveComponentsAndVerifiedBytes(t *testing.T) {
 		})
 	}
 }
+
+func TestSpaceNeedsAreCombinedPerFilesystem(t *testing.T) {
+	const mib = 1 << 20
+	needs := []spaceNeed{
+		{path: "/staging", floor: 2048 * mib},
+		{path: "/data", floor: 2048 * mib},
+		{path: "/bin", floor: 1024 * mib, write: 200 * mib},
+	}
+	type fs struct{ dev, avail uint64 }
+	for _, tc := range []struct {
+		name    string
+		mounts  map[string]fs
+		refused string
+	}{
+		{"one disk short by one MiB", map[string]fs{"/staging": {1, 2247 * mib}, "/data": {1, 2247 * mib}, "/bin": {1, 2247 * mib}}, "/staging"},
+		{"one disk exact", map[string]fs{"/staging": {1, 2248 * mib}, "/data": {1, 2248 * mib}, "/bin": {1, 2248 * mib}}, ""},
+		{"separate disks exact", map[string]fs{"/staging": {1, 2048 * mib}, "/data": {2, 2048 * mib}, "/bin": {3, 1224 * mib}}, ""},
+		{"only the install disk is short", map[string]fs{"/staging": {1, 9000 * mib}, "/data": {2, 9000 * mib}, "/bin": {3, 1223 * mib}}, "/bin"},
+		{"unreadable filesystem", map[string]fs{"/staging": {1, 9000 * mib}, "/bin": {3, 9000 * mib}}, "/data"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkSpaceNeeds(needs, func(path string) (uint64, uint64, error) {
+				m, ok := tc.mounts[path]
+				if !ok {
+					return 0, 0, errors.New("cannot read " + path)
+				}
+				return m.dev, m.avail, nil
+			})
+			if (err != nil) != (tc.refused != "") || (err != nil && !strings.Contains(err.Error(), tc.refused)) {
+				t.Fatalf("wrong outcome: %v", err)
+			}
+		})
+	}
+}

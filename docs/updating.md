@@ -40,7 +40,7 @@ The plan has these fields:
 | `version` | Canonical VPN version without `v`: `MAJOR.MINOR.PATCH` or `MAJOR.MINOR.PATCH-rc.N`, where N is a positive integer without leading zeros |
 | `platform` | `debian-13-amd64` |
 | `summary` | Short plain-text release explanation |
-| `minimum_free_mib` | Tested free-space requirement, at least 1024 MiB; checked on staging and affected data filesystems |
+| `minimum_free_mib` | Free space, at least 1024 MiB, that must remain on the staging and affected data filesystems after the update installs its files; checked before downloading and again before any service stops |
 | `sources` | Exact tested objects containing `vpn`, `bitcoin`, `lnd`, `syncthing`; an empty Syncthing version means absent |
 | `networks` | Explicitly supported installed profiles: `mainnet`, `testnet4`, `public-signet` |
 | `bitcoin`, `lnd`, `syncthing` | Each has `version` and the upstream archive's lowercase `sha256` |
@@ -121,6 +121,13 @@ checks Core before LND. Syncthing is included only where installed. Core's daemo
 and CLI are always covered; companion tools installed by earlier VPN versions
 are updated too, without installing additional tools. No component data directory
 is copied back, deleted, or restored.
+
+Free space is checked before downloading and again after staging, before any
+service stops. Each filesystem is counted once: its required free space plus the
+executables still to be installed there must fit. A refusal leaves every service
+as it was, removes the downloaded component files, and can be cancelled or
+retried after freeing space. A successful update also removes its downloaded
+component files; the release plan and job record remain.
 
 Temporary systemd drop-ins disable automatic restarts and require a permit under
 `/run` before each start. The worker durably records that a component may run

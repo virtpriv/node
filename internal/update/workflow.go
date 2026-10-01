@@ -4,6 +4,7 @@ package update
 import (
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 
 	"github.com/virtualprivatenode/vpn/internal/update/protocol"
@@ -14,6 +15,8 @@ import (
 type workflowOps struct {
 	save       func(*job) error
 	stage      func(*job) error
+	capacity   func(*job) error
+	discard    func(*job) error
 	guard      func([]protocol.Component) error
 	stop       func(protocol.Component) error
 	install    func(*job) error
@@ -30,13 +33,17 @@ func runJob(j *job, ops workflowOps) error {
 	}
 	affected := j.Affected
 	publish := func(phase, step string) error { j.Phase, j.Step = phase, step; return ops.save(j) }
+	// refuse records a failure without touching services.
+	refuse := func(cause error) error {
+		j.Phase = "failed"
+		j.Error = cause.Error()
+		return errors.Join(cause, ops.save(j))
+	}
 	fail := func(cause error) error {
 		if j.Completed["staged"] && ops.quarantine != nil {
 			cause = errors.Join(cause, ops.quarantine(affected))
 		}
-		j.Phase = "failed"
-		j.Error = cause.Error()
-		return errors.Join(cause, ops.save(j))
+		return refuse(cause)
 	}
 	if !j.Completed["staged"] {
 		if err := publish("staging", "Download and verify release files"); err != nil {
@@ -45,9 +52,20 @@ func runJob(j *job, ops workflowOps) error {
 		if err := ops.stage(j); err != nil {
 			return fail(err)
 		}
+		// Last space check before any service is touched. A refusal here
+		// returns the downloaded files' space and can still be cancelled.
+		if err := ops.capacity(j); err != nil {
+			return refuse(errors.Join(err, ops.discard(j)))
+		}
 		j.Completed["staged"] = true
 		if err := publish("installing", "Prepare service changes"); err != nil {
 			return err
+		}
+	} else if j.Phase == "installing" {
+		// A resumed or retried installation checks space again before it
+		// stops anything. Services stay exactly as they were found.
+		if err := ops.capacity(j); err != nil {
+			return refuse(err)
 		}
 	}
 	if j.Phase == "installing" {
@@ -105,5 +123,12 @@ func runJob(j *job, ops workflowOps) error {
 		return fail(err)
 	}
 	j.Error = ""
-	return publish("complete", "Update complete; reopen the TUI")
+	if err := publish("complete", "Update complete; reopen the TUI"); err != nil {
+		return err
+	}
+	// Leftover downloads only cost space. They cannot fail a finished update.
+	if err := ops.discard(j); err != nil {
+		fmt.Fprintln(os.Stderr, "remove staged update files:", err)
+	}
+	return nil
 }

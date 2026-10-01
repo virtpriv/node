@@ -65,9 +65,11 @@ func (h *workflowHarness) effect(name string, fn func() error) error {
 }
 func (h *workflowHarness) ops() workflowOps {
 	return workflowOps{
-		save:  h.checkpoint,
-		stage: func(*job) error { return h.effect("stage", nil) },
-		guard: func([]protocol.Component) error { return h.effect("guard", nil) },
+		save:     h.checkpoint,
+		stage:    func(*job) error { return h.effect("stage", nil) },
+		capacity: func(*job) error { return h.effect("capacity", nil) },
+		discard:  func(*job) error { return h.effect("discard", nil) },
+		guard:    func([]protocol.Component) error { return h.effect("guard", nil) },
 		stop: func(c protocol.Component) error {
 			return h.effect("stop:"+string(c), func() error { h.running[c] = false; return nil })
 		},
@@ -131,7 +133,8 @@ func TestWorkflowStagesBeforeDowntimeAndCommitsVPNLast(t *testing.T) {
 			t.Fatalf("%s must precede %s: %v", a, b, h.events)
 		}
 	}
-	before("stage", "guard")
+	before("stage", "capacity")
+	before("capacity", "guard")
 	before("stop:lnd", "stop:bitcoin")
 	before("health:bitcoin", "start:lnd")
 	for _, c := range j.Affected {
@@ -283,5 +286,73 @@ func TestCancellationCannotAbandonPartiallyInstalledComponents(t *testing.T) {
 	j.Phase = "failed"
 	if cancelJob(j) == nil || !j.active() {
 		t.Fatal("failed corrective download abandoned the earlier migration")
+	}
+}
+
+// A space refusal must never be the reason services stop, start or get blocked.
+func TestSpaceRefusalLeavesServicesAsFound(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		reach       func(*testing.T, *workflowHarness, *job)
+		discards    bool
+		running     bool
+		cancellable bool
+	}{
+		{"first run", func(*testing.T, *workflowHarness, *job) {}, true, true, true},
+		{"resumed before guard", func(t *testing.T, h *workflowHarness, j *job) {
+			h.interrupt = "guard"
+			runInterrupted(t, j, h.ops())
+			h.interrupt = ""
+		}, false, true, false},
+		{"retry after quarantine", func(t *testing.T, h *workflowHarness, j *job) {
+			h.failure = "start:lnd"
+			if runJob(j, h.ops()) == nil {
+				t.Fatal("fixture did not fail")
+			}
+			if err := retryUpdate(h.root, j.Review.Digest); err != nil {
+				t.Fatal(err)
+			}
+		}, false, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			j := workflowFixture()
+			h := newHarness(t, j)
+			tc.reach(t, h, j)
+			j = h.reload()
+			history := maps.Clone(j.MayHaveRun)
+			h.events, h.failure = nil, "capacity"
+			if runJob(j, h.ops()) == nil {
+				t.Fatal("ignored insufficient space")
+			}
+			if slices.ContainsFunc(h.events, func(e string) bool { return e != "stage" && e != "capacity" && e != "discard" }) {
+				t.Fatalf("space refusal touched services: %v", h.events)
+			}
+			// Downloads are returned only while no host change can have begun;
+			// afterwards Retry still needs them.
+			if slices.Contains(h.events, "discard") != tc.discards {
+				t.Fatalf("wrong download retention: %v", h.events)
+			}
+			saved := h.reload()
+			if saved.Phase != "failed" || !strings.Contains(saved.Error, "injected failure") || !maps.Equal(saved.MayHaveRun, history) {
+				t.Fatal("lost the refusal or migration history", saved)
+			}
+			for _, c := range j.Affected {
+				if h.running[c] != tc.running {
+					t.Fatal("space refusal changed service state", c, h.running)
+				}
+			}
+			if (cancelJob(saved) == nil) != tc.cancellable {
+				t.Fatal("wrong cancellation boundary")
+			}
+		})
+	}
+}
+
+func TestFailedCleanupDoesNotUndoCompletion(t *testing.T) {
+	j := workflowFixture()
+	h := newHarness(t, j)
+	h.failure = "discard"
+	if err := runJob(j, h.ops()); err != nil || h.reload().Phase != "complete" {
+		t.Fatal("leftover downloads failed a completed update", err)
 	}
 }

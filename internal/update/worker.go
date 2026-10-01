@@ -54,8 +54,16 @@ func RunWorker(version string) error {
 		return recordWorkerFailure(j, errors.New("node configuration changed during update"))
 	}
 	return runJob(j, workflowOps{
-		save:    func(j *job) error { return saveJob(Root, j) },
-		stage:   func(j *job) error { return stageJob(j) },
+		save:  func(j *job) error { return saveJob(Root, j) },
+		stage: func(j *job) error { return stageJob(j) },
+		capacity: func(j *job) error {
+			needs, err := spaceNeeds(Root, paths.BinaryPath, j)
+			if err != nil {
+				return err
+			}
+			return checkSpaceNeeds(needs, observeSpace)
+		},
+		discard: func(j *job) error { return discardStaged(Root, j) },
 		guard:   host.GuardUpdateServices,
 		stop:    host.StopUpdateService,
 		install: func(j *job) error { return installJob(j, cfg) },
@@ -107,31 +115,113 @@ func quarantine(components []protocol.Component) error {
 	return err
 }
 
-func checkSpace(path string, mib int64) error {
-	var stat unix.Statfs_t
-	if err := unix.Statfs(path, &stat); err != nil {
-		return err
+const installDir = "/usr/local/bin"
+
+// A spaceNeed is what one path's filesystem must hold before services stop:
+// the free space that has to remain, plus the bytes still to be written there.
+type spaceNeed struct {
+	path         string
+	floor, write uint64
+}
+
+func dataDir(c protocol.Component) string {
+	return map[protocol.Component]string{protocol.Bitcoin: paths.BitcoinDataDir, protocol.LND: paths.LNDDataDir, protocol.Syncthing: paths.SyncthingDataDir}[c]
+}
+
+func floorNeeds(root string, j *job) []spaceNeed {
+	floor := uint64(j.Review.Manifest.MinimumFreeMiB) << 20
+	needs := []spaceNeed{{path: root, floor: floor}, {path: installDir, floor: 1024 << 20}}
+	for _, c := range j.Affected {
+		needs = append(needs, spaceNeed{path: dataDir(c), floor: floor})
 	}
-	available := uint64(stat.Bavail) * uint64(stat.Bsize) / (1 << 20)
-	if available < uint64(mib) {
-		return fmt.Errorf("at least %d MiB free space is required on %s", mib, path)
+	return needs
+}
+
+// spaceNeeds measures the staged files, so it covers every byte installation
+// and VPN publication will write after the services stop.
+func spaceNeeds(root, binary string, j *job) ([]spaceNeed, error) {
+	var install uint64
+	for _, c := range j.Affected {
+		for _, name := range host.UpdateBinaryNames(c) {
+			if _, ok := j.BinaryHashes[name]; !ok {
+				continue
+			}
+			i, err := os.Stat(filepath.Join(j.dir(root), string(c), "bin", name))
+			if err != nil {
+				return nil, err
+			}
+			install += uint64(i.Size())
+		}
+	}
+	worker, err := os.Stat(filepath.Join(j.dir(root), "vpn"))
+	if err != nil {
+		return nil, err
+	}
+	return append(floorNeeds(root, j), spaceNeed{path: installDir, write: install}, spaceNeed{path: filepath.Dir(binary), write: uint64(worker.Size())}), nil
+}
+
+// checkSpaceNeeds counts each filesystem once, even when several paths share
+// it: the largest floor plus all remaining writes must fit.
+func checkSpaceNeeds(needs []spaceNeed, observe func(path string) (dev, avail uint64, err error)) error {
+	type total struct {
+		spaceNeed
+		avail uint64
+	}
+	var totals []*total
+	byDev := map[uint64]*total{}
+	for _, n := range needs {
+		dev, avail, err := observe(n.path)
+		if err != nil {
+			return fmt.Errorf("check free space on %s: %w", n.path, err)
+		}
+		t := byDev[dev]
+		if t == nil {
+			t = &total{spaceNeed: spaceNeed{path: n.path}, avail: avail}
+			byDev[dev] = t
+			totals = append(totals, t)
+		}
+		t.floor, t.write, t.avail = max(t.floor, n.floor), t.write+n.write, min(t.avail, avail)
+	}
+	for _, t := range totals {
+		if required := t.floor + t.write; t.avail < required {
+			return fmt.Errorf("at least %d MiB free space is required on %s; %d MiB is available", (required+1<<20-1)>>20, t.path, t.avail>>20)
+		}
 	}
 	return nil
 }
 
+func observeSpace(path string) (dev, avail uint64, err error) {
+	var st unix.Stat_t
+	if err := unix.Stat(path, &st); err != nil {
+		return 0, 0, err
+	}
+	var fs unix.Statfs_t
+	if err := unix.Statfs(path, &fs); err != nil {
+		return 0, 0, err
+	}
+	return uint64(st.Dev), uint64(fs.Bavail) * uint64(fs.Bsize), nil
+}
+
+// discardStaged removes the downloaded component files. The worker, plan and
+// job records stay for status and inspection.
+func discardStaged(root string, j *job) error {
+	if err := files.Check(j.dir(root), true); err != nil {
+		return err
+	}
+	var err error
+	for _, c := range protocol.Components {
+		err = errors.Join(err, os.RemoveAll(filepath.Join(j.dir(root), string(c))))
+	}
+	return errors.Join(err, files.Sync(j.dir(root)))
+}
+
 func stageJob(j *job) error {
-	if err := checkSpace(Root, j.Review.Manifest.MinimumFreeMiB); err != nil {
+	// Refuse early, before downloading anything.
+	if err := checkSpaceNeeds(floorNeeds(Root, j), observeSpace); err != nil {
 		return err
 	}
-	if err := checkSpace("/usr/local/bin", 1024); err != nil {
-		return err
-	}
-	for _, c := range j.Affected {
-		p := map[protocol.Component]string{protocol.Bitcoin: paths.BitcoinDataDir, protocol.LND: paths.LNDDataDir, protocol.Syncthing: paths.SyncthingDataDir}[c]
-		if err := checkSpace(p, j.Review.Manifest.MinimumFreeMiB); err != nil {
-			return err
-		}
-	}
+	// Every affected component is staged again, so earlier entries are stale.
+	clear(j.BinaryHashes)
 	for _, c := range j.Affected {
 		j.Step = "Download and verify " + string(c)
 		if err := saveJob(Root, j); err != nil {
@@ -150,9 +240,6 @@ func stageJob(j *job) error {
 }
 
 func installJob(j *job, cfg *config.AppConfig) error {
-	if err := checkSpace(Root, j.Review.Manifest.MinimumFreeMiB); err != nil {
-		return err
-	}
 	// Verify every staged member before replacing the first installed member.
 	for _, c := range j.Affected {
 		_, required, err := host.UpdateArchive(c, j.Review.Manifest.Artifact(c).Version)
@@ -190,10 +277,10 @@ func installJob(j *job, cfg *config.AppConfig) error {
 			if err := saveJob(Root, j); err != nil {
 				return err
 			}
-			if err := files.Copy(filepath.Join(j.dir(Root), string(c), "bin", name), filepath.Join("/usr/local/bin", name), 0755); err != nil {
+			if err := files.Copy(filepath.Join(j.dir(Root), string(c), "bin", name), filepath.Join(installDir, name), 0755); err != nil {
 				return err
 			}
-			if err := verifyHash(filepath.Join("/usr/local/bin", name), j.BinaryHashes[name]); err != nil {
+			if err := verifyHash(filepath.Join(installDir, name), j.BinaryHashes[name]); err != nil {
 				return err
 			}
 		}
