@@ -14,7 +14,7 @@ import (
 
 func workflowFixture() *job {
 	h := strings.Repeat("a", 64)
-	source := protocol.Versions{VPN: "0.7.0", Bitcoin: "29.2", LND: "0.21.1-beta", Syncthing: "2.1.4"}
+	source := protocol.Versions{VPN: "0.7.0", Bitcoin: "29.2", LND: "0.21.1-beta", Syncthing: "2.1.3"}
 	m := protocol.Manifest{Protocol: 1, Platform: "debian-13-amd64", Version: "0.7.1", Summary: "Fixture only", MinimumFreeMiB: 2048, Sources: []protocol.Versions{source}, Networks: []string{"public-signet"}, Bitcoin: protocol.Artifact{Version: "29.3", SHA256: h}, LND: protocol.Artifact{Version: "0.21.2-beta", SHA256: h}, Syncthing: protocol.Artifact{Version: "2.1.5", SHA256: h}}
 	return &job{Schema: 1, Review: protocol.Review{Digest: h, Manifest: m, Source: source, Network: "public-signet"}, WorkerHash: h, PlanHash: h, ConfigHash: h, Phase: "accepted", Started: map[protocol.Component]bool{}, MayHaveRun: map[protocol.Component]bool{}, Completed: map[string]bool{}, BinaryHashes: map[string]string{}, Affected: m.Affected(source)}
 }
