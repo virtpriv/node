@@ -72,6 +72,9 @@ type Manifest struct {
 	// release must explicitly acknowledge the interrupted release as well as
 	// the observed executable combination in Sources.
 	RecoveryFrom []string `json:"recovery_from,omitempty"`
+	// Bridge optionally names one earlier release. A node this plan does not
+	// admit is told to install that release first.
+	Bridge string `json:"bridge,omitempty"`
 }
 
 func (m Manifest) Artifact(c Component) Artifact {
@@ -121,7 +124,13 @@ func Decode(data []byte) (Manifest, error) {
 	return m, m.Validate()
 }
 
-func (m Manifest) Validate() error {
+// Validate is the full check used by release authoring and by the worker.
+func (m Manifest) Validate() error { return m.validate(true) }
+
+// validate with strict false is the installed helper's check. It accepts
+// network and service names added by later releases: the helper needs only its
+// own network, and the newer worker checks every name it acts on.
+func (m Manifest) validate(strict bool) error {
 	if m.Protocol != Protocol || m.Platform != "debian-13-amd64" || !release.ValidVersion(m.Version) {
 		return errors.New("unsupported release protocol, platform or version")
 	}
@@ -140,7 +149,7 @@ func (m Manifest) Validate() error {
 		return errors.New("release needs explicit tested sources and networks")
 	}
 	for _, n := range m.Networks {
-		if n != "mainnet" && n != "testnet4" && n != "public-signet" {
+		if strict && n != "mainnet" && n != "testnet4" && n != "public-signet" {
 			return fmt.Errorf("unknown network %q", n)
 		}
 	}
@@ -176,17 +185,97 @@ func (m Manifest) Validate() error {
 		}
 	}
 	for _, c := range m.HostServices {
-		if !slices.Contains(Components, c) {
+		if strict && !slices.Contains(Components, c) {
 			return errors.New("unknown host-step service")
 		}
 	}
+	if m.Bridge != "" {
+		older, err := release.Newer(m.Bridge, m.Version)
+		if err != nil || !older || (release.IsStable(m.Version) && !release.IsStable(m.Bridge)) {
+			return errors.New("bridge must be an earlier release, and a stable one for a stable release")
+		}
+	}
 	return nil
+}
+
+// Admission is how an installed helper reads a signed plan. The helper stays
+// in service for later releases, so it ignores fields it does not know; the
+// target worker reads the same plan in full with Decode. Admission returns
+// either a plan that admits this node, or the release to install first.
+func Admission(data []byte, selected, current string, source Versions, network, failed string) (Manifest, string, error) {
+	var m Manifest
+	if len(data) > 32<<10 {
+		return m, "", errors.New("release plan exceeds 32 KiB")
+	}
+	// These three fields keep their meaning in every protocol, so a plan this
+	// helper cannot otherwise read can still name its bridge.
+	var head struct {
+		Protocol int    `json:"protocol"`
+		Version  string `json:"version"`
+		Bridge   string `json:"bridge"`
+	}
+	d := json.NewDecoder(bytes.NewReader(data))
+	if err := d.Decode(&head); err != nil {
+		return m, "", err
+	}
+	if err := d.Decode(new(any)); err != io.EOF {
+		return m, "", errors.New("release plan has trailing content")
+	}
+	if head.Version != selected {
+		return m, "", errors.New("signed plan version differs from selected release")
+	}
+	// A failed update needs its repair release, never a detour.
+	bridge := func() string {
+		if failed != "" {
+			return ""
+		}
+		if newer, err := release.Newer(current, head.Bridge); err != nil || !newer {
+			return ""
+		}
+		if older, err := release.Newer(head.Bridge, head.Version); err != nil || !older {
+			return ""
+		}
+		if release.IsStable(head.Version) && !release.IsStable(head.Bridge) {
+			return ""
+		}
+		return head.Bridge
+	}
+	if head.Protocol != Protocol {
+		if first := bridge(); first != "" {
+			return m, first, nil
+		}
+		return m, "", errors.New("this release needs a newer VPN first; see its release notes")
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return m, "", err
+	}
+	if err := m.validate(false); err != nil {
+		return m, "", err
+	}
+	if !slices.Contains(m.Sources, source) {
+		if first := bridge(); first != "" {
+			return m, first, nil
+		}
+	}
+	return m, "", m.admit(source, network, failed)
 }
 
 func (m Manifest) Admit(source Versions, network, failedRelease string) error {
 	if err := m.Validate(); err != nil {
 		return err
 	}
+	return m.admit(source, network, failedRelease)
+}
+
+// AdmitInstalled is Admit for a plan the installed helper read with Admission.
+func (m Manifest) AdmitInstalled(source Versions, network, failedRelease string) error {
+	if err := m.validate(false); err != nil {
+		return err
+	}
+	return m.admit(source, network, failedRelease)
+}
+
+func (m Manifest) admit(source Versions, network, failedRelease string) error {
 	if !slices.Contains(m.Sources, source) || !slices.Contains(m.Networks, network) {
 		return errors.New("this installed combination and network have no tested transition in this release")
 	}

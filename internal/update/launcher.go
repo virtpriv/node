@@ -6,17 +6,18 @@ import (
 	"path/filepath"
 )
 
-// Launch is a small, retained entry point. It understands the job envelope and
-// checks the approved target bytes; the target implements its own host changes.
+// Launch is a small, retained entry point. It reads only the installed side's
+// part of the record and checks the approved target bytes; the target
+// implements its own host changes.
 func Launch() error {
-	if err := requireUpdateHost(); err != nil {
+	if err := requireRoot(); err != nil {
 		return err
 	}
-	j, err := loadJob(Root)
+	j, err := loadRecord(Root)
 	if err != nil || j == nil {
 		return err
 	}
-	if !j.active() || j.Phase == "failed" {
+	if !j.relaunch() {
 		return nil
 	}
 	path := filepath.Join(j.dir(Root), "vpn")

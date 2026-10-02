@@ -1,8 +1,12 @@
 package update
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -33,7 +37,12 @@ func RunWorker(version string) error {
 	if !j.active() || j.Phase == "failed" {
 		return nil
 	}
-	if err := ValidateBuild(j.Review.Manifest, version); err != nil {
+	plan, err := loadPlan(Root, j)
+	if err != nil {
+		return recordWorkerFailure(j, err)
+	}
+	j.Review.Manifest = plan
+	if err := ValidateBuild(plan, version); err != nil {
 		return recordWorkerFailure(j, err)
 	}
 	self, err := os.Executable()
@@ -41,6 +50,9 @@ func RunWorker(version string) error {
 		return err
 	}
 	if err := verifyHash(self, j.WorkerHash); err != nil {
+		return recordWorkerFailure(j, err)
+	}
+	if err := inheritFailed(Root, j); err != nil {
 		return recordWorkerFailure(j, err)
 	}
 	cfg, err := config.Load()
@@ -75,6 +87,88 @@ func RunWorker(version string) error {
 		},
 		quarantine: quarantine,
 	})
+}
+
+// loadPlan reads the approved plan bytes in full. The installed helper that
+// accepted the job may be older and may have understood only part of the plan.
+func loadPlan(root string, j *job) (protocol.Manifest, error) {
+	path := filepath.Join(j.dir(root), "update.json")
+	if err := files.Check(path, false); err != nil {
+		return protocol.Manifest{}, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return protocol.Manifest{}, err
+	}
+	if sum := sha256.Sum256(data); !protocol.ValidDigest(j.PlanHash) || hex.EncodeToString(sum[:]) != j.PlanHash {
+		return protocol.Manifest{}, errors.New("retained update file failed integrity verification")
+	}
+	return protocol.Decode(data)
+}
+
+// inheritFailed gives a repair job the duties of the failed update it follows:
+// the services that update affected, what may already have run, and the wallet
+// and device identity recorded before any change. The helper retained each
+// failed record as result.json. A failed repair whose worker never ran has not
+// merged its own predecessor, so the chain is followed until one has.
+func inheritFailed(root string, j *job) error {
+	if j.Previous == "" || j.Completed["inherited"] {
+		return nil
+	}
+	affected, mayHaveRun := slices.Clone(j.Affected), maps.Clone(j.MayHaveRun)
+	wallet, device, hostChanges := j.WalletPresent, j.SyncthingID, j.HostChanges
+	seen := map[string]bool{j.Review.Digest: true}
+	for id := j.Previous; id != ""; {
+		if !protocol.ValidDigest(id) || seen[id] {
+			return errors.New("invalid failed update history")
+		}
+		seen[id] = true
+		b, err := readRecord(filepath.Join(root, id, "result.json"))
+		if err != nil {
+			return fmt.Errorf("read failed update record: %w", err)
+		}
+		var failed struct {
+			Previous      string                      `json:"previous"`
+			Affected      []protocol.Component        `json:"affected"`
+			MayHaveRun    map[protocol.Component]bool `json:"may_have_run"`
+			Completed     map[string]bool             `json:"completed"`
+			WalletPresent bool                        `json:"wallet_present"`
+			SyncthingID   string                      `json:"syncthing_id"`
+			HostChanges   bool                        `json:"host_changes_begun"`
+		}
+		if err := json.Unmarshal(b, &failed); err != nil {
+			return fmt.Errorf("read failed update record: %w", err)
+		}
+		for _, c := range append(slices.Collect(maps.Keys(failed.MayHaveRun)), failed.Affected...) {
+			if !slices.Contains(protocol.Components, c) {
+				return fmt.Errorf("failed update involved %q, which this release cannot repair", c)
+			}
+		}
+		for _, c := range failed.Affected {
+			if !slices.Contains(affected, c) {
+				affected = append(affected, c)
+			}
+		}
+		for c, ran := range failed.MayHaveRun {
+			if ran {
+				mayHaveRun[c] = true
+			}
+		}
+		wallet, hostChanges = wallet || failed.WalletPresent, hostChanges || failed.HostChanges
+		if device == "" {
+			device = failed.SyncthingID
+		}
+		if failed.Completed["inherited"] {
+			break
+		}
+		id = failed.Previous
+	}
+	slices.SortFunc(affected, func(a, b protocol.Component) int {
+		return slices.Index(protocol.Components, a) - slices.Index(protocol.Components, b)
+	})
+	j.Affected, j.MayHaveRun, j.WalletPresent, j.SyncthingID, j.HostChanges = affected, mayHaveRun, wallet, device, hostChanges
+	j.Completed["inherited"] = true
+	return nil
 }
 
 // commitJob publishes VPN only after the affected processes and retained bytes

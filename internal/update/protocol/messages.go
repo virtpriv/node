@@ -6,6 +6,10 @@ type Review struct {
 	Manifest Manifest `json:"manifest"`
 	Source   Versions `json:"source"`
 	Network  string   `json:"network"`
+	// UpdateFirst is guidance instead of a review: the selected release does
+	// not admit this node, and its plan names this release to install first.
+	// Such an answer has no token and cannot be approved.
+	UpdateFirst string `json:"update_first,omitempty"`
 }
 
 // Status deliberately excludes local paths, credentials and raw command output.

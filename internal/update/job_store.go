@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/release"
 	"github.com/virtualprivatenode/vpn/internal/update/files"
 	"github.com/virtualprivatenode/vpn/internal/update/protocol"
 )
@@ -19,13 +20,91 @@ const Root = paths.PrivateDir + "/updates"
 const LockPath = paths.RuntimeDir + "/operations.lock"
 const Service = "vpn-update.service"
 
-// A job records intent before each side effect. Completed is advisory: live
-// files and service invocations are verified again after an interruption.
+// A record is the part of current.json that the installed helper and the
+// retained launcher depend on. Both stay in service for every later release
+// that admits this one, and that release's worker may add fields, phases and
+// components. So they read only these fields, treat every phase other than
+// failed, complete, cancelled and waiting-unlock as work in progress, and keep
+// the rest of the file when they write. Removing or redefining one of these
+// fields breaks nodes that are already installed.
+type record struct {
+	Schema int `json:"schema"`
+	Review struct {
+		Digest   string `json:"digest"`
+		Manifest struct {
+			Version string `json:"version"`
+		} `json:"manifest"`
+		Network string `json:"network"`
+	} `json:"review"`
+	WorkerHash  string `json:"worker_hash"`
+	ConfigHash  string `json:"config_hash"`
+	Phase       string `json:"phase"`
+	Step        string `json:"step"`
+	Error       string `json:"error"`
+	HostChanges bool   `json:"host_changes_begun"`
+}
+
+func (r *record) active() bool           { return r.Phase != "complete" && r.Phase != "cancelled" }
+func (r *record) dir(root string) string { return filepath.Join(root, r.Review.Digest) }
+
+// relaunch reports whether the launcher should hand the job to its worker.
+// A failed job waits for an explicit Retry.
+func (r *record) relaunch() bool { return r.active() && r.Phase != "failed" }
+
+func loadRecord(root string) (*record, error) {
+	b, err := readRecord(filepath.Join(root, "current.json"))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var r record
+	if err := json.Unmarshal(b, &r); err != nil {
+		return nil, err
+	}
+	if r.Schema != 1 || r.Phase == "" || !protocol.ValidDigest(r.Review.Digest) || !protocol.ValidDigest(r.WorkerHash) || !protocol.ValidDigest(r.ConfigHash) || !release.ValidVersion(r.Review.Manifest.Version) {
+		return nil, errors.New("unsupported or invalid update record")
+	}
+	return &r, nil
+}
+
+// amendRecord changes only the named fields and keeps every other field as
+// the worker wrote it. A nil value removes the field.
+func amendRecord(root string, set map[string]any) error {
+	path := filepath.Join(root, "current.json")
+	b, err := readRecord(path)
+	if err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	for name, value := range set {
+		if value == nil {
+			delete(raw, name)
+			continue
+		}
+		if raw[name], err = json.Marshal(value); err != nil {
+			return err
+		}
+	}
+	if raw["updated"], err = json.Marshal(time.Now().UTC()); err != nil {
+		return err
+	}
+	return writeJSON(path, raw)
+}
+
+// A job is the worker's full view of the same record. It records intent before
+// each side effect. Completed is advisory: live files and service invocations
+// are verified again after an interruption.
 type job struct {
 	Previous      string                      `json:"previous,omitempty"`
 	Schema        int                         `json:"schema"`
 	Review        protocol.Review             `json:"review"`
 	WorkerHash    string                      `json:"worker_hash"`
+	PlanHash      string                      `json:"plan_hash"`
 	Phase         string                      `json:"phase"`
 	Step          string                      `json:"step"`
 	Error         string                      `json:"error,omitempty"`
@@ -38,24 +117,36 @@ type job struct {
 	Affected      []protocol.Component        `json:"affected"`
 	Completed     map[string]bool             `json:"completed"`
 	BinaryHashes  map[string]string           `json:"binary_hashes"`
+	// HostChanges is saved before the first service guard and never cleared.
+	// The installed helper refuses Cancel once it is set.
+	HostChanges bool `json:"host_changes_begun"`
 }
 
 func (j *job) active() bool           { return j.Phase != "complete" && j.Phase != "cancelled" }
 func (j *job) dir(root string) string { return filepath.Join(root, j.Review.Digest) }
 
-func readJSON(path string, result any) error {
+func readRecord(path string) ([]byte, error) {
 	if err := files.CheckAncestors(filepath.Dir(path)); err != nil {
-		return err
+		return nil, err
 	}
 	if err := files.Check(path, false); err != nil {
-		return err
+		return nil, err
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(b) > 1<<20 {
-		return errors.New("update record exceeds size limit")
+		return nil, errors.New("update record exceeds size limit")
+	}
+	return b, nil
+}
+
+// readJSON is the strict reader for records this build wrote or fully owns.
+func readJSON(path string, result any) error {
+	b, err := readRecord(path)
+	if err != nil {
+		return err
 	}
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.DisallowUnknownFields()
@@ -71,7 +162,7 @@ func readJSON(path string, result any) error {
 // InstalledVersion prevents a helper left in memory from applying older rules
 // after the worker has published the new executable.
 func InstalledVersion(version string) error {
-	j, err := loadJob(Root)
+	j, err := loadRecord(Root)
 	if err != nil {
 		return err
 	}
@@ -89,6 +180,8 @@ func writeJSON(path string, value any) error {
 	return files.Write(path, append(b, '\n'), 0600)
 }
 
+// loadJob is the worker's strict reader. The worker is the newest code in a
+// job and must understand all of its record before it changes the host.
 func loadJob(root string) (*job, error) {
 	var j job
 	err := readJSON(filepath.Join(root, "current.json"), &j)
@@ -98,7 +191,7 @@ func loadJob(root string) (*job, error) {
 	if err != nil {
 		return nil, err
 	}
-	if j.Schema != 1 || !protocol.ValidDigest(j.Review.Digest) || !protocol.ValidDigest(j.WorkerHash) || j.Review.Manifest.Validate() != nil || j.Started == nil || j.MayHaveRun == nil || j.Completed == nil || j.BinaryHashes == nil {
+	if j.Schema != 1 || !protocol.ValidDigest(j.Review.Digest) || !protocol.ValidDigest(j.WorkerHash) || !protocol.ValidDigest(j.PlanHash) || j.Review.Manifest.Validate() != nil || j.Started == nil || j.MayHaveRun == nil || j.Completed == nil || j.BinaryHashes == nil {
 		return nil, errors.New("unsupported or invalid update record")
 	}
 	if !protocol.ValidDigest(j.ConfigHash) || j.Review.Manifest.Admit(j.Review.Source, j.Review.Network, "") != nil {
@@ -117,7 +210,7 @@ func loadJob(root string) (*job, error) {
 		}
 	}
 	switch j.Phase {
-	case "accepted", "staging", "installing", "starting", "checking", "waiting-unlock", "committing", "complete", "failed", "cancelled":
+	case "accepted", "retry", "staging", "installing", "starting", "checking", "waiting-unlock", "committing", "complete", "failed", "cancelled":
 	default:
 		return nil, errors.New("unknown update phase")
 	}
@@ -132,7 +225,7 @@ func saveJob(root string, j *job) error {
 // MutationGuard is called while holding LockPath. An interrupted job continues
 // to exclude conflicting writes even while no worker is running.
 func MutationGuard() error {
-	j, err := loadJob(Root)
+	j, err := loadRecord(Root)
 	if err != nil {
 		return err
 	}

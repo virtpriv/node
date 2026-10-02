@@ -62,6 +62,8 @@ func TestReleasePlanRejectsUntrustedShapesAndDowngrades(t *testing.T) {
 		"terminal injection":  func(m *Manifest) { m.Summary = "test\x1b[2J" },
 		"command step":        func(m *Manifest) { m.HostSteps = []string{"sh -c anything"} },
 		"duplicate step":      func(m *Manifest) { m.HostSteps = append(m.HostSteps, m.HostSteps[0]) },
+		"unknown network":     func(m *Manifest) { m.Networks = append(m.Networks, "testnet5") },
+		"unknown service":     func(m *Manifest) { m.HostServices = []Component{"tor"} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := fixture()
@@ -165,5 +167,104 @@ func TestCandidatePlansKeepExactSourceAndRecoveryAdmission(t *testing.T) {
 				t.Fatal("RC support admitted a downgrade")
 			}
 		})
+	}
+}
+
+// laterPlan is a plan as a later release might publish it: every field this
+// build knows, plus fields it has never heard of.
+func laterPlan(t *testing.T, change func(map[string]any)) []byte {
+	t.Helper()
+	b, err := json.Marshal(fixture())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan map[string]any
+	if err := json.Unmarshal(b, &plan); err != nil {
+		t.Fatal(err)
+	}
+	plan["snapshots"] = map[string]any{"keep": 2}
+	plan["sources"].([]any)[0].(map[string]any)["tor"] = "0.5.0"
+	if change != nil {
+		change(plan)
+	}
+	b, err = json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func TestInstalledHelperAdmitsLaterPlanWithoutWeakeningAdmission(t *testing.T) {
+	source := fixture().Sources[0]
+	failed := strings.Repeat("b", 64)
+	for _, tc := range []struct {
+		name            string
+		change          func(map[string]any)
+		selected        string
+		current         string
+		source          func(*Versions)
+		network, failed string
+		first           string
+		refused         string
+	}{
+		{name: "added fields are ignored"},
+		{name: "a later network beside this node's own", change: func(p map[string]any) { p["networks"] = []any{"testnet5", "public-signet"} }},
+		{name: "a later service name", change: func(p map[string]any) { p["host_services"] = []any{"tor", "lnd"} }},
+		{name: "only later networks", change: func(p map[string]any) { p["networks"] = []any{"testnet5"} }, refused: "no tested transition"},
+		{name: "untested combination", source: func(v *Versions) { v.Bitcoin = "29.1" }, refused: "no tested transition"},
+		{name: "unsupported network", network: "mainnet", refused: "no tested transition"},
+		{name: "plan for another release", selected: "0.7.2", refused: "differs from selected release"},
+		{name: "known field made unsafe", change: func(p map[string]any) { p["summary"] = "x\x1b[2J" }, refused: "control characters"},
+		{name: "trailing content", refused: "trailing"},
+		{name: "older node is sent through the bridge", change: func(p map[string]any) { p["bridge"] = "0.7.0" },
+			current: "0.6.9", source: func(v *Versions) { v.VPN = "0.6.9" }, first: "0.7.0"},
+		{name: "bridge cannot help an installed combination at or past it", change: func(p map[string]any) { p["bridge"] = "0.7.0" },
+			source: func(v *Versions) { v.Bitcoin = "29.1" }, refused: "no tested transition"},
+		{name: "failed update needs repair, not a bridge", change: func(p map[string]any) { p["bridge"] = "0.7.0" },
+			current: "0.6.9", source: func(v *Versions) { v.VPN = "0.6.9" }, failed: failed, refused: "no tested transition"},
+		{name: "unknown protocol still names its bridge", change: func(p map[string]any) { p["protocol"] = 2; p["bridge"] = "0.7.0"; delete(p, "sources") },
+			current: "0.6.9", source: func(v *Versions) { v.VPN = "0.6.9" }, first: "0.7.0"},
+		{name: "unknown protocol cannot route a stable release through a candidate", change: func(p map[string]any) { p["protocol"] = 2; p["bridge"] = "0.7.0-rc.1" },
+			current: "0.6.9", source: func(v *Versions) { v.VPN = "0.6.9" }, refused: "newer VPN"},
+		{name: "unknown protocol without a usable bridge", change: func(p map[string]any) { p["protocol"] = 2 }, refused: "newer VPN"},
+		{name: "bridge must be older than its release", change: func(p map[string]any) { p["bridge"] = "0.7.1" }, refused: "bridge"},
+		{name: "stable release cannot route through a candidate", change: func(p map[string]any) { p["bridge"] = "0.7.1-rc.1" }, refused: "bridge"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := laterPlan(t, tc.change)
+			if tc.name == "trailing content" {
+				data = append(data, []byte("{}")...)
+			}
+			selected, current, network, from := "0.7.1", "0.7.0", "public-signet", source
+			if tc.selected != "" {
+				selected = tc.selected
+			}
+			if tc.current != "" {
+				current = tc.current
+			}
+			if tc.network != "" {
+				network = tc.network
+			}
+			if tc.source != nil {
+				tc.source(&from)
+			}
+			m, first, err := Admission(data, selected, current, from, network, tc.failed)
+			if tc.refused != "" {
+				if err == nil || first != "" || !strings.Contains(err.Error(), tc.refused) {
+					t.Fatalf("wrong refusal: first=%q err=%v", first, err)
+				}
+				return
+			}
+			if err != nil || first != tc.first {
+				t.Fatalf("first=%q err=%v", first, err)
+			}
+			if first == "" && m.AdmitInstalled(from, network, "") != nil {
+				t.Fatal("returned a plan that does not admit this node")
+			}
+		})
+	}
+	// Release authoring and the worker keep reading the whole plan strictly.
+	if _, err := Decode(laterPlan(t, nil)); err == nil {
+		t.Fatal("strict reader accepted fields it does not implement")
 	}
 }

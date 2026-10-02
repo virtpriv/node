@@ -47,11 +47,21 @@ The plan has these fields:
 | `host_steps` | Ordered operation IDs implemented in the target worker |
 | `host_services` | Optional affected component names for host steps; stopping Core also includes LND |
 | `recovery_from` | Optional exact VPN archive digests this release can repair |
+| `bridge` | Optional earlier VPN version. A node this plan does not admit is told to install that release first. A stable release must name a stable bridge |
 
 Do not invent checksums or mark a transition tested merely because it compiles.
 Each supported source combination needs release-specific compatibility and data
 migration testing. Sources are complete combinations, not independently mixed
 version ranges. Component downgrades and older/equal VPN releases are refused.
+
+Each stable release admits the stable release directly before it, with and
+without Syncthing, and names that release as its `bridge`. A node that skipped
+releases is guided through them one at a time; every hop is a full reviewed
+update with its own downloads and service restarts. When the releases in between
+changed only VPN, with the same Core, LND and Syncthing versions and no host
+step, a release should also admit those older sources, so that a node behind by
+VPN-only releases updates in one step. Each admitted source still needs its own
+transition test; that test is light when no component or host change is skipped.
 
 The initial host operation is `lnd-service-v1`. It installs the reviewed LND
 systemd template, preserves the configured auto-unlock choice, validates the unit,
@@ -123,10 +133,11 @@ are updated too, without installing additional tools. No component data director
 is copied back, deleted, or restored.
 
 Free space is checked before downloading and again after staging, before any
-service stops. Each filesystem is counted once: its required free space plus the
-executables still to be installed there must fit. A refusal leaves every service
-as it was, removes the downloaded component files, and can be cancelled or
-retried after freeing space. A successful update also removes its downloaded
+service stops; the status then reads "Check free space". Each filesystem is
+counted once: its required free space plus the executables still to be
+installed there must fit. A refusal leaves every service as it was and can be
+retried after freeing space. Before host changes have begun it also removes the
+downloaded component files and can be cancelled. A successful update also removes its downloaded
 component files; the release plan and job record remain.
 
 Temporary systemd drop-ins disable automatic restarts and require a permit under
@@ -138,11 +149,38 @@ An uncertain start is checked against the surviving process; if the process is
 absent, an explicit Retry is required. Retry uses the same approved release and
 preserves the history that database changes may have occurred.
 
-A failed download or verification can be cancelled before staging completes,
-releasing the maintenance restriction without changing the running node. Once
-host changes may have begun, cancellation is refused; completion or repair is
-required instead. A corrective job also retains this restriction if its download
-fails, because the earlier update may already have changed the node.
+The worker records that host changes have begun before it guards the first
+service. Until then a failed or refused update can be cancelled, releasing the
+maintenance restriction without changing the running node. Afterwards
+cancellation is refused; completion or repair is required instead. A corrective
+job starts with the failed update's record of this, so it stays uncancellable
+even if its own download fails.
+
+## Installed helper and later releases
+
+The helper and launcher on a node are older than the worker of every update
+they start. They read only these fields of the job record: `schema`,
+`review.digest`, `review.manifest.version`, `review.network`, `worker_hash`,
+`config_hash`, `phase`, `step`, `error` and `host_changes_begun`. They act on
+four phase words, `failed`, `complete`, `cancelled` and `waiting-unlock`, and
+treat any other as work in progress. Retry only sets `phase` to `retry`; the
+worker decides where to resume. Retry and Cancel keep every other field as the
+worker wrote it. A worker may add fields, phases and components, but must keep
+these meanings for as long as its plan admits a source with this helper.
+
+Once a job exists, the launcher, Retry and Cancel no longer check the Debian
+version or read the node configuration; they hand the job to the worker, which
+makes its own checks. A later worker can therefore change either part way
+through an update and still be resumed.
+
+The helper likewise ignores plan fields it does not know, and network and
+service names it does not know, and still enforces the exact source, its own
+network, newer-version and recovery checks. The worker reads the
+approved plan bytes in full and refuses a plan it does not completely
+understand. A plan with a `protocol` number the helper does not know is refused,
+unless it names a `bridge` the node can install first. A corrective worker reads
+the failed update's retained record for the services it affected, what may have
+run, and the wallet and device identity.
 
 Health checks include the running executable, Core's version and full network
 identity, LND's version/network and wallet readiness, and Syncthing's version,

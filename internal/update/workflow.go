@@ -40,35 +40,71 @@ func runJob(j *job, ops workflowOps) error {
 		return errors.Join(cause, ops.save(j))
 	}
 	fail := func(cause error) error {
-		if j.Completed["staged"] && ops.quarantine != nil {
+		if j.HostChanges && ops.quarantine != nil {
 			cause = errors.Join(cause, ops.quarantine(affected))
 		}
 		return refuse(cause)
+	}
+	// Last space check before any service is touched. Services stay exactly
+	// as they were found. A refusal returns the downloaded files' space unless
+	// Retry still needs them: that is only after a finished download whose
+	// host changes have begun. The record is saved first, so a crash cannot
+	// leave it promising files that are gone.
+	checkSpace := func() error {
+		if err := publish(j.Phase, "Check free space"); err != nil {
+			return err
+		}
+		err := ops.capacity(j)
+		if err == nil {
+			return nil
+		}
+		if j.Completed["staged"] && j.HostChanges {
+			return refuse(err)
+		}
+		delete(j.Completed, "staged")
+		return errors.Join(refuse(err), ops.discard(j))
+	}
+	if j.Phase == "retry" {
+		// The installed helper only records the request. Starts are attempted
+		// afresh; downloads and the history of what may have run are kept.
+		j.Started = map[protocol.Component]bool{}
+		j.Phase = "accepted"
+		if j.Completed["staged"] {
+			j.Phase = "installing"
+		}
 	}
 	if !j.Completed["staged"] {
 		if err := publish("staging", "Download and verify release files"); err != nil {
 			return err
 		}
+		// Staging touches no service, so its failure never quarantines, even
+		// in a repair job that starts with host changes already begun.
 		if err := ops.stage(j); err != nil {
-			return fail(err)
+			return refuse(err)
 		}
-		// Last space check before any service is touched. A refusal here
-		// returns the downloaded files' space and can still be cancelled.
-		if err := ops.capacity(j); err != nil {
-			return refuse(errors.Join(err, ops.discard(j)))
+		if err := checkSpace(); err != nil {
+			return err
 		}
 		j.Completed["staged"] = true
 		if err := publish("installing", "Prepare service changes"); err != nil {
 			return err
 		}
 	} else if j.Phase == "installing" {
-		// A resumed or retried installation checks space again before it
-		// stops anything. Services stay exactly as they were found.
-		if err := ops.capacity(j); err != nil {
-			return refuse(err)
+		// A resumed or retried installation checks again before it stops
+		// anything.
+		if err := checkSpace(); err != nil {
+			return err
 		}
 	}
 	if j.Phase == "installing" {
+		if !j.HostChanges {
+			// Saved before the first guard. From here Cancel is refused and a
+			// failure quarantines the affected services.
+			j.HostChanges = true
+			if err := publish("installing", "Guard services"); err != nil {
+				return err
+			}
+		}
 		if err := ops.guard(affected); err != nil {
 			return fail(err)
 		}

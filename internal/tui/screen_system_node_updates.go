@@ -34,6 +34,8 @@ type NodeUpdateScreen struct {
 	button       int
 	attempt      uint64
 	releaseInput *textinput.Model
+	// notice explains why target is not the release the operator selected.
+	notice string
 }
 
 type nodeUpdateMsg struct {
@@ -52,7 +54,7 @@ func NewNodeUpdateScreen(ctx *ScreenContext) *NodeUpdateScreen {
 	return s
 }
 func (s *NodeUpdateScreen) selectStable() {
-	s.target = ""
+	s.target, s.notice = "", ""
 	if release.IsStable(s.ctx.LatestVersion) {
 		s.target = s.ctx.LatestVersion
 	}
@@ -128,6 +130,15 @@ func (s *NodeUpdateScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 		}
 		if m.err == nil {
 			if m.kind == "prepare" {
+				if first := m.review.UpdateFirst; first != "" {
+					// Guidance, not an approvable review: offer the release
+					// this node has to install first.
+					s.notice = fmt.Sprintf("v%s can be installed after v%s. Review v%s first.", s.target, first, first)
+					s.target = first
+					s.button = 0
+					return s, s.poll()
+				}
+				s.notice = ""
 				s.review = &m.review
 				s.button = 0
 				return s, nil
@@ -298,7 +309,7 @@ func (s *NodeUpdateScreen) handleReleaseKey(k string, msg tea.KeyPressMsg) (Scre
 			s.err = fmt.Errorf("select a newer release tag, such as v0.7.0-rc.1")
 			return s, s.releaseInput.Focus()
 		}
-		s.target = version
+		s.target, s.notice = version, ""
 		s.releaseInput = nil
 		s.button = 0
 		return s, s.request("prepare")
@@ -358,6 +369,9 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 	}
 	if s.hasTarget() && s.review == nil {
 		p.blank()
+		if s.notice != "" {
+			p.line(s.notice)
+		}
 		p.field("Available: ", "v"+s.target)
 	}
 	if s.busy != "" {

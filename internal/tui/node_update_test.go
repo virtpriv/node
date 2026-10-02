@@ -53,10 +53,15 @@ type nodeUpdateClientStub struct {
 	status            protocol.Status
 	prepareErr        error
 	statusErr         error
+	// updateFirst maps a selected release to the one the helper names first.
+	updateFirst map[string]string
 }
 
 func (s *nodeUpdateClientStub) Prepare(v string) (protocol.Review, error) {
 	s.prepared = v
+	if first := s.updateFirst[v]; first != "" {
+		return protocol.Review{UpdateFirst: first}, nil
+	}
 	return protocol.Review{Token: strings.Repeat("b", 64), Digest: strings.Repeat("a", 64), Manifest: protocol.Manifest{Version: v}}, s.prepareErr
 }
 func (s *nodeUpdateClientStub) Start(id string) (protocol.Status, error) {
@@ -238,5 +243,28 @@ func TestNodeUpdateMessagesReachOnlyTheirLiveOwner(t *testing.T) {
 				t.Fatal("old response changed the replacement screen")
 			}
 		})
+	}
+}
+
+// A node that skipped releases is told which release to install first. That
+// answer is guidance only and must never be installable as it stands.
+func TestSkippedReleaseIsReviewedThroughItsBridge(t *testing.T) {
+	client := &nodeUpdateClientStub{updateFirst: map[string]string{"0.9.0": "0.8.0"}}
+	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0", LatestVersion: "0.9.0"}
+	s := NewNodeUpdateScreen(ctx)
+	s.HandleMsg(pressNodeUpdateAction(t, s, "Review update")())
+	if s.review != nil || slices.Contains(s.buttons(), "Install") || client.starts != 0 {
+		t.Fatal("guidance was offered as an installable review")
+	}
+	if view := s.View(80, 24); !strings.Contains(view, "v0.8.0") || !strings.Contains(view, "v0.9.0") {
+		t.Fatal("operator is not told which release comes first:", view)
+	}
+	s.HandleMsg(pressNodeUpdateAction(t, s, "Review update")())
+	if client.prepared != "0.8.0" || s.review == nil {
+		t.Fatal("the bridge release was not reviewed next")
+	}
+	s.HandleMsg(pressNodeUpdateAction(t, s, "Install")())
+	if client.starts != 1 || client.started != strings.Repeat("b", 64) {
+		t.Fatal("bridge installation did not submit its reviewed approval")
 	}
 }

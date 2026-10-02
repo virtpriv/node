@@ -16,7 +16,7 @@ func workflowFixture() *job {
 	h := strings.Repeat("a", 64)
 	source := protocol.Versions{VPN: "0.7.0", Bitcoin: "29.2", LND: "0.21.1-beta", Syncthing: "2.1.4"}
 	m := protocol.Manifest{Protocol: 1, Platform: "debian-13-amd64", Version: "0.7.1", Summary: "Fixture only", MinimumFreeMiB: 2048, Sources: []protocol.Versions{source}, Networks: []string{"public-signet"}, Bitcoin: protocol.Artifact{Version: "29.3", SHA256: h}, LND: protocol.Artifact{Version: "0.21.2-beta", SHA256: h}, Syncthing: protocol.Artifact{Version: "2.1.5", SHA256: h}}
-	return &job{Schema: 1, Review: protocol.Review{Digest: h, Manifest: m, Source: source, Network: "public-signet"}, WorkerHash: h, ConfigHash: h, Phase: "accepted", Started: map[protocol.Component]bool{}, MayHaveRun: map[protocol.Component]bool{}, Completed: map[string]bool{}, BinaryHashes: map[string]string{}, Affected: m.Affected(source)}
+	return &job{Schema: 1, Review: protocol.Review{Digest: h, Manifest: m, Source: source, Network: "public-signet"}, WorkerHash: h, PlanHash: h, ConfigHash: h, Phase: "accepted", Started: map[protocol.Component]bool{}, MayHaveRun: map[protocol.Component]bool{}, Completed: map[string]bool{}, BinaryHashes: map[string]string{}, Affected: m.Affected(source)}
 }
 
 type workflowHarness struct {
@@ -28,9 +28,19 @@ type workflowHarness struct {
 	interrupt string
 	after     bool
 	failure   string
+	// crash, when set, is asked after each durable save whether power is lost.
+	crash func(*job) bool
 }
 
-func (h *workflowHarness) checkpoint(j *job) error { return saveJob(h.root, j) }
+func (h *workflowHarness) checkpoint(j *job) error {
+	if err := saveJob(h.root, j); err != nil {
+		return err
+	}
+	if h.crash != nil && h.crash(j) {
+		panic("power loss")
+	}
+	return nil
+}
 func (h *workflowHarness) reload() *job {
 	h.t.Helper()
 	j, err := loadJob(h.root)
@@ -222,8 +232,14 @@ func TestWorkflowInterruptionRequiresRetryAfterUncertainStart(t *testing.T) {
 }
 
 func TestRejectedArtifactLeavesServicesAloneAndFailureNeverCommits(t *testing.T) {
-	for _, failure := range []string{"stage", "guard", "stop:lnd", "install", "start:lnd", "health:bitcoin", "health:syncthing"} {
+	failures := []string{"stage", "guard", "stop:lnd", "install", "start:lnd", "health:bitcoin", "health:syncthing"}
+	// The last entry repeats the download failure for a repair job, which
+	// starts with host changes already begun.
+	for i, failure := range append(failures, "stage") {
 		j := workflowFixture()
+		if i == len(failures) {
+			j.Previous, j.HostChanges = strings.Repeat("b", 64), true
+		}
 		h := newHarness(t, j)
 		h.failure = failure
 		if runJob(j, h.ops()) == nil {
@@ -269,23 +285,35 @@ func TestFailedBoundarySavePreventsStart(t *testing.T) {
 	}
 }
 
-func TestCancellationCannotAbandonPartiallyInstalledComponents(t *testing.T) {
-	j := workflowFixture()
-	j.Phase = "failed"
-	if err := cancelJob(j); err != nil || j.active() {
-		t.Fatal("failed download kept node locked", err)
-	}
-	j = workflowFixture()
-	j.Completed["staged"] = true
-	j.Phase = "failed"
-	if cancelJob(j) == nil || !j.active() {
-		t.Fatal("abandoned possible host changes")
-	}
-	j = workflowFixture()
-	j.Previous = strings.Repeat("b", 64)
-	j.Phase = "failed"
-	if cancelJob(j) == nil || !j.active() {
-		t.Fatal("failed corrective download abandoned the earlier migration")
+// Cancel is decided by whether host changes may have begun, not by how far the
+// download got. Retry must not reopen that choice.
+func TestCancellationStopsWhereHostChangesBegin(t *testing.T) {
+	for _, tc := range []struct {
+		failure     string
+		cancellable bool
+	}{
+		{"stage", true}, {"guard", false}, {"stop:lnd", false}, {"start:bitcoin", false},
+	} {
+		t.Run(tc.failure, func(t *testing.T) {
+			j := workflowFixture()
+			h := newHarness(t, j)
+			h.failure = tc.failure
+			if runJob(j, h.ops()) == nil {
+				t.Fatal("fixture did not fail")
+			}
+			if !tc.cancellable {
+				if err := retryUpdate(h.root, j.Review.Digest); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := cancelUpdate(h.root, j.Review.Digest)
+			if (err == nil) != tc.cancellable {
+				t.Fatal("wrong cancellation boundary:", err)
+			}
+			if h.reload().active() == tc.cancellable {
+				t.Fatal("maintenance restriction does not match the cancellation")
+			}
+		})
 	}
 }
 
@@ -299,7 +327,18 @@ func TestSpaceRefusalLeavesServicesAsFound(t *testing.T) {
 		cancellable bool
 	}{
 		{"first run", func(*testing.T, *workflowHarness, *job) {}, true, true, true},
-		{"resumed before guard", func(t *testing.T, h *workflowHarness, j *job) {
+		{"resumed after download, before host changes", func(t *testing.T, h *workflowHarness, j *job) {
+			h.crash = func(j *job) bool { return j.Completed["staged"] && !j.HostChanges }
+			runInterrupted(t, j, h.ops())
+			h.crash = nil
+		}, true, true, true},
+		{"repair before its download finishes", func(t *testing.T, h *workflowHarness, j *job) {
+			j.Previous, j.HostChanges = strings.Repeat("b", 64), true
+			if err := h.checkpoint(j); err != nil {
+				t.Fatal(err)
+			}
+		}, true, true, false},
+		{"resumed at the service guard", func(t *testing.T, h *workflowHarness, j *job) {
 			h.interrupt = "guard"
 			runInterrupted(t, j, h.ops())
 			h.interrupt = ""
@@ -341,7 +380,11 @@ func TestSpaceRefusalLeavesServicesAsFound(t *testing.T) {
 					t.Fatal("space refusal changed service state", c, h.running)
 				}
 			}
-			if (cancelJob(saved) == nil) != tc.cancellable {
+			// Removed downloads must be fetched again; kept ones must not be.
+			if saved.Completed["staged"] == tc.discards {
+				t.Fatal("download record disagrees with the files on disk")
+			}
+			if (cancelUpdate(h.root, j.Review.Digest) == nil) != tc.cancellable {
 				t.Fatal("wrong cancellation boundary")
 			}
 		})

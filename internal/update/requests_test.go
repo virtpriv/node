@@ -29,11 +29,11 @@ func saveReview(t *testing.T, root string, p prepared) string {
 }
 
 func TestStartRechecksNodeAndWorkerBeforeAcceptingReview(t *testing.T) {
-	for _, change := range []string{"", "configuration", "source", "worker", "observation", "identity", "launcher"} {
+	for _, change := range []string{"", "configuration", "source", "worker", "plan", "observation", "identity", "launcher"} {
 		t.Run("change="+change, func(t *testing.T) {
 			j := workflowFixture()
 			root, _ := workerFiles(t, j)
-			p := prepared{Review: j.Review, WorkerHash: j.WorkerHash, ConfigHash: j.ConfigHash}
+			p := prepared{Review: j.Review, WorkerHash: j.WorkerHash, PlanHash: j.PlanHash, ConfigHash: j.ConfigHash}
 			token := saveReview(t, root, p)
 			cfg := config.Default()
 			cfg.Network = j.Review.Network
@@ -49,6 +49,11 @@ func TestStartRechecksNodeAndWorkerBeforeAcceptingReview(t *testing.T) {
 				wantError = "node changed since review"
 			case "worker":
 				if err := os.WriteFile(filepath.Join(j.dir(root), "vpn"), []byte("changed worker"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				wantError = "integrity verification"
+			case "plan":
+				if err := os.WriteFile(filepath.Join(j.dir(root), "update.json"), []byte("{}"), 0600); err != nil {
 					t.Fatal(err)
 				}
 				wantError = "integrity verification"
@@ -106,12 +111,51 @@ func TestStartRechecksNodeAndWorkerBeforeAcceptingReview(t *testing.T) {
 	}
 }
 
+// A plan may name networks and services added after this helper was built.
+// The helper must still accept the job; the newer worker checks those names.
+func TestHelperAcceptsReviewOfPlanWithLaterNames(t *testing.T) {
+	j := workflowFixture()
+	j.Review.Manifest.Networks = append(j.Review.Manifest.Networks, "testnet5")
+	j.Review.Manifest.HostServices = []protocol.Component{"tor"}
+	root, _ := workerFiles(t, j)
+	p := prepared{Review: j.Review, WorkerHash: j.WorkerHash, PlanHash: j.PlanHash, ConfigHash: j.ConfigHash}
+	token := saveReview(t, root, p)
+	cfg := config.Default()
+	cfg.Network = j.Review.Network
+	err := acceptUpdate(root, token, admissionOps{
+		observe: func() (nodeObservation, error) {
+			return nodeObservation{source: j.Review.Source, config: cfg, configHash: j.ConfigHash}, nil
+		},
+		identify: func(*job, *config.AppConfig) error { return nil },
+		launcher: func() error { return nil },
+	})
+	if err != nil {
+		t.Fatal("helper refused a plan over names it does not need:", err)
+	}
+	if r, err := loadRecord(root); err != nil || r == nil || !r.relaunch() {
+		t.Fatal("accepted job is not ready for its worker:", err)
+	}
+	cfg.Network = "mainnet"
+	if err := cancelUpdate(root, j.Review.Digest); err != nil {
+		t.Fatal(err)
+	}
+	if acceptUpdate(root, saveReview(t, root, p), admissionOps{
+		observe: func() (nodeObservation, error) {
+			return nodeObservation{source: j.Review.Source, config: cfg, configHash: j.ConfigHash}, nil
+		},
+		identify: func(*job, *config.AppConfig) error { return nil },
+		launcher: func() error { return nil },
+	}) == nil {
+		t.Fatal("later names admitted a node on a network the plan does not list")
+	}
+}
+
 func TestCorrectiveAdmissionPreservesFailedUpdateObligations(t *testing.T) {
 	for _, refusal := range []string{"", "ordinary release", "different failed update", "configuration", "unfinished"} {
 		t.Run("refusal="+refusal, func(t *testing.T) {
 			previous := workflowFixture()
 			previous.Phase = "failed"
-			previous.Completed["staged"] = true
+			previous.Completed["staged"], previous.HostChanges = true, true
 			previous.Started[protocol.LND], previous.MayHaveRun[protocol.LND] = true, true
 			previous.WalletPresent, previous.SyncthingID = true, "original device"
 			j := workflowFixture()
@@ -124,7 +168,7 @@ func TestCorrectiveAdmissionPreservesFailedUpdateObligations(t *testing.T) {
 			j.Review.Manifest.Sources = []protocol.Versions{j.Review.Source}
 			j.Review.Manifest.RecoveryFrom = []string{previous.Review.Digest}
 			root, _ := workerFiles(t, j)
-			p := prepared{Review: j.Review, WorkerHash: j.WorkerHash, ConfigHash: j.ConfigHash, Previous: previous.Review.Digest}
+			p := prepared{Review: j.Review, WorkerHash: j.WorkerHash, PlanHash: j.PlanHash, ConfigHash: j.ConfigHash, Previous: previous.Review.Digest}
 			wantError := ""
 			switch refusal {
 			case "ordinary release":
@@ -178,8 +222,16 @@ func TestCorrectiveAdmissionPreservesFailedUpdateObligations(t *testing.T) {
 			if err != nil || j == nil {
 				t.Fatal("corrective record missing", err)
 			}
+			// The helper only carries the cancellation boundary. The repair
+			// worker reads the failed job's duties from its retained record.
+			if cancelUpdate(root, j.Review.Digest) == nil {
+				t.Fatal("repair of a changed node could be cancelled before its worker ran")
+			}
+			if err := inheritFailed(root, j); err != nil {
+				t.Fatal(err)
+			}
 			if !j.MayHaveRun[protocol.LND] || !j.WalletPresent || j.SyncthingID != previous.SyncthingID {
-				t.Fatal("corrective admission forgot data or identity obligations")
+				t.Fatal("repair forgot data or identity obligations")
 			}
 			var retained job
 			if err := readJSON(filepath.Join(previous.dir(root), "result.json"), &retained); err != nil || retained.Review.Digest != previous.Review.Digest || !retained.MayHaveRun[protocol.LND] {
@@ -198,6 +250,49 @@ func TestCorrectiveAdmissionPreservesFailedUpdateObligations(t *testing.T) {
 				t.Fatal("inherited dependencies started in the wrong order")
 			}
 		})
+	}
+}
+
+// A repair can itself fail before its worker ever runs. The next repair must
+// still find the duties of the first failure.
+func TestRepairOfRepairKeepsFirstFailureDuties(t *testing.T) {
+	first := workflowFixture()
+	first.Phase, first.HostChanges = "failed", true
+	first.MayHaveRun[protocol.LND] = true
+	first.WalletPresent, first.SyncthingID = true, "original device"
+	second := workflowFixture()
+	second.Review.Digest, second.Previous = strings.Repeat("b", 64), first.Review.Digest
+	second.Phase, second.HostChanges, second.Affected = "failed", true, nil
+	third := workflowFixture()
+	third.Review.Digest, third.Previous = strings.Repeat("c", 64), second.Review.Digest
+	third.HostChanges, third.Affected = true, nil
+	third.Review.Source = third.Review.Manifest.Target(third.Review.Source)
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, failed := range []*job{first, second} {
+		if err := os.Mkdir(failed.dir(root), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := writeJSON(filepath.Join(failed.dir(root), "result.json"), failed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := inheritFailed(root, third); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(third.Affected, first.Affected) || !third.MayHaveRun[protocol.LND] || !third.WalletPresent || third.SyncthingID != first.SyncthingID {
+		t.Fatal("second repair lost the first failure's duties", third.Affected, third.MayHaveRun)
+	}
+	// A missing record must stop the repair, never shrink its duties.
+	if err := os.Remove(filepath.Join(first.dir(root), "result.json")); err != nil {
+		t.Fatal(err)
+	}
+	fresh := workflowFixture()
+	fresh.Previous, fresh.Affected = second.Review.Digest, nil
+	if inheritFailed(root, fresh) == nil {
+		t.Fatal("repair continued without the first failure's record")
 	}
 }
 

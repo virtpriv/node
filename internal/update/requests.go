@@ -24,6 +24,7 @@ import (
 type prepared struct {
 	Review     protocol.Review `json:"review"`
 	WorkerHash string          `json:"worker_hash"`
+	PlanHash   string          `json:"plan_hash"`
 	ConfigHash string          `json:"config_hash"`
 	Previous   string          `json:"previous"`
 }
@@ -53,9 +54,20 @@ func readPrepared(root, token string) (prepared, error) {
 	return p, nil
 }
 
-func requireUpdateHost() error {
+func requireRoot() error {
 	if os.Geteuid() != 0 {
 		return errors.New("managed updates require the root helper")
+	}
+	return nil
+}
+
+// requireUpdateHost gates the start of an update and the worker. The launcher,
+// Retry and Cancel act on a job that already exists and only require root: a
+// later worker may change the system or the configuration layout part way
+// through, and it must still be handed the job afterwards.
+func requireUpdateHost() error {
+	if err := requireRoot(); err != nil {
+		return err
 	}
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		return errors.New("managed updates require Debian 13 amd64")
@@ -98,7 +110,7 @@ func Prepare(current, version string) (protocol.Review, error) {
 		return none, err
 	}
 	defer unlock()
-	previous, err := loadJob(Root)
+	previous, err := loadRecord(Root)
 	if err != nil {
 		return none, err
 	}
@@ -145,14 +157,15 @@ func Prepare(current, version string) (protocol.Review, error) {
 	if err != nil {
 		return none, err
 	}
-	m, err := protocol.Decode(data)
+	m, first, err := protocol.Admission(data, version, current, source, cfg.Network, failed)
 	if err != nil {
 		return none, err
 	}
-	if m.Version != version {
-		return none, errors.New("signed plan version differs from selected release")
+	if first != "" {
+		return protocol.Review{UpdateFirst: first}, nil
 	}
-	if err := m.Admit(source, cfg.Network, failed); err != nil {
+	planHash, err := files.Hash(filepath.Join(work, "update.json"))
+	if err != nil {
 		return none, err
 	}
 	id, err := files.Hash(filepath.Join(work, archive))
@@ -167,7 +180,7 @@ func Prepare(current, version string) (protocol.Review, error) {
 	if err != nil {
 		return none, err
 	}
-	p := prepared{Review: protocol.Review{Digest: id, Manifest: m, Source: source, Network: cfg.Network}, WorkerHash: workerHash, ConfigHash: configHash, Previous: failed}
+	p := prepared{Review: protocol.Review{Digest: id, Manifest: m, Source: source, Network: cfg.Network}, WorkerHash: workerHash, PlanHash: planHash, ConfigHash: configHash, Previous: failed}
 	p.Review.Token, err = approvalToken(p)
 	if err != nil {
 		return none, err
@@ -301,7 +314,7 @@ func acceptUpdate(root, token string, ops admissionOps) error {
 		return err
 	}
 	id := p.Review.Digest
-	previous, err := loadJob(root)
+	previous, err := loadRecord(root)
 	if err != nil {
 		return err
 	}
@@ -329,33 +342,28 @@ func acceptUpdate(root, token string, ops admissionOps) error {
 	if failed != "" && (cfg.Network != previous.Review.Network || configHash != previous.ConfigHash) {
 		return errors.New("node configuration changed during the failed update; resolve that change before recovery")
 	}
-	if err := p.Review.Manifest.Admit(source, cfg.Network, failed); err != nil {
+	if err := p.Review.Manifest.AdmitInstalled(source, cfg.Network, failed); err != nil {
 		return err
 	}
 	if err := verifyHash(filepath.Join(root, id, "vpn"), p.WorkerHash); err != nil {
 		return err
 	}
-	j := &job{Schema: 1, Review: p.Review, WorkerHash: p.WorkerHash, ConfigHash: configHash, Phase: "accepted", Step: "Update accepted", Started: map[protocol.Component]bool{}, MayHaveRun: map[protocol.Component]bool{}, Completed: map[string]bool{}, BinaryHashes: map[string]string{}, Affected: p.Review.Manifest.Affected(source)}
+	if err := verifyHash(filepath.Join(root, id, "update.json"), p.PlanHash); err != nil {
+		return err
+	}
+	j := &job{Schema: 1, Review: p.Review, WorkerHash: p.WorkerHash, PlanHash: p.PlanHash, ConfigHash: configHash, Phase: "accepted", Step: "Update accepted", Started: map[protocol.Component]bool{}, MayHaveRun: map[protocol.Component]bool{}, Completed: map[string]bool{}, BinaryHashes: map[string]string{}, Affected: p.Review.Manifest.Affected(source)}
 	j.Previous = failed
 	if failed != "" {
-		j.WalletPresent, j.SyncthingID = previous.WalletPresent, previous.SyncthingID
-		for _, c := range protocol.Components {
-			if slices.Contains(previous.Affected, c) && !slices.Contains(j.Affected, c) {
-				j.Affected = append(j.Affected, c)
-			}
-		}
-		slices.SortFunc(j.Affected, func(a, b protocol.Component) int {
-			return slices.Index(protocol.Components, a) - slices.Index(protocol.Components, b)
-		})
-		for c, v := range previous.MayHaveRun {
-			j.MayHaveRun[c] = v
-		}
+		// A repair keeps the failed update's cancellation boundary. Its worker
+		// reads the remaining duties from the record retained below, which a
+		// later worker may have written in a form this helper cannot interpret.
+		j.HostChanges = previous.HostChanges
 	} else if err := ops.identify(j, cfg); err != nil {
 		return err
 	}
 
 	if previous != nil {
-		if err := writeJSON(filepath.Join(previous.dir(root), "result.json"), previous); err != nil {
+		if err := files.Copy(filepath.Join(root, "current.json"), filepath.Join(previous.dir(root), "result.json"), 0600); err != nil {
 			return err
 		}
 	}
@@ -379,7 +387,7 @@ func installWorkerUnit() error {
 func startWorker() error { return system.RunRoot("systemctl", "start", "--no-block", Service) }
 
 func Resume(id string) (protocol.Status, error) {
-	if err := requireUpdateHost(); err != nil {
+	if err := requireRoot(); err != nil {
 		return protocol.Status{}, err
 	}
 	unlock, err := files.Lock(LockPath)
@@ -397,37 +405,30 @@ func Resume(id string) (protocol.Status, error) {
 	return Status()
 }
 
-// retryUpdate records explicit consent to start again without erasing evidence
-// that an earlier invocation may already have migrated component data.
+// retryUpdate records explicit consent to try again. The worker decides where
+// to resume and keeps the evidence that component data may have been migrated.
 func retryUpdate(root, id string) error {
-	j, err := loadJob(root)
+	j, err := loadRecord(root)
 	if err != nil {
 		return err
 	}
 	if j == nil || !j.active() || j.Review.Digest != id {
 		return errors.New("update identity changed; refresh its status")
 	}
-	j.Error = ""
-	j.Started = map[protocol.Component]bool{}
-	if j.Completed["staged"] {
-		j.Phase = "installing"
-	} else {
-		j.Phase = "accepted"
-	}
-	return saveJob(root, j)
+	return amendRecord(root, map[string]any{"phase": "retry", "error": nil})
 }
 
 func Status() (protocol.Status, error) {
-	if os.Geteuid() != 0 {
-		return protocol.Status{}, errors.New("update status requires the root helper")
+	if err := requireRoot(); err != nil {
+		return protocol.Status{}, err
 	}
-	j, err := loadJob(Root)
+	j, err := loadRecord(Root)
 	if err != nil || j == nil {
 		return protocol.Status{}, err
 	}
 	s := protocol.Status{ID: j.Review.Digest, Version: j.Review.Manifest.Version, Phase: j.Phase, Step: j.Step, Error: j.Error, Active: j.active()}
 	s.Running = system.IsServiceActive(Service)
-	s.Cancellable = j.active() && !j.Completed["staged"] && j.Previous == "" && !s.Running
+	s.Cancellable = j.active() && !j.HostChanges && !s.Running
 	if j.Phase == "waiting-unlock" {
 		p, err := config.NetworkConfigFromName(j.Review.Network)
 		if err != nil {
@@ -452,7 +453,7 @@ func verifyHash(path, want string) error {
 // Cancel releases maintenance admission only before host changes can begin.
 // Downloaded artifacts and the terminal record remain available for inspection.
 func Cancel(id string) (protocol.Status, error) {
-	if err := requireUpdateHost(); err != nil {
+	if err := requireRoot(); err != nil {
 		return protocol.Status{}, err
 	}
 	unlock, err := files.Lock(LockPath)
@@ -460,28 +461,22 @@ func Cancel(id string) (protocol.Status, error) {
 		return protocol.Status{}, err
 	}
 	defer unlock()
-	j, err := loadJob(Root)
-	if err != nil {
-		return protocol.Status{}, err
-	}
-	if j == nil || j.Review.Digest != id {
-		return protocol.Status{}, errors.New("update identity changed; refresh its status")
-	}
-	if err := cancelJob(j); err != nil {
-		return protocol.Status{}, err
-	}
-	if err := saveJob(Root, j); err != nil {
+	if err := cancelUpdate(Root, id); err != nil {
 		return protocol.Status{}, err
 	}
 	return Status()
 }
 
-func cancelJob(j *job) error {
-	if !j.active() || j.Completed["staged"] || j.Previous != "" {
+func cancelUpdate(root, id string) error {
+	j, err := loadRecord(root)
+	if err != nil {
+		return err
+	}
+	if j == nil || j.Review.Digest != id {
+		return errors.New("update identity changed; refresh its status")
+	}
+	if !j.active() || j.HostChanges {
 		return errors.New("host changes may have begun; complete or repair this update")
 	}
-	j.Phase = "cancelled"
-	j.Step = "Update cancelled before host changes"
-	j.Error = ""
-	return nil
+	return amendRecord(root, map[string]any{"phase": "cancelled", "step": "Update cancelled before host changes", "error": nil})
 }

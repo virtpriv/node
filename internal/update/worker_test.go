@@ -1,6 +1,7 @@
 package update
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -44,6 +45,59 @@ func TestWorkerRejectsPlanForDifferentBuild(t *testing.T) {
 	}
 }
 
+// The installed helper may understand less of a plan than the worker must.
+// The worker therefore reads the approved plan bytes itself, in full.
+func TestWorkerReadsApprovedPlanInFull(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		rewrite func(map[string]any)
+		rehash  bool
+		refused string
+	}{
+		{name: "approved plan"},
+		{name: "plan changed after approval", rewrite: func(m map[string]any) { m["minimum_free_mib"] = 1024 }, refused: "integrity"},
+		{name: "plan needs a newer worker", rewrite: func(m map[string]any) { m["snapshots"] = true }, rehash: true, refused: "unknown field"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			j := workflowFixture()
+			root, _ := workerFiles(t, j)
+			path := filepath.Join(j.dir(root), "update.json")
+			if tc.rewrite != nil {
+				b, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var m map[string]any
+				if err := json.Unmarshal(b, &m); err != nil {
+					t.Fatal(err)
+				}
+				tc.rewrite(m)
+				if b, err = json.Marshal(m); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, b, 0600); err != nil {
+					t.Fatal(err)
+				}
+				if tc.rehash {
+					if j.PlanHash, err = files.Hash(path); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			m, err := loadPlan(root, j)
+			if tc.refused != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.refused) {
+					t.Fatalf("wrong refusal: %v", err)
+				}
+				return
+			}
+			if err != nil || m.Version != j.Review.Manifest.Version {
+				t.Fatal("approved plan was not read:", err)
+			}
+		})
+	}
+}
+
 // Real files exercise retained-byte verification and atomic VPN publication.
 func workerFiles(t *testing.T, j *job) (string, string) {
 	t.Helper()
@@ -59,6 +113,17 @@ func workerFiles(t *testing.T, j *job) (string, string) {
 		t.Fatal(err)
 	}
 	j.WorkerHash, err = files.Hash(worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := json.Marshal(j.Review.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(j.dir(root), "update.json"), plan, 0600); err != nil {
+		t.Fatal(err)
+	}
+	j.PlanHash, err = files.Hash(filepath.Join(j.dir(root), "update.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
