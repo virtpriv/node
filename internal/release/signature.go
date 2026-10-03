@@ -1,6 +1,6 @@
 // Trust model
 //
-// The legacy VPN self-update workflow pins its release signing key here.
+// VPN release packaging and verification share the signing key pinned here.
 // Component provisioning and signer policies belong to host.
 // artifact.VerifySignature owns isolated GPG verification; each caller
 // rejects bad signatures and insufficient trusted signers.
@@ -24,19 +24,19 @@ import (
 // into an ephemeral keyring, and confirm the fingerprint with
 // gpg --with-colons --list-keys.
 
-// vpnReleaseFP is the primary fingerprint of the vpn
+// SigningFingerprint is the primary fingerprint of the vpn
 // release signing key.
 // Source: generated locally; public key hosted at
 // keys.openpgp.org. Cross-check: docs/verifying.md publishes the
 // same fingerprint used for manual release verification.
-const vpnReleaseFP = "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
+const SigningFingerprint = "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
 
-// ── Self-update verification ────────────────────────────
+// ── Release verification ────────────────────────────
 
 // VerifySignature requires the pinned VPN signer and rejects bad signatures.
 // The caller owns the private workspace containing the downloaded manifest.
 func VerifySignature(workDir string) error {
-	logger.Verify("--- Self-update signature verification ---")
+	logger.Verify("--- VPN release signature verification ---")
 
 	sumsFile := filepath.Join(workDir, "SHA256SUMS")
 	sigFile := filepath.Join(workDir, "SHA256SUMS.asc")
@@ -56,7 +56,7 @@ func VerifySignature(workDir string) error {
 	keyFile := filepath.Join(workDir, "release-key.asc")
 	keyURL := fmt.Sprintf(
 		"https://keys.openpgp.org/vks/v1/by-fingerprint/%s",
-		vpnReleaseFP)
+		SigningFingerprint)
 	if err := system.DownloadRequireTor(
 		keyURL, keyFile); err != nil {
 		logger.Verify(
@@ -65,7 +65,7 @@ func VerifySignature(workDir string) error {
 			"download release signing key: %w", err)
 	}
 
-	pinnedFPs := map[string]bool{vpnReleaseFP: true}
+	pinnedFPs := map[string]bool{SigningFingerprint: true}
 
 	distinct, hasBadSig, err := artifact.VerifySignature(
 		[]string{keyFile}, sigFile, sumsFile, pinnedFPs)
@@ -87,7 +87,7 @@ func VerifySignature(workDir string) error {
 			"signature not from the release signing key")
 	}
 
-	logger.Verify("OK self-update: signature valid " +
+	logger.Verify("OK release: signature valid " +
 		"(release key, pinned fingerprint)")
 	return nil
 }

@@ -67,6 +67,11 @@ func TestVerbMenuIsExactlyTheRuledSet(t *testing.T) {
 		helper.VerbRebuildSSHConfig,
 		helper.VerbPackageUpdate,
 		helper.VerbSelfUpdate,
+		helper.VerbPrepareUpdate,
+		helper.VerbStartUpdate,
+		helper.VerbUpdateStatus,
+		helper.VerbResumeUpdate,
+		helper.VerbCancelUpdate,
 		helper.VerbUpgradeP2PToHybrid,
 		helper.VerbSyncthingInstall,
 		// Live-read verbs have no mutation. Account detail accepts an identity. The verification
@@ -325,7 +330,7 @@ func TestDirSizeValidation(t *testing.T) {
 }
 
 // The self-update gate refuses before any network or disk
-// activity: bad target shapes, cross-major targets, and a
+// activity: older/equal versions, bad shapes, cross-major targets, and a
 // non-release running version all stop at the boundary.
 func TestSelfUpdateGate(t *testing.T) {
 	previous := updateSelf
@@ -337,6 +342,7 @@ func TestSelfUpdateGate(t *testing.T) {
 	}
 	ctx := &verbCtx{version: "0.7.0"}
 	for _, target := range []string{
+		"0.6.3", "0.7.0",
 		"", "dev", "v0.7.1", "0.7", "1.0.0", "2.3.4",
 		"0.7.1-rc1", "0.7.1;curl evil",
 	} {
@@ -358,104 +364,78 @@ func TestSelfUpdateGate(t *testing.T) {
 	}
 }
 
-func TestSelfUpdateRetiresHelperOnlyAfterSuccess(t *testing.T) {
+func TestLegacySelfUpdateCannotBypassManagedRelease(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("helper peer credentials require Linux")
 	}
 	previous := updateSelf
 	t.Cleanup(func() { updateSelf = previous })
-	failure := errors.New("binary installation failed")
-	for _, tc := range []struct {
-		name  string
-		err   error
-		steps []int
-	}{
-		{"failure", failure, []int{0, 1, 2}},
-		{"success", nil, []int{0, 1, 2, 3}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			// Real IPC and peer credentials without a listening socket or host path.
-			fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			clientFile := os.NewFile(uintptr(fds[0]), "update-client")
-			serverFile := os.NewFile(uintptr(fds[1]), "update-server")
-			defer clientFile.Close()
-			defer serverFile.Close()
-			client, err := net.FileConn(clientFile)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer client.Close()
-			clientFile.Close()
-			if err := client.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
-				t.Fatal(err)
-			}
-			serverConn, err := net.FileConn(serverFile)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer serverConn.Close()
-			serverFile.Close()
-			conn := serverConn.(*net.UnixConn)
+	// Real IPC and peer credentials without a listening socket or host path.
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientFile := os.NewFile(uintptr(fds[0]), "update-client")
+	serverFile := os.NewFile(uintptr(fds[1]), "update-server")
+	defer clientFile.Close()
+	defer serverFile.Close()
+	client, err := net.FileConn(clientFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	clientFile.Close()
+	if err := client.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	serverConn, err := net.FileConn(serverFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverConn.Close()
+	serverFile.Close()
+	conn := serverConn.(*net.UnixConn)
 
-			calls, target := 0, ""
-			updateSelf = func(version string, progress func(int)) error {
-				calls++
-				target = version
-				for _, index := range tc.steps {
-					progress(index)
-				}
-				return tc.err
-			}
-			srv := &server{version: "0.7.0", allowed: map[uint32]bool{uint32(os.Getuid()): true}}
-			done := make(chan struct{})
-			var retire bool
-			go func() {
-				defer close(done)
-				retire = srv.handleConn(conn)
-			}()
-			defer func() {
-				client.Close()
-				conn.Close()
-				select {
-				case <-done:
-				case <-time.After(5 * time.Second):
-					t.Error("helper connection did not finish")
-				}
-			}()
-			request := helper.Request{Verb: helper.VerbSelfUpdate, Params: raw(t, helper.SelfUpdateParams{Version: "0.7.1"})}
-			if err := json.NewEncoder(client).Encode(request); err != nil {
-				t.Fatal(err)
-			}
-			decoder := json.NewDecoder(client)
-			for _, index := range tc.steps {
-				var event helper.Event
-				if err := decoder.Decode(&event); err != nil || event.Event != "step" || event.Index != index {
-					t.Fatalf("progress %d: event=%+v error=%v", index, event, err)
-				}
-			}
-			wantError := ""
-			if tc.err != nil {
-				wantError = tc.err.Error()
-			}
-			var end helper.Event
-			if err := decoder.Decode(&end); err != nil || end.Event != "end" || end.OK != (tc.err == nil) || end.Error != wantError {
-				t.Fatalf("terminal outcome: event=%+v error=%v", end, err)
-			}
-			if err := decoder.Decode(&helper.Event{}); !errors.Is(err, io.EOF) {
-				t.Fatalf("expected connection close after one terminal event, got %v", err)
-			}
-			select {
-			case <-done:
-			case <-time.After(5 * time.Second):
-				t.Fatal("helper connection did not return its retirement decision")
-			}
-			if calls != 1 || target != "0.7.1" || retire != (tc.err == nil) {
-				t.Fatalf("wrong dispatch or retirement: calls=%d target=%q retire=%v", calls, target, retire)
-			}
-		})
+	calls := 0
+	updateSelf = func(string, func(int)) error {
+		calls++
+		return nil
+	}
+	srv := &server{version: "0.7.0", allowed: map[uint32]bool{uint32(os.Getuid()): true}}
+	done := make(chan struct{})
+	var retire bool
+	go func() {
+		defer close(done)
+		retire = srv.handleConn(conn)
+	}()
+	defer func() {
+		client.Close()
+		conn.Close()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("helper connection did not finish")
+		}
+	}()
+	request := helper.Request{Verb: helper.VerbSelfUpdate, Params: raw(t, helper.SelfUpdateParams{Version: "0.7.1"})}
+	if err := json.NewEncoder(client).Encode(request); err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(client)
+	var end helper.Event
+	if err := decoder.Decode(&end); err != nil || end.Event != "end" || end.OK || !strings.Contains(end.Error, "Node Updates") {
+		t.Fatalf("terminal outcome: event=%+v error=%v", end, err)
+	}
+	if err := decoder.Decode(&helper.Event{}); !errors.Is(err, io.EOF) {
+		t.Fatalf("expected connection close after one terminal event, got %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("helper connection did not return its retirement decision")
+	}
+	if calls != 0 || retire {
+		t.Fatalf("wrong dispatch or retirement: calls=%d retire=%v", calls, retire)
 	}
 }
 

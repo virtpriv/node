@@ -11,6 +11,13 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
+// Syncthing initializes home paths even for --version. runuser supplies HOME
+// from the service account when the root helper has no login environment.
+func syncthingVersion() (string, error) {
+	return system.RunRootOutputWithTimeout(10*time.Second,
+		"runuser", "-u", syncthingUser, "--", paths.SyncthingBinary, "--version")
+}
+
 // SyncthingDeviceID reads the certificate identity with the pinned daemon's
 // read-only command. Configuration device order does not identify the local node.
 // runuser supplies the service HOME required by Syncthing package initialization.

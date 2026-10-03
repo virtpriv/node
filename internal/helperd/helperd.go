@@ -55,6 +55,7 @@ import (
 
 	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/update"
 )
 
 const (
@@ -77,8 +78,8 @@ const (
 )
 
 // Serve is the `vpn helperd` entry point. version is the
-// running binary's version (the self-update verb's same-major
-// gate compares against it).
+// running binary's version. Self-update independently checks newer ordering
+// and major-version compatibility against it.
 func Serve(version string) error {
 	if os.Geteuid() != 0 {
 		return errors.New(
@@ -294,6 +295,16 @@ func (s *server) handleConn(c *net.UnixConn) (exitAfter bool) {
 	start := time.Now()
 
 	ctx := &verbCtx{conn: c, version: s.version}
+	if err := update.InstalledVersion(s.version); err != nil {
+		writeEnd(c, &helper.Event{Event: "end", Error: err.Error()})
+		return true
+	}
+	unlock, err := guardHelperOperation(req.Verb)
+	if err != nil {
+		writeEnd(c, &helper.Event{Event: "end", Error: err.Error()})
+		return false
+	}
+	defer unlock()
 	result, err := def.handler(ctx, req.Params)
 	ms := time.Since(start).Milliseconds()
 	if err != nil {

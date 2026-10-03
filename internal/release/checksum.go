@@ -13,7 +13,7 @@ import (
 
 // ArchiveName identifies the fixed amd64 VPN artifact for a release version.
 func ArchiveName(version string) (string, error) {
-	if !releaseVersion.MatchString(version) {
+	if !ValidVersion(version) {
 		return "", fmt.Errorf("%q is not a valid release version", version)
 	}
 	return "vpn-" + version + "-amd64.tar.gz", nil

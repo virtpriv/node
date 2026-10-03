@@ -73,6 +73,17 @@ func GetBlockchainIdentity(rpcPort int) (BlockchainIdentity, error) {
 	}, nil
 }
 
+// GetSubversion identifies the running daemon through its authenticated RPC.
+func GetSubversion(rpcPort int) (string, error) {
+	var reply struct {
+		Subversion string `json:"subversion"`
+	}
+	if err := rpcCall(rpcPort, "getnetworkinfo", nil, &reply); err != nil {
+		return "", err
+	}
+	return reply.Subversion, nil
+}
+
 // rpcCall performs one JSON-RPC call against loopback. The
 // credential never touches argv or the environment: it is read
 // from the board and sent as HTTP basic auth.

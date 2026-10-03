@@ -4,8 +4,14 @@ Verify signatures before installation.
 
 These steps apply to the releases published so far, which were made
 under the project's previous name and ship a binary called rlvpn. They
-carry forward unchanged to v0.7.0, which will be the first release
-under the new name.
+use `rlvpn-VERSION-amd64.tar.gz`. Starting with v0.7.0, the archive is
+`vpn-VERSION-amd64.tar.gz` and contains `vpn`. The signature and checksum
+filenames stay the same. The example below is for the historical v0.6.3 release.
+
+Managed release archives also contain `update.json`. Its integrity is covered
+by the same signed archive checksum. The TUI verifies that plan before review
+and checks each selected component against its pinned upstream signature and
+the plan's exact archive hash. See [managed updates](updating.md).
 
 ### Import the release signing key
 

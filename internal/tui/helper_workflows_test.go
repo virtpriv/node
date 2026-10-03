@@ -22,8 +22,6 @@ func progressFixture(t *testing.T, kind app.HelperWorkflowKind, ctx *ScreenConte
 		op = w.InstallSyncthing()
 	case app.P2PUpgrade:
 		op = w.UpgradeP2P(reviewedP2PRequest(t), nil)
-	case app.SelfUpdate:
-		op = w.UpdateSelf("0.7.1")
 	}
 	s := NewInstallProgressScreen(ctx, op, nil, nil)
 	s.Init()
@@ -32,12 +30,12 @@ func progressFixture(t *testing.T, kind app.HelperWorkflowKind, ctx *ScreenConte
 
 func TestHelperProgressRoutesToOwnerAndRejectsReplay(t *testing.T) {
 	ctx := &ScreenContext{Cfg: config.Default()}
-	progress := progressFixture(t, app.SelfUpdate, ctx)
-	owner := &SelfUpdateScreen{ctx: ctx, step: selfUpdateProgress, progress: progress}
+	progress := progressFixture(t, app.SyncthingInstall, ctx)
+	owner := &SyncthingInstallScreen{ctx: ctx, step: syncInstallProgress, progress: progress}
 	idle := &P2PUpgradeScreen{ctx: ctx, step: p2pConfirm}
 	m := Model{nav: NewNavSidebar(), screenCtx: ctx, tabs: []openTab{
 		{Kind: tabP2PUpgrade, Section: secSystem, Screen: idle},
-		{Kind: tabSelfUpdate, Section: secSystem, Screen: owner},
+		{Kind: tabSyncthingInstall, Section: secAddons, Screen: owner},
 	}}
 	m.nav.ActiveItem = secWallet
 	completed := 0
@@ -69,7 +67,7 @@ func TestHelperProgressRoutesToOwnerAndRejectsReplay(t *testing.T) {
 	if !progress.done || completed != 1 || idle.progress != nil {
 		t.Fatal("completion ownership or replay guard failed")
 	}
-	orphan := progressFixture(t, app.SelfUpdate, ctx)
+	orphan := progressFixture(t, app.SyncthingInstall, ctx)
 	_, cmd := m.Update(helperProgressMsg{operation: orphan.operation, event: app.HelperProgress{Index: 0}})
 	if cmd != nil {
 		t.Fatal("removed operation reached another screen")
@@ -102,8 +100,8 @@ func TestHelperActiveTabAndDelayedClose(t *testing.T) {
 	// The user navigates elsewhere before the Done command is delivered.
 	m.nav.ActiveItem = secSystem
 	m.activeTab = 1
-	other := NewSelfUpdateScreen(ctx)
-	m.tabs = append(m.tabs, openTab{Kind: tabSelfUpdate, Section: secSystem, Screen: other})
+	other := NewNodeUpdateScreen(ctx)
+	m.tabs = append(m.tabs, openTab{Kind: tabNodeUpdates, Section: secSystem, Screen: other})
 	updated, _ = m.Update(closeCmd())
 	m = updated.(Model)
 	if len(m.tabs) != 2 || m.tabs[1].Screen != other {

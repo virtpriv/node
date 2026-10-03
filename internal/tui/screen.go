@@ -49,6 +49,7 @@ type Screen interface {
 // read the current observation when rendering; no screen owns a second copy.
 
 type ScreenContext struct {
+	NodeUpdates         nodeUpdates
 	ChannelHistory      *channelHistoryContext
 	PaymentHistory      *paymentHistoryContext
 	OnChain             *OnChainContext
