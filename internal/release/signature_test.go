@@ -99,11 +99,11 @@ func copyFile(t *testing.T, from, to string) {
 // Installed nodes read this file, so a wrong file would silently take away
 // one of their two sources.
 func TestRepositoryKeyFileHoldsThePinnedKey(t *testing.T) {
-	out, err := exec.Command("gpg", "--batch", "--show-keys", "--with-colons", filepath.Join("..", "..", "keys", "release-key.asc")).Output()
+	out, err := exec.Command("gpg", "--batch", "--show-keys", "--with-colons", filepath.Join("..", "..", "keys", "ripsline.asc")).Output()
 	if err != nil {
-		t.Fatalf("read keys/release-key.asc with gpg: %v", err)
+		t.Fatalf("read keys/ripsline.asc with gpg: %v", err)
 	}
 	if !strings.Contains(string(out), "\nfpr:::::::::"+SigningFingerprint+":") {
-		t.Fatalf("keys/release-key.asc does not hold the pinned key %s", SigningFingerprint)
+		t.Fatalf("keys/ripsline.asc does not hold the pinned key %s", SigningFingerprint)
 	}
 }

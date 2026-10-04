@@ -51,7 +51,7 @@ key is not certified with a trusted signature is normal for a key you imported
 yourself.
 
 The same public key is kept in this repository as
-[`keys/release-key.asc`](../keys/release-key.asc). It can be imported with
+[`keys/ripsline.asc`](../keys/ripsline.asc). It can be imported with
 `gpg --import` when the keyserver cannot be reached. Check that the imported
 key has the fingerprint above.
 

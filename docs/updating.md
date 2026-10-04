@@ -20,7 +20,7 @@ date the signature carries. An expired key still counts. Bitcoin Core still
 needs two of its five pinned builders after a revoked one is left out.
 
 The node reads the VPN release key from two places on every review: the file
-`keys/release-key.asc` in this repository and keys.openpgp.org. It uses both
+`keys/ripsline.asc` in this repository and keys.openpgp.org. It uses both
 together, so a revocation or a new signing subkey published in either one is
 seen, and only material signed by the pinned key has any effect. If the
 keyserver cannot be reached, the review continues with the repository file and

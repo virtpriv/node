@@ -28,8 +28,9 @@ import (
 // SigningFingerprint is the primary fingerprint of the vpn
 // release signing key.
 // Source: generated locally; public key hosted at
-// keys.openpgp.org. Cross-check: docs/verifying.md publishes the
-// same fingerprint used for manual release verification.
+// keys.openpgp.org and kept in this repository as keys/ripsline.asc.
+// Cross-check: docs/verifying.md publishes the same fingerprint used
+// for manual release verification.
 const SigningFingerprint = "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
 
 // ── Release verification ────────────────────────────
@@ -38,7 +39,7 @@ const SigningFingerprint = "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
 // addresses are fixed in every installed helper, so a later release can only
 // replace one of them while the other still works.
 const (
-	keyFileURL    = "https://raw.githubusercontent.com/virtualprivatenode/vpn/main/keys/release-key.asc"
+	keyFileURL    = "https://raw.githubusercontent.com/virtualprivatenode/vpn/main/keys/ripsline.asc"
 	keyWebsiteURL = "https://keys.openpgp.org/vks/v1/by-fingerprint/"
 )
 
