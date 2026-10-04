@@ -104,11 +104,16 @@ func VerifyLND(version, workDir string) error {
 
 	pinnedFPs := map[string]bool{lndSigner.fingerprint: true}
 
-	distinct, hasBadSig, err := artifact.VerifySignature(
+	result, err := artifact.VerifySignature(
 		[]string{keyFile}, sigFile, manifestFile, pinnedFPs)
 	if err != nil {
 		return fmt.Errorf(
 			"LND signature verification failed: %w", err)
+	}
+	distinct, hasBadSig := result.Signers, result.Bad
+	if !hasBadSig && distinct < 1 && len(result.Revoked) > 0 {
+		logger.Verify("FAIL: LND release signing key is revoked")
+		return fmt.Errorf("LND's release signing key has been revoked; a newer VPN release is needed")
 	}
 
 	if hasBadSig {

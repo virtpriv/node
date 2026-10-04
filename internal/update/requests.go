@@ -144,7 +144,8 @@ func Prepare(current, version string) (protocol.Review, error) {
 			return none, err
 		}
 	}
-	if err := release.VerifySignature(work); err != nil {
+	keyCheck, err := release.VerifySignature(work)
+	if err != nil {
 		return none, err
 	}
 	if err := release.VerifyChecksum(version, work); err != nil {
@@ -180,7 +181,7 @@ func Prepare(current, version string) (protocol.Review, error) {
 	if err != nil {
 		return none, err
 	}
-	p := prepared{Review: protocol.Review{Digest: id, Manifest: m, Source: source, Network: cfg.Network}, WorkerHash: workerHash, PlanHash: planHash, ConfigHash: configHash, Previous: failed}
+	p := prepared{Review: protocol.Review{Digest: id, Manifest: m, Source: source, Network: cfg.Network, KeyServerUnreachable: keyCheck.WebsiteUnreachable}, WorkerHash: workerHash, PlanHash: planHash, ConfigHash: configHash, Previous: failed}
 	p.Review.Token, err = approvalToken(p)
 	if err != nil {
 		return none, err
@@ -352,6 +353,9 @@ func acceptUpdate(root, token string, ops admissionOps) error {
 		return err
 	}
 	j := &job{Schema: 1, Review: p.Review, WorkerHash: p.WorkerHash, PlanHash: p.PlanHash, ConfigHash: configHash, Phase: "accepted", Step: "Update accepted", Started: map[protocol.Component]bool{}, MayHaveRun: map[protocol.Component]bool{}, Completed: map[string]bool{}, BinaryHashes: map[string]string{}, Affected: p.Review.Manifest.Affected(source)}
+	// The job record keeps the same fields as before: every later worker has
+	// to read it, and the notice has served its purpose once approved.
+	j.Review.KeyServerUnreachable = false
 	j.Previous = failed
 	if failed != "" {
 		// A repair keeps the failed update's cancellation boundary. Its worker

@@ -352,6 +352,10 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 		for _, step := range m.HostSteps {
 			p.field("Host change: ", step)
 		}
+		if r.KeyServerUnreachable {
+			p.blank()
+			p.line(theme.Warning.Render("Key server not reached. A new key revocation would be missed."))
+		}
 		p.blank()
 		p.line("Affected services will restart. Downloads use Tor.")
 		p.line("Databases are preserved. A failed update may need repair.")

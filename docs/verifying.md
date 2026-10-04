@@ -34,6 +34,27 @@ wget -q "https://github.com/virtualprivatenode/vpn/releases/download/v${VERSION}
 gpg --verify SHA256SUMS.asc SHA256SUMS
 ```
 
+A good result names the project key as the primary key:
+
+```text
+gpg: Good signature from "..."
+Primary key fingerprint: AFA0 EBAC DC9A 4C4A A7B0  154A C97C E10F 170B A5FE
+```
+
+The line `using ... key` may show a different, shorter-lived signing subkey.
+That is expected; the primary key fingerprint is the one to compare.
+
+Do not install the release if gpg prints
+`WARNING: This key has been revoked by its owner!`. gpg still reports
+"Good signature" in that case, so read the whole output. A warning that the
+key is not certified with a trusted signature is normal for a key you imported
+yourself.
+
+The same public key is kept in this repository as
+[`keys/release-key.asc`](../keys/release-key.asc). It can be imported with
+`gpg --import` when the keyserver cannot be reached. Check that the imported
+key has the fingerprint above.
+
 ### Verify the checksum
 
 ```bash

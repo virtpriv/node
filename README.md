@@ -448,7 +448,12 @@ All software is verified with GPG signatures and SHA256 checksums:
   and the built-in updater performs the same key and checksum
   verification for every later release. Hosting the key off GitHub
   means compromising one source does not compromise both the
-  binary and the key.
+  binary and the key. The updater also reads a copy of the public key
+  kept in this repository, so an outage of the keyserver does not stop
+  updates; it trusts only the pinned fingerprint, never the copy itself.
+
+A signature from a key that its owner has revoked is refused for every
+download above.
 
 The release signing key fingerprint is
 `AFA0 EBAC DC9A 4C4A A7B0  154A C97C E10F 170B A5FE`. The same key
