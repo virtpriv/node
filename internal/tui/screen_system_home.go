@@ -10,11 +10,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/bitcoin"
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
-	"github.com/virtualprivatenode/vpn/internal/release"
-	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/bitcoin"
+	"github.com/virtpriv/node/internal/lndrpc"
+	"github.com/virtpriv/node/internal/release"
+	"github.com/virtpriv/node/internal/servicecontrol"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 // ── SystemHomeScreen ──────────────────────────────────

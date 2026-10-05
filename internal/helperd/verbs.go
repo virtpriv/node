@@ -10,17 +10,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/accountaccess"
-	"github.com/virtualprivatenode/vpn/internal/autounlock"
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/host"
-	"github.com/virtualprivatenode/vpn/internal/p2p"
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/release"
-	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
-	"github.com/virtualprivatenode/vpn/internal/system"
-	"github.com/virtualprivatenode/vpn/internal/update"
+	"github.com/virtpriv/node/internal/accountaccess"
+	"github.com/virtpriv/node/internal/autounlock"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/host"
+	"github.com/virtpriv/node/internal/p2p"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/release"
+	"github.com/virtpriv/node/internal/servicecontrol"
+	"github.com/virtpriv/node/internal/system"
+	"github.com/virtpriv/node/internal/update"
 )
 
 // ── The verb menu ────────────────────────────────────────

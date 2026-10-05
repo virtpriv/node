@@ -1,7 +1,7 @@
 package installer
 
 import (
-	"github.com/virtualprivatenode/vpn/internal/loginpassword"
+	"github.com/virtpriv/node/internal/loginpassword"
 	"strings"
 	"testing"
 )

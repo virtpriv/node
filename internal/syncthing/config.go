@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"path/filepath"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // ConfirmPrivacy requires explicit fields; missing values are not evidence of

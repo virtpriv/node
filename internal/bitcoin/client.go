@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // RPCUser is the operator RPC identity shared by the client, host provisioning

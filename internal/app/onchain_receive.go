@@ -6,8 +6,8 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/lndrpc"
 )
 
 type OnChainReceiveClient interface {

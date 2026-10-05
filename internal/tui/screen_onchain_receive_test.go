@@ -8,9 +8,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/lndrpc"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 type receiveAddressClient struct {

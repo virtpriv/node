@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/virtualprivatenode/vpn/internal/bitcoin"
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/bitcoin"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // SetupNodeCLI installs the operator's unprivileged recovery commands.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/loginpassword"
+	"github.com/virtpriv/node/internal/loginpassword"
 )
 
 func TestOwnerSudoFollowsConfirmedPasswordAndDeliveryMarker(t *testing.T) {

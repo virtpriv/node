@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtpriv/node/internal/lndrpc"
 )
 
 type TransactionLabelClient interface {

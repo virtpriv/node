@@ -10,8 +10,8 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
+	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/servicecontrol"
 )
 
 func TestServiceControlBoundAndClose(t *testing.T) {

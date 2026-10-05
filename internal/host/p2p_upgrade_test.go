@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/p2p"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/p2p"
 )
 
 func TestHybridTransitionRefusalAndCompletionBoundary(t *testing.T) {

@@ -12,13 +12,13 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/host"
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/release"
-	"github.com/virtualprivatenode/vpn/internal/system"
-	"github.com/virtualprivatenode/vpn/internal/update/files"
-	"github.com/virtualprivatenode/vpn/internal/update/protocol"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/host"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/release"
+	"github.com/virtpriv/node/internal/system"
+	"github.com/virtpriv/node/internal/update/files"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 type prepared struct {
@@ -138,7 +138,7 @@ func Prepare(current, version string) (protocol.Review, error) {
 	if err != nil {
 		return none, err
 	}
-	base := "https://github.com/virtualprivatenode/vpn/releases/download/v" + version + "/"
+	base := "https://github.com/virtpriv/node/releases/download/v" + version + "/"
 	for _, name := range []string{archive, "SHA256SUMS", "SHA256SUMS.asc"} {
 		if err := system.DownloadRequireTor(base+name, filepath.Join(work, name)); err != nil {
 			return none, err

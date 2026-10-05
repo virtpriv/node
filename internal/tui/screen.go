@@ -6,12 +6,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/autounlock"
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
-	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
-	"github.com/virtualprivatenode/vpn/internal/syncthing"
+	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/autounlock"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/lndrpc"
+	"github.com/virtpriv/node/internal/servicecontrol"
+	"github.com/virtpriv/node/internal/syncthing"
 )
 
 // ── Screen interface ────────────────────────────────────

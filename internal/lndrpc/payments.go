@@ -9,7 +9,7 @@ import (
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
 
-	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtpriv/node/internal/logger"
 )
 
 // SendPaymentResult holds the outcome of a payment attempt.

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/loginpassword"
+	"github.com/virtpriv/node/internal/loginpassword"
 )
 
 const passwordFixture = "test password: with spaces"

@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/p2p"
-	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/p2p"
+	"github.com/virtpriv/node/internal/servicecontrol"
+	"github.com/virtpriv/node/internal/system"
 )
 
 type p2pUpgradeOps struct {

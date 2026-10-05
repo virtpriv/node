@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/update"
-	"github.com/virtualprivatenode/vpn/internal/update/files"
+	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/update"
+	"github.com/virtpriv/node/internal/update/files"
 )
 
 func verbPrepareUpdate(ctx *verbCtx, raw json.RawMessage) (any, error) {

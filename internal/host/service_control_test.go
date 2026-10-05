@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
+	"github.com/virtpriv/node/internal/servicecontrol"
 )
 
 // The child stands in for systemctl and cannot operate on real services.

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/lndrpc"
 )
 
 type WalletObservation struct {

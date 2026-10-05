@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/bitcoin"
+	"github.com/virtpriv/node/internal/bitcoin"
 )
 
 // The rpcauth line must be exactly what bitcoind's reference

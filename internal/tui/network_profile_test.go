@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtpriv/node/internal/config"
 )
 
 func TestLightningInvoicePrefilterUsesInstalledProfile(t *testing.T) {

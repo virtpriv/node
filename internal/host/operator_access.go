@@ -6,8 +6,8 @@ import (
 	"os"
 	"os/user"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/system"
 )
 
 // CreateOperatorAccount creates the owner during an admitted base installation.

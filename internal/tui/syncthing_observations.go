@@ -4,7 +4,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/virtualprivatenode/vpn/internal/syncthing"
+	"github.com/virtpriv/node/internal/syncthing"
 )
 
 type refreshSyncthingMsg struct{ owner *ScreenContext }

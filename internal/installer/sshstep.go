@@ -1,8 +1,8 @@
 package installer
 
 import (
-	"github.com/virtualprivatenode/vpn/internal/host"
-	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtpriv/node/internal/host"
+	"github.com/virtpriv/node/internal/logger"
 )
 
 // The owner has a password and usable sudo before root SSH is disabled.

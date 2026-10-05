@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtpriv/node/internal/config"
 )
 
 func withInitialFirewallTestDeps(t *testing.T) {

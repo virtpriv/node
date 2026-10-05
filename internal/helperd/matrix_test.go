@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // Refresh selection is a behavioral contract: wallet creation needs only the

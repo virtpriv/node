@@ -1,4 +1,4 @@
-module github.com/virtualprivatenode/vpn
+module github.com/virtpriv/node
 
 go 1.26.8
 

@@ -11,7 +11,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtpriv/node/internal/logger"
 )
 
 // Result is what one signature file proved.

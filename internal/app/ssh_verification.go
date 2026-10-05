@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/system"
 )
 
 // SSHVerification is one completed first-login observation. Address is only a

@@ -7,7 +7,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/autounlock"
+	"github.com/virtpriv/node/internal/autounlock"
 )
 
 func TestAutoUnlockObservations(t *testing.T) {

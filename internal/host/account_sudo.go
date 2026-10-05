@@ -3,7 +3,7 @@ package host
 import (
 	"strings"
 
-	"github.com/virtualprivatenode/vpn/internal/accountaccess"
+	"github.com/virtpriv/node/internal/accountaccess"
 )
 
 // Summarize only simple, uniform grants from sudo's C-locale long listing.

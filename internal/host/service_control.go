@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/servicecontrol"
+	"github.com/virtpriv/node/internal/system"
 )
 
 // ControlService completes independently of the requesting terminal. The bound

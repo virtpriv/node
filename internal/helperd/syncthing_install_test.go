@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
+	"github.com/virtpriv/node/internal/helper"
 )
 
 func TestSyncthingInstallRejectsParametersBeforeHostDispatch(t *testing.T) {

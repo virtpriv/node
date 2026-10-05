@@ -16,9 +16,9 @@ For non-security bugs, open a GitHub issue with steps to reproduce, expected vs 
 
 ### Good first issues
 
-Issues tagged [`good first issue`](https://github.com/virtualprivatenode/vpn/labels/good%20first%20issue) are scoped to be approachable without deep knowledge of the codebase. Typical examples: small UI tweaks, documentation improvements, accessibility polish.
+Issues tagged [`good first issue`](https://github.com/virtpriv/node/labels/good%20first%20issue) are scoped to be approachable without deep knowledge of the codebase. Typical examples: small UI tweaks, documentation improvements, accessibility polish.
 
-Issues tagged [`help wanted`](https://github.com/virtualprivatenode/vpn/labels/help%20wanted) are good for contributors who want to tackle something meatier.
+Issues tagged [`help wanted`](https://github.com/virtpriv/node/labels/help%20wanted) are good for contributors who want to tackle something meatier.
 
 ### Translations
 

@@ -8,8 +8,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 // ChannelDetailScreen retains the selected funding outpoint and owns its close

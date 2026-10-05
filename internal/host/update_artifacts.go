@@ -9,8 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/virtualprivatenode/vpn/internal/update/files"
-	"github.com/virtualprivatenode/vpn/internal/update/protocol"
+	"github.com/virtpriv/node/internal/update/files"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 func UpdateArchive(c protocol.Component, version string) (string, map[string]string, error) {

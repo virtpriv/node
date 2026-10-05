@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"slices"
 
-	"github.com/virtualprivatenode/vpn/internal/release"
+	"github.com/virtpriv/node/internal/release"
 	"golang.org/x/mod/semver"
 )
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtpriv/node/internal/config"
 )
 
 func mustBuildTorConfig(t *testing.T, cfg *config.AppConfig) string {

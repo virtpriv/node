@@ -6,9 +6,9 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/logger"
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/logger"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 // helperProgressMsg identifies one operation and its ordered application event.

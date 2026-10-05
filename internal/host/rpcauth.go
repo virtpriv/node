@@ -12,7 +12,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/virtualprivatenode/vpn/internal/bitcoin"
+	"github.com/virtpriv/node/internal/bitcoin"
 )
 
 type nodeRPCAuthCredentials struct {

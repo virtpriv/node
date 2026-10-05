@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/system"
 )
 
 // SSHObservation is an effective configuration snapshot for initial SSH setup.

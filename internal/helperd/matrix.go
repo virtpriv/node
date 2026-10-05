@@ -5,9 +5,9 @@ package helperd
 import (
 	"fmt"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/host"
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/host"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // ── The freshness matrix ─────────────────────────────────

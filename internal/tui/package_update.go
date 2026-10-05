@@ -4,8 +4,8 @@ import (
 	"errors"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/logger"
 )
 
 type packageAttempt struct {

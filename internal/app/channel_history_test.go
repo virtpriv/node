@@ -7,7 +7,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtpriv/node/internal/lndrpc"
 )
 
 type closedChannelSource func(context.Context) ([]lndrpc.ClosedChannel, error)

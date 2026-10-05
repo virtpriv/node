@@ -7,8 +7,8 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/lndrpc"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 // renderViewport creates a local viewport, sets content,

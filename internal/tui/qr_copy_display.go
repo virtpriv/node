@@ -4,7 +4,7 @@ import (
 	"slices"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/virtualprivatenode/vpn/internal/app"
+	"github.com/virtpriv/node/internal/app"
 )
 
 // Requests capture the exact QR or Copy payload on the event loop. Commands never

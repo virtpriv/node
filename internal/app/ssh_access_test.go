@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/sshkeys"
+	"github.com/virtpriv/node/internal/sshkeys"
 	"golang.org/x/crypto/ssh"
 )
 

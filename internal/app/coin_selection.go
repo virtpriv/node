@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtpriv/node/internal/lndrpc"
 )
 
 // CoinSelection retains outpoint identity even when a refresh removes a coin.

@@ -7,7 +7,7 @@ import (
 	"os"
 	"slices"
 
-	"github.com/virtualprivatenode/vpn/internal/update/protocol"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 // workflowOps marks the actual trust, storage and service boundaries. Tests

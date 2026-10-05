@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/sshkeys"
+	"github.com/virtpriv/node/internal/sshkeys"
 )
 
 // realistic excerpt of sshd -T output: lowercase keywords,

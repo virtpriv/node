@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/lightningnetwork/lnd/lnrpc"
-	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtpriv/node/internal/logger"
 )
 
 const defaultTimeout = 30 * time.Second

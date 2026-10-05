@@ -6,8 +6,8 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/virtualprivatenode/vpn/internal/loginpassword"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/loginpassword"
+	"github.com/virtpriv/node/internal/system"
 )
 
 // InstallFrontend presents one root installation session. Returning requests

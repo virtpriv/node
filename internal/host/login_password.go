@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/loginpassword"
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/loginpassword"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // SetLoginPassword provisions the initial password during root installation.

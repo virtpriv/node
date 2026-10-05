@@ -122,14 +122,14 @@ The project can then be cloned as follows:
 
 ```bash
 git clone --branch "${GIT_TAG}" --depth 1 \
-    https://github.com/virtualprivatenode/vpn.git
+    https://github.com/virtpriv/node.git
 ```
 
 If you already have the repo cloned, fetch all new updates and
 checkout the release:
 
 ```bash
-cd vpn
+cd node
 git fetch --all --tags
 git checkout "${GIT_TAG}"
 ```
@@ -137,7 +137,7 @@ git checkout "${GIT_TAG}"
 Change into the project folder and build:
 
 ```bash
-cd vpn
+cd node
 VERSION="${GIT_TAG#v}"
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath \
@@ -150,14 +150,14 @@ The binary will be placed in the current directory as `rlvpn`.
 ### Verifying the binary is identical
 
 Download the released binary from
-[GitHub Releases](https://github.com/virtualprivatenode/vpn/releases):
+[GitHub Releases](https://github.com/virtpriv/node/releases):
 
 ```bash
 VERSION="0.6.3"
 
-wget -q "https://github.com/virtualprivatenode/vpn/releases/download/v${VERSION}/rlvpn-${VERSION}-amd64.tar.gz"
-wget -q "https://github.com/virtualprivatenode/vpn/releases/download/v${VERSION}/SHA256SUMS"
-wget -q "https://github.com/virtualprivatenode/vpn/releases/download/v${VERSION}/SHA256SUMS.asc"
+wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/rlvpn-${VERSION}-amd64.tar.gz"
+wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/SHA256SUMS"
+wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/SHA256SUMS.asc"
 ```
 
 Import the release signing key from the OpenPGP keyserver:

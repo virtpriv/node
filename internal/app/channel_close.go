@@ -4,7 +4,7 @@ import (
 	"errors"
 	"math"
 
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtpriv/node/internal/lndrpc"
 )
 
 type ChannelCloseClient interface {

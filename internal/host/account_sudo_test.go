@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/accountaccess"
+	"github.com/virtpriv/node/internal/accountaccess"
 )
 
 func TestAccountSudoSummaryDoesNotOverstatePolicy(t *testing.T) {

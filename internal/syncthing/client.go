@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/paths"
 	"golang.org/x/sys/unix"
 )
 

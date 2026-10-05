@@ -9,9 +9,9 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/virtualprivatenode/vpn/internal/accountaccess"
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/sshkeys"
+	"github.com/virtpriv/node/internal/accountaccess"
+	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/sshkeys"
 )
 
 func TestAccountImportRechecksSourceBeforeOwnerWrite(t *testing.T) {

@@ -3,7 +3,7 @@ package host
 import (
 	"fmt"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // LNDServiceUnit renders the LND systemd unit. withUnlock adds

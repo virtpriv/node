@@ -7,8 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
+	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/servicecontrol"
 )
 
 type serviceControlStub struct {

@@ -12,9 +12,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
 
-	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/lndrpc"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 // ── On-chain send screen steps ──────────────────────────

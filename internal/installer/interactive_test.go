@@ -8,8 +8,8 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/virtualprivatenode/vpn/internal/host"
-	"github.com/virtualprivatenode/vpn/internal/loginpassword"
+	"github.com/virtpriv/node/internal/host"
+	"github.com/virtpriv/node/internal/loginpassword"
 )
 
 func interactiveFixture(t *testing.T, steps []InstallStep, complete func() error) (*InstallSession, InteractiveInput) {

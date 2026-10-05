@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // Authentication uses the owner's password. Credential caching remains host

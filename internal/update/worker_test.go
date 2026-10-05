@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/component"
-	"github.com/virtualprivatenode/vpn/internal/update/files"
-	"github.com/virtualprivatenode/vpn/internal/update/protocol"
+	"github.com/virtpriv/node/internal/component"
+	"github.com/virtpriv/node/internal/update/files"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 func TestWorkerRejectsPlanForDifferentBuild(t *testing.T) {

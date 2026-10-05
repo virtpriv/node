@@ -4,9 +4,9 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/syncthing"
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/syncthing"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 // ── SyncthingDeviceScreen ──────────────────────────────

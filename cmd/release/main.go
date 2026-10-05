@@ -13,10 +13,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/virtualprivatenode/vpn/internal/artifact"
-	"github.com/virtualprivatenode/vpn/internal/release"
-	"github.com/virtualprivatenode/vpn/internal/update"
-	"github.com/virtualprivatenode/vpn/internal/update/protocol"
+	"github.com/virtpriv/node/internal/artifact"
+	"github.com/virtpriv/node/internal/release"
+	"github.com/virtpriv/node/internal/update"
+	"github.com/virtpriv/node/internal/update/protocol"
 	"golang.org/x/mod/modfile"
 )
 
@@ -130,7 +130,7 @@ func checkToolchain() error {
 	if err != nil {
 		return err
 	}
-	if m.Go == nil || m.Module == nil || m.Module.Mod.Path != "github.com/virtualprivatenode/vpn" {
+	if m.Go == nil || m.Module == nil || m.Module.Mod.Path != "github.com/virtpriv/node" {
 		return errors.New("run from the VPN repository root with its pinned go.mod")
 	}
 	cmd := goCommand("env", "GOVERSION")

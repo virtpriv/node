@@ -15,10 +15,10 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/virtualprivatenode/vpn/internal/autounlock"
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
+	"github.com/virtpriv/node/internal/autounlock"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/servicecontrol"
 )
 
 // Every verb has a socket deadline. Execution bounds must also be enforced by
