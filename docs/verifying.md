@@ -60,7 +60,3 @@ key has the fingerprint above.
 ```bash
 sha256sum --check --ignore-missing SHA256SUMS
 ```
-
-The bootstrap script performs this verification automatically during
-installation. This section is for users who want to verify manually
-before running the one-liner.
