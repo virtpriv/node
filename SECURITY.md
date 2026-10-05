@@ -36,7 +36,7 @@ The following are in scope for security reports:
 
 - Vulnerabilities that could compromise user funds or private keys
 - Vulnerabilities that could compromise node integrity (remote code execution, privilege escalation, unauthorized access)
-- Weaknesses in the bootstrap script, update mechanism, or reproducible build process
+- Weaknesses in the installer, update mechanism, or reproducible build process
 - Weaknesses in the Tor routing, SSH hardening, or firewall configuration applied by rlvpn
 - Supply chain concerns affecting the release pipeline (signing, checksums, distribution)
 
