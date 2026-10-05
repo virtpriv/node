@@ -294,6 +294,8 @@ while [ "$#" -gt 0 ]; do
         --export) mode=export ;;
         --import) mode=import ;;
         --verify) mode=verify ;;
+        --list-keys) mode=list ;;
+        --with-colons) ;;
         --*) exit 1 ;;
         *) if [ -z "$first" ]; then first="$1"; elif [ -z "$second" ]; then second="$1"; else exit 1; fi ;;
     esac
@@ -313,6 +315,7 @@ case "$mode" in
         test "${RELEASE_TEST_FAILURE:-}" != export
         printf 'public key fixture\n' > "$output"
         ;;
+    list) test -d "$homedir" ;;
     import)
         test -d "$homedir"; test -f "$first"
         echo import >> "$RELEASE_TEST_TRACE"
@@ -323,6 +326,7 @@ case "$mode" in
         echo verify >> "$RELEASE_TEST_TRACE"
         signer="$RELEASE_TEST_SIGNER"
         if [ "${RELEASE_TEST_FAILURE:-}" = untrusted ]; then signer=UNTRUSTED; fi
+        printf '[GNUPG:] NEWSIG\n[GNUPG:] GOODSIG %s fixture\n' "$signer"
         printf '[GNUPG:] VALIDSIG %s 2026-09-28 0 0 4 0 1 10 00 %s\n' "$signer" "$signer"
         if [ "${RELEASE_TEST_FAILURE:-}" = badsig ]; then
             printf '[GNUPG:] BADSIG fixture\n'

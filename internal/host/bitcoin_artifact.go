@@ -141,12 +141,13 @@ func VerifyBitcoinCore(workDir string) error {
 			"could not download any Bitcoin Core signing keys")
 	}
 
-	distinct, hasBadSig, err := artifact.VerifySignature(
+	result, err := artifact.VerifySignature(
 		keyFiles, sigFile, sumsFile, pinnedFPs)
 	if err != nil {
 		return fmt.Errorf(
 			"signature verification failed: %w", err)
 	}
+	distinct, hasBadSig := result.Signers, result.Bad
 
 	if hasBadSig {
 		logger.Verify("FAIL: bad signature detected")
@@ -160,8 +161,13 @@ func VerifyBitcoinCore(workDir string) error {
 
 	if distinct < minValid {
 		logger.Verify(
-			"FAIL: insufficient valid signatures: got %d, need %d",
-			distinct, minValid)
+			"FAIL: insufficient valid signatures: got %d, need %d, revoked signers %d",
+			distinct, minValid, len(result.Revoked))
+		if len(result.Revoked) > 0 {
+			return fmt.Errorf(
+				"insufficient valid signatures: got %d, need %d; %d pinned signer key(s) revoked, a newer VPN release is needed",
+				distinct, minValid, len(result.Revoked))
+		}
 		return fmt.Errorf(
 			"insufficient valid signatures: got %d, need %d",
 			distinct, minValid)

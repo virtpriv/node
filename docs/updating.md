@@ -13,6 +13,22 @@ archives are downloaded through Tor, checked against upstream signing pins, and
 also checked against the exact archive hashes in the VPN plan. Discovery of a
 GitHub release alone never authorizes installation.
 
+Every signature check, for VPN and for each component, follows one rule. A
+pinned signer counts only when gpg reports its signature as good. A signature
+made with a revoked key, or a revoked signing subkey, never counts, whatever
+date the signature carries. An expired key still counts. Bitcoin Core still
+needs two of its five pinned builders after a revoked one is left out.
+
+The node reads the VPN release key from two places on every review: the file
+`keys/ripsline.asc` in this repository and keys.openpgp.org. It uses both
+together, so a revocation or a new signing subkey published in either one is
+seen, and only material signed by the pinned key has any effect. If the
+keyserver cannot be reached, the review continues with the repository file and
+says so on the review screen; if neither can be fetched, the review is refused.
+Both addresses are fixed in installed nodes. Keep the repository file current
+whenever the key changes, and keep at least one of the two addresses working
+until nodes have installed a release that knows a replacement.
+
 Build a managed release from the repository root:
 
 (local PC)
@@ -218,5 +234,5 @@ Review a disposable Debian 13 Signet test slate before preparing a VPS:
    and restored normal service behavior after success.
 
 This worker does not yet implement arbitrary Debian package migrations, automatic
-database restoration, channel recovery, signing-key rotation, or reboot-requiring
-host changes. Those need explicit release operations and their own validation.
+database restoration, channel recovery, replacement of the pinned release key,
+or reboot-requiring host changes. Those need explicit release operations and their own validation.

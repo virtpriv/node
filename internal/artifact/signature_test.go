@@ -243,8 +243,9 @@ func TestVerifySignature(t *testing.T) {
 	// ── Case 1: Good sig from a pinned key → accept ────
 	t.Run("pinned_key_accepts", func(t *testing.T) {
 		pinned := map[string]bool{fpAlpha: true}
-		distinct, bad, err := VerifySignature(
+		result, err := VerifySignature(
 			[]string{keyAlpha}, sigAlpha, dataFile, pinned)
+		distinct, bad := result.Signers, result.Bad
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -259,8 +260,9 @@ func TestVerifySignature(t *testing.T) {
 	// ── Case 2: Tampered file → BADSIG → reject ────────
 	t.Run("tampered_file_badsig", func(t *testing.T) {
 		pinned := map[string]bool{fpAlpha: true}
-		_, bad, err := VerifySignature(
+		result, err := VerifySignature(
 			[]string{keyAlpha}, sigAlpha, tamperedFile, pinned)
+		bad := result.Bad
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -273,8 +275,9 @@ func TestVerifySignature(t *testing.T) {
 	t.Run("unpinned_key_rejects", func(t *testing.T) {
 		// Alpha signed, but only Beta is pinned.
 		pinned := map[string]bool{fpBeta: true}
-		distinct, bad, err := VerifySignature(
+		result, err := VerifySignature(
 			[]string{keyAlpha}, sigAlpha, dataFile, pinned)
+		distinct, bad := result.Signers, result.Bad
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -292,9 +295,10 @@ func TestVerifySignature(t *testing.T) {
 	//     → fails threshold 2
 	t.Run("same_key_twice_counts_once", func(t *testing.T) {
 		pinned := map[string]bool{fpAlpha: true}
-		distinct, bad, err := VerifySignature(
+		result, err := VerifySignature(
 			[]string{keyAlpha},
 			sigAlphaAlpha, dataFile, pinned)
+		distinct, bad := result.Signers, result.Bad
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -314,9 +318,10 @@ func TestVerifySignature(t *testing.T) {
 			fpAlpha: true,
 			fpBeta:  true,
 		}
-		distinct, bad, err := VerifySignature(
+		result, err := VerifySignature(
 			[]string{keyAlpha, keyBeta},
 			sigAlphaBeta, dataFile, pinned)
+		distinct, bad := result.Signers, result.Bad
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -335,9 +340,10 @@ func TestVerifySignature(t *testing.T) {
 		// must match the VALIDSIG last field (primary), not
 		// the first field (subkey).
 		pinned := map[string]bool{fpSubkey: true}
-		distinct, bad, err := VerifySignature(
+		result, err := VerifySignature(
 			[]string{keySubkey},
 			sigSubkey, dataFile, pinned)
+		distinct, bad := result.Signers, result.Bad
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -419,8 +425,9 @@ func TestVerifySignatureClearsign(t *testing.T) {
 	// ── Case 1: Clearsigned by pinned key → accept ─────
 	t.Run("clearsign_pinned_key_accepts", func(t *testing.T) {
 		pinned := map[string]bool{fpAlpha: true}
-		distinct, bad, err := VerifySignature(
+		result, err := VerifySignature(
 			[]string{keyAlpha}, clearAlpha, "", pinned)
+		distinct, bad := result.Signers, result.Bad
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -435,8 +442,9 @@ func TestVerifySignatureClearsign(t *testing.T) {
 	// ── Case 2: Tampered inside the armor → BADSIG ─────
 	t.Run("clearsign_tampered_badsig", func(t *testing.T) {
 		pinned := map[string]bool{fpAlpha: true}
-		distinct, bad, err := VerifySignature(
+		result, err := VerifySignature(
 			[]string{keyAlpha}, tamperedFile, "", pinned)
+		distinct, bad := result.Signers, result.Bad
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -453,8 +461,9 @@ func TestVerifySignatureClearsign(t *testing.T) {
 	t.Run("clearsign_unpinned_key_rejects", func(t *testing.T) {
 		// Alpha clearsigned, but only Beta is pinned.
 		pinned := map[string]bool{fpBeta: true}
-		distinct, bad, err := VerifySignature(
+		result, err := VerifySignature(
 			[]string{keyAlpha}, clearAlpha, "", pinned)
+		distinct, bad := result.Signers, result.Bad
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

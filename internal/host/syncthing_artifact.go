@@ -109,11 +109,16 @@ func verifySyncthingSig(workDir string) error {
 	pinnedFPs := map[string]bool{syncthingSigner.fingerprint: true}
 
 	// dataFile "" → clearsigned, single-argument verify.
-	distinct, hasBadSig, err := artifact.VerifySignature(
+	result, err := artifact.VerifySignature(
 		[]string{keyFile}, ascFile, "", pinnedFPs)
 	if err != nil {
 		return fmt.Errorf(
 			"Syncthing signature verification failed: %w", err)
+	}
+	distinct, hasBadSig := result.Signers, result.Bad
+	if !hasBadSig && distinct < 1 && len(result.Revoked) > 0 {
+		logger.Verify("FAIL: Syncthing release signing key is revoked")
+		return fmt.Errorf("the syncthing release signing key has been revoked; a newer VPN release is needed")
 	}
 
 	if hasBadSig {

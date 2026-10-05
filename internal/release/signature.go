@@ -8,6 +8,7 @@
 package release
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,15 +28,38 @@ import (
 // SigningFingerprint is the primary fingerprint of the vpn
 // release signing key.
 // Source: generated locally; public key hosted at
-// keys.openpgp.org. Cross-check: docs/verifying.md publishes the
-// same fingerprint used for manual release verification.
+// keys.openpgp.org and kept in this repository as keys/ripsline.asc.
+// Cross-check: docs/verifying.md publishes the same fingerprint used
+// for manual release verification.
 const SigningFingerprint = "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
 
 // ── Release verification ────────────────────────────
 
+// The release key is fetched from two places that fail independently. Both
+// addresses are fixed in every installed helper, so a later release can only
+// replace one of them while the other still works.
+const (
+	keyFileURL    = "https://raw.githubusercontent.com/virtualprivatenode/vpn/main/keys/ripsline.asc"
+	keyWebsiteURL = "https://keys.openpgp.org/vks/v1/by-fingerprint/"
+)
+
+var errKeyUnavailable = errors.New("the release signing key could not be downloaded from the repository or the key server")
+
+// KeyCheck reports how the release key was obtained.
+type KeyCheck struct {
+	// WebsiteUnreachable means the key server could not be asked, so a
+	// revocation published only there was not seen.
+	WebsiteUnreachable bool
+}
+
 // VerifySignature requires the pinned VPN signer and rejects bad signatures.
 // The caller owns the private workspace containing the downloaded manifest.
-func VerifySignature(workDir string) error {
+func VerifySignature(workDir string) (KeyCheck, error) {
+	return verifySignature(workDir, SigningFingerprint, system.DownloadRequireTor)
+}
+
+func verifySignature(workDir, fingerprint string, download func(url, dest string) error) (KeyCheck, error) {
+	var check KeyCheck
 	logger.Verify("--- VPN release signature verification ---")
 
 	sumsFile := filepath.Join(workDir, "SHA256SUMS")
@@ -43,51 +67,71 @@ func VerifySignature(workDir string) error {
 
 	if _, err := os.Stat(sumsFile); err != nil {
 		logger.Verify("FAIL: SHA256SUMS not found")
-		return fmt.Errorf("SHA256SUMS not found")
+		return check, fmt.Errorf("SHA256SUMS not found")
 	}
 	if _, err := os.Stat(sigFile); err != nil {
 		logger.Verify("FAIL: SHA256SUMS.asc not found")
-		return fmt.Errorf("SHA256SUMS.asc not found")
+		return check, fmt.Errorf("SHA256SUMS.asc not found")
 	}
 
-	// Download the release signing key fresh into the work
-	// directory. artifact.VerifySignature imports it into an ephemeral
-	// GPG home; the shared keyring is never touched.
-	keyFile := filepath.Join(workDir, "release-key.asc")
-	keyURL := fmt.Sprintf(
-		"https://keys.openpgp.org/vks/v1/by-fingerprint/%s",
-		SigningFingerprint)
-	if err := system.DownloadRequireTor(
-		keyURL, keyFile); err != nil {
-		logger.Verify(
-			"FAIL: download release signing key: %v", err)
-		return fmt.Errorf(
-			"download release signing key: %w", err)
+	// Both copies are always fetched and used together, so a revocation or a
+	// new signing subkey known to either one is seen. Only material signed by
+	// the pinned key has any effect, so neither source has to be trusted.
+	// The repository file is loaded first: see artifact.VerifySignature.
+	var keyFiles []string
+	repositoryKey := filepath.Join(workDir, "release-key-repository.asc")
+	if err := download(keyFileURL, repositoryKey); err != nil {
+		logger.Verify("SKIP release key from the repository: %v", err)
+	} else {
+		keyFiles = append(keyFiles, repositoryKey)
+	}
+	websiteKey := filepath.Join(workDir, "release-key-website.asc")
+	if err := download(keyWebsiteURL+fingerprint, websiteKey); err != nil {
+		logger.Verify("SKIP release key from the key server: %v", err)
+		check.WebsiteUnreachable = true
+	} else {
+		keyFiles = append(keyFiles, websiteKey)
+	}
+	if len(keyFiles) == 0 {
+		logger.Verify("FAIL: release signing key not downloaded")
+		return check, errKeyUnavailable
 	}
 
-	pinnedFPs := map[string]bool{SigningFingerprint: true}
-
-	distinct, hasBadSig, err := artifact.VerifySignature(
-		[]string{keyFile}, sigFile, sumsFile, pinnedFPs)
+	result, err := artifact.VerifySignature(
+		keyFiles, sigFile, sumsFile, map[string]bool{fingerprint: true})
 	if err != nil {
-		return fmt.Errorf(
+		return check, fmt.Errorf(
 			"signature verification failed: %w", err)
 	}
 
-	if hasBadSig {
+	if result.Bad {
 		logger.Verify("FAIL: bad signature detected")
-		return fmt.Errorf(
+		return check, fmt.Errorf(
 			"bad signature detected: verification aborted")
 	}
 
-	if distinct < 1 {
+	// An answer that is not the pinned key is no better than no answer.
+	if !result.Imported[websiteKey] {
+		check.WebsiteUnreachable = true
+	}
+	if !result.Imported[repositoryKey] && !result.Imported[websiteKey] {
+		logger.Verify("FAIL: release signing key not obtained")
+		return check, errKeyUnavailable
+	}
+
+	if result.Signers < 1 {
+		if len(result.Revoked) > 0 {
+			logger.Verify("FAIL: release signing key is revoked")
+			return check, fmt.Errorf(
+				"the key that signed this release has been revoked; do not install it")
+		}
 		logger.Verify(
 			"FAIL: signature not from the release signing key")
-		return fmt.Errorf(
+		return check, fmt.Errorf(
 			"signature not from the release signing key")
 	}
 
 	logger.Verify("OK release: signature valid " +
 		"(release key, pinned fingerprint)")
-	return nil
+	return check, nil
 }

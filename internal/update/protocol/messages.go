@@ -10,6 +10,10 @@ type Review struct {
 	// not admit this node, and its plan names this release to install first.
 	// Such an answer has no token and cannot be approved.
 	UpdateFirst string `json:"update_first,omitempty"`
+	// KeyServerUnreachable tells the operator that the release key was
+	// checked without the key server, so a revocation published only there
+	// was not seen. It belongs to the review and is not kept in a job.
+	KeyServerUnreachable bool `json:"key_server_unreachable,omitempty"`
 }
 
 // Status deliberately excludes local paths, credentials and raw command output.

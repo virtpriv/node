@@ -28,10 +28,13 @@ func Self(version string, progress func(int)) error {
 		return fmt.Errorf("create work dir: %w", err)
 	}
 	if err := runSelfUpdate(version, archive, workDir, selfUpdateOps{
-		download:        system.DownloadRequireTor,
-		verifySignature: release.VerifySignature,
-		verifyChecksum:  release.VerifyChecksum,
-		install:         host.InstallVPNUpdate,
+		download: system.DownloadRequireTor,
+		verifySignature: func(workDir string) error {
+			_, err := release.VerifySignature(workDir)
+			return err
+		},
+		verifyChecksum: release.VerifyChecksum,
+		install:        host.InstallVPNUpdate,
 	}, progress); err != nil {
 		return err
 	}

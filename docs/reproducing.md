@@ -172,6 +172,9 @@ Verify the signature:
 gpg --verify SHA256SUMS.asc SHA256SUMS
 ```
 
+Compare the primary key fingerprint in the output, and stop if gpg warns that
+the key has been revoked. See [Release Verification](verifying.md).
+
 Verify the checksum:
 
 ```bash

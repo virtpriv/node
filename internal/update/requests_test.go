@@ -328,3 +328,33 @@ func TestExplicitRetryCompletesSavedFailureWithoutLosingMigrationHistory(t *test
 		})
 	}
 }
+
+// The notice about an unreachable key server is part of what the operator
+// approved, but the job record is read by every later worker and keeps its
+// existing fields.
+func TestKeyServerNoticeIsApprovedButNotKeptInTheJob(t *testing.T) {
+	j := workflowFixture()
+	root, _ := workerFiles(t, j)
+	review := j.Review
+	review.KeyServerUnreachable = true
+	token := saveReview(t, root, prepared{Review: review, WorkerHash: j.WorkerHash, PlanHash: j.PlanHash, ConfigHash: j.ConfigHash})
+	cfg := config.Default()
+	cfg.Network = j.Review.Network
+	err := acceptUpdate(root, token, admissionOps{
+		observe: func() (nodeObservation, error) {
+			return nodeObservation{source: j.Review.Source, config: cfg, configHash: j.ConfigHash}, nil
+		},
+		identify: func(*job, *config.AppConfig) error { return nil },
+		launcher: func() error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("review with the notice was not accepted: %v", err)
+	}
+	record, err := os.ReadFile(filepath.Join(root, "current.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(record), "key_server_unreachable") {
+		t.Fatal("job record gained a field that later workers do not expect")
+	}
+}

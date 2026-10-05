@@ -203,11 +203,14 @@ func signChecksums(sums, work string) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("export release public key: %w", err)
 	}
-	count, bad, err := artifact.VerifySignature([]string{key}, sig, sums, map[string]bool{release.SigningFingerprint: true})
+	result, err := artifact.VerifySignature([]string{key}, sig, sums, map[string]bool{release.SigningFingerprint: true})
 	if err != nil {
 		return err
 	}
-	if bad || count != 1 {
+	if len(result.Revoked) > 0 {
+		return errors.New("the release signing key, or the subkey that signed, is revoked")
+	}
+	if result.Bad || result.Signers != 1 {
 		return errors.New("checksum signature did not verify with the pinned release signing key")
 	}
 	return nil
