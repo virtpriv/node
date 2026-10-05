@@ -50,6 +50,9 @@ go build ./...
 git diff --check
 ```
 
+The signature tests need the `gpg` program (GnuPG) installed. They fail,
+and do not skip, when it is missing.
+
 Tests whose names begin with `TestRoot` exercise real Linux ownership
 and filesystem behavior. Outside Linux or without effective UID 0, they
 skip with an explicit reason.

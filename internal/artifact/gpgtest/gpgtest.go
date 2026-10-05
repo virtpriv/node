@@ -195,8 +195,19 @@ func (h *Home) SignExpiring(fingerprint, when, life, data, file string) string {
 // Clearsign makes one file holding the data and its signature.
 func (h *Home) Clearsign(fingerprint, data, file string) string {
 	h.t.Helper()
+	return h.ClearsignBy(data, file, fingerprint)
+}
+
+// ClearsignBy makes one file holding the data and one signature from each
+// named key, as a release signed with an old and a new key does.
+func (h *Home) ClearsignBy(data, file string, fingerprints ...string) string {
+	h.t.Helper()
+	args := []string{"--armor"}
+	for _, f := range fingerprints {
+		args = append(args, "--local-user", f+"!")
+	}
 	out := filepath.Join(h.dir, file)
-	h.gpg("--armor", "--local-user", fingerprint+"!", "--clearsign", "--output", out, data)
+	h.gpg(append(args, "--clearsign", "--output", out, data)...)
 	return out
 }
 

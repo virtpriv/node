@@ -165,7 +165,7 @@ func testClearsign(
 
 func TestVerifySignature(t *testing.T) {
 	if !gpgAvailable() {
-		t.Skip("gpg not available — skipping")
+		t.Fatal("these tests need the real gpg program")
 	}
 
 	// Set up a key-generation homedir with two distinct keys
@@ -370,7 +370,7 @@ func TestVerifySignature(t *testing.T) {
 
 func TestVerifySignatureClearsign(t *testing.T) {
 	if !gpgAvailable() {
-		t.Skip("gpg not available — skipping")
+		t.Fatal("these tests need the real gpg program")
 	}
 
 	genHome, err := os.MkdirTemp("", "vpn-test-gen-")
