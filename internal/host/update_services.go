@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/system"
-	"github.com/virtualprivatenode/vpn/internal/update/files"
-	"github.com/virtualprivatenode/vpn/internal/update/protocol"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/system"
+	"github.com/virtpriv/node/internal/update/files"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 func UpdateUnit(c protocol.Component) string {

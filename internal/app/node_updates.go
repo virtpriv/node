@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/update/protocol"
+	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 // NodeUpdates owns observation lifetimes. Canceling a client never cancels

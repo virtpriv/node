@@ -14,12 +14,12 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/virtualprivatenode/vpn/internal/component"
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/logger"
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/syncthing"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/component"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/logger"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/syncthing"
+	"github.com/virtpriv/node/internal/system"
 )
 
 var syncthingResiduePaths = []string{

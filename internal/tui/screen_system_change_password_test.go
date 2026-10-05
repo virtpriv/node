@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 func TestPasswordFailureDistinguishesUnchangedFromUnconfirmed(t *testing.T) {

@@ -10,10 +10,10 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/virtualprivatenode/vpn/internal/installer"
-	"github.com/virtualprivatenode/vpn/internal/loginpassword"
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/installer"
+	"github.com/virtpriv/node/internal/loginpassword"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 type wizardPhase int

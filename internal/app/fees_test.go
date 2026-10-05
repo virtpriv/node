@@ -8,8 +8,8 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/bitcoin"
-	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtpriv/node/internal/bitcoin"
+	"github.com/virtpriv/node/internal/config"
 )
 
 func TestFeeCollectionProfilesAndPartialResults(t *testing.T) {

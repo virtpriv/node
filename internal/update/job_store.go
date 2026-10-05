@@ -10,10 +10,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/release"
-	"github.com/virtualprivatenode/vpn/internal/update/files"
-	"github.com/virtualprivatenode/vpn/internal/update/protocol"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/release"
+	"github.com/virtpriv/node/internal/update/files"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 const Root = paths.PrivateDir + "/updates"

@@ -30,10 +30,10 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/virtualprivatenode/vpn/internal/host"
-	"github.com/virtualprivatenode/vpn/internal/logger"
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/host"
+	"github.com/virtpriv/node/internal/logger"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/system"
 )
 
 // PreflightResult is one check's outcome. Err == nil means pass.

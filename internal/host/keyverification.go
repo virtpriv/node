@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 const keyVerificationNote = "pending\n"

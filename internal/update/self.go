@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/virtualprivatenode/vpn/internal/host"
-	"github.com/virtualprivatenode/vpn/internal/release"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/host"
+	"github.com/virtpriv/node/internal/release"
+	"github.com/virtpriv/node/internal/system"
 )
 
 // Self completes an accepted VPN binary update in the root helper. The helper
@@ -52,7 +52,7 @@ type selfUpdateOps struct {
 }
 
 func runSelfUpdate(version, archive, workDir string, ops selfUpdateOps, progress func(int)) error {
-	baseURL := "https://github.com/virtualprivatenode/vpn/releases/download/v" + version
+	baseURL := "https://github.com/virtpriv/node/releases/download/v" + version
 	for _, name := range []string{archive, "SHA256SUMS", "SHA256SUMS.asc"} {
 		if err := ops.download(baseURL+"/"+name, filepath.Join(workDir, name)); err != nil {
 			return fmt.Errorf("downloading v%s: %w", version, err)

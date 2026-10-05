@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/host"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/host"
 )
 
 type protectedTreeEntry struct {

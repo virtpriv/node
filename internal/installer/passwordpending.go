@@ -24,8 +24,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/system"
 )
 
 const passwordPendingNote = `An unattended install applied a generated owner login password

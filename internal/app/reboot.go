@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
+	"github.com/virtpriv/node/internal/helper"
 )
 
 type RebootOutcome int

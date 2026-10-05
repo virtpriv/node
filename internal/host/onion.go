@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // OnionAddresses contains the fixed Tor hostname observations used for display.

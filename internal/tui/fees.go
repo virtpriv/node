@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/virtualprivatenode/vpn/internal/app"
+	"github.com/virtpriv/node/internal/app"
 )
 
 type feeReader interface {

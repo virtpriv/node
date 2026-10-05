@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/autounlock"
-	"github.com/virtualprivatenode/vpn/internal/helper"
+	"github.com/virtpriv/node/internal/autounlock"
+	"github.com/virtpriv/node/internal/helper"
 )
 
 // AutoUnlockObservation describes what the local caller knows about the request.

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtpriv/node/internal/logger"
 )
 
 // Run executes a command and returns an error with output on failure.

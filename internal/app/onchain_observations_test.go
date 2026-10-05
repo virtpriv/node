@@ -9,7 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtpriv/node/internal/lndrpc"
 )
 
 type observationSource struct {

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/component"
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/helper"
+	"github.com/virtpriv/node/internal/component"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/helper"
 )
 
 // The client must wait for every provisioning step, credential staging and

@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/artifact/gpgtest"
+	"github.com/virtpriv/node/internal/artifact/gpgtest"
 )
 
 // A signer whose key was revoked must never count, and a signer in good

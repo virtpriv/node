@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/release"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/release"
+	"github.com/virtpriv/node/internal/system"
 )
 
 // InstallVPNUpdate extracts the verified VPN archive and installs its binary

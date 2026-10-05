@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtpriv/node/internal/config"
 )
 
 // The ledger is root-private historical authority for exactly one bounded

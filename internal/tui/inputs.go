@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
-	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtpriv/node/internal/config"
 )
 
 // ── Character filters ────────────────────────────────────

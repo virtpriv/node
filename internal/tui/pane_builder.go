@@ -6,7 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 // paneBuilder constructs consistently-formatted content

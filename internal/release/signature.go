@@ -13,9 +13,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/virtualprivatenode/vpn/internal/artifact"
-	"github.com/virtualprivatenode/vpn/internal/logger"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/artifact"
+	"github.com/virtpriv/node/internal/logger"
+	"github.com/virtpriv/node/internal/system"
 )
 
 // ── Trust anchors ───────────────────────────────────────
@@ -39,7 +39,7 @@ const SigningFingerprint = "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
 // addresses are fixed in every installed helper, so a later release can only
 // replace one of them while the other still works.
 const (
-	keyFileURL    = "https://raw.githubusercontent.com/virtualprivatenode/vpn/main/keys/ripsline.asc"
+	keyFileURL    = "https://raw.githubusercontent.com/virtpriv/node/main/keys/ripsline.asc"
 	keyWebsiteURL = "https://keys.openpgp.org/vks/v1/by-fingerprint/"
 )
 

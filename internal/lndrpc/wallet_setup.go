@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/lightningnetwork/lnd/lnrpc"
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/paths"
 	"google.golang.org/grpc"
 )
 

@@ -5,7 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 // Section IDs — 5 parents + theme toggle

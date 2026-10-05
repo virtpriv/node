@@ -5,10 +5,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/bitcoin"
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/bitcoin"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/system"
 )
 
 func createBitcoinDirs(username string) error {

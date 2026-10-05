@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtpriv/node/internal/lndrpc"
 )
 
 type LightningInvoiceClient interface {

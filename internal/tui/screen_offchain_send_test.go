@@ -7,9 +7,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/lndrpc"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 type screenPaymentClient struct {

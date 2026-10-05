@@ -7,7 +7,7 @@ Bitcoin Core, LND, and Tor, configured and running in minutes.
 
 **A new home, new name, and v0.7.0.**
 
-Virtual Private Node moved to github.com/virtualprivatenode/vpn, and
+Virtual Private Node moved to github.com/virtpriv/node, and
 the move brought every earlier release with it. Those releases predate
 the rename: they install a binary called rlvpn, and they are the
 previous generation of this project. v0.7.0 is the first release under

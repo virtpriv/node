@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/lightningnetwork/lnd/lnrpc"
-	"github.com/virtualprivatenode/vpn/internal/bitcoin"
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/syncthing"
-	"github.com/virtualprivatenode/vpn/internal/update/protocol"
+	"github.com/virtpriv/node/internal/bitcoin"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/syncthing"
+	"github.com/virtpriv/node/internal/update/protocol"
 	"google.golang.org/grpc/metadata"
 )
 

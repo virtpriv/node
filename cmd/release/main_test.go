@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/component"
-	"github.com/virtualprivatenode/vpn/internal/host"
-	"github.com/virtualprivatenode/vpn/internal/release"
-	"github.com/virtualprivatenode/vpn/internal/update/protocol"
+	"github.com/virtpriv/node/internal/component"
+	"github.com/virtpriv/node/internal/host"
+	"github.com/virtpriv/node/internal/release"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 // Build and GPG processes are fixtures. Packaging, plan admission, checksum

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // The LND unit template: one source for both variants, so they

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // The certificate watch is what keeps the staged TLS cert copy

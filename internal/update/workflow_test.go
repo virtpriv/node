@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/update/protocol"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 func workflowFixture() *job {

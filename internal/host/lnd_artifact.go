@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/virtualprivatenode/vpn/internal/artifact"
-	"github.com/virtualprivatenode/vpn/internal/logger"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/artifact"
+	"github.com/virtpriv/node/internal/logger"
+	"github.com/virtpriv/node/internal/system"
 )
 
 // DownloadLND fetches the release archive and manifest over Tor.

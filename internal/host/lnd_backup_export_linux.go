@@ -18,8 +18,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 const (

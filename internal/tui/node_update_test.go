@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/update/protocol"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 func TestSavedUpdateCanBeResumedWithoutReleaseDiscovery(t *testing.T) {

@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/lndrpc"
 )
 
 type WalletPresence int

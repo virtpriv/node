@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // ConnectionTarget selects one of the existing operator connection displays.

@@ -13,7 +13,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtpriv/node/internal/lndrpc"
 )
 
 type ChannelOpenClient interface {

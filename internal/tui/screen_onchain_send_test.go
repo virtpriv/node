@@ -9,10 +9,10 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/lndrpc"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 type screenOnChainClient struct {

@@ -5,7 +5,7 @@ package host
 import (
 	"fmt"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtpriv/node/internal/config"
 )
 
 // PublishLNDBackup is available only on the certified Linux target because

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/system"
 )
 
 var (

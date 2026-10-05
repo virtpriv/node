@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/accountaccess"
+	"github.com/virtpriv/node/internal/accountaccess"
 	"golang.org/x/sys/unix"
 )
 

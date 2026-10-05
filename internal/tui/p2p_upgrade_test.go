@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/config"
 )
 
 func TestP2PObservationOwnershipAndReviewedConsent(t *testing.T) {

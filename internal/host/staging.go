@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // StageLNDTLSCert copies LND's TLS certificate (the public

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 
-	"github.com/virtualprivatenode/vpn/internal/sshkeys"
+	"github.com/virtpriv/node/internal/sshkeys"
 )
 
 type Ref struct {

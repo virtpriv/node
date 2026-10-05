@@ -5,7 +5,7 @@ package installer
 import (
 	"fmt"
 
-	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtpriv/node/internal/logger"
 )
 
 // ── Install engine core ──────────────────────────────────

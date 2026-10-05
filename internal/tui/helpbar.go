@@ -6,7 +6,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 func (m Model) renderHelpBar(maxW int) string {

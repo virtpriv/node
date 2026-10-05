@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/system"
 )
 
 // UpgradePackages preserves existing configuration on conflict. Installation

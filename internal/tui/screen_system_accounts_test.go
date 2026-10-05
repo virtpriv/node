@@ -7,10 +7,10 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/virtualprivatenode/vpn/internal/accountaccess"
-	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/sshkeys"
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/accountaccess"
+	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/sshkeys"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 type accountScreenAccess struct {

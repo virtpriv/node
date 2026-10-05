@@ -9,14 +9,14 @@ import (
 	"os/user"
 	"strconv"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/helperd"
-	"github.com/virtualprivatenode/vpn/internal/host"
-	"github.com/virtualprivatenode/vpn/internal/installer"
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/tui"
-	installui "github.com/virtualprivatenode/vpn/internal/tui/install"
-	"github.com/virtualprivatenode/vpn/internal/update"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/helperd"
+	"github.com/virtpriv/node/internal/host"
+	"github.com/virtpriv/node/internal/installer"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/tui"
+	installui "github.com/virtpriv/node/internal/tui/install"
+	"github.com/virtpriv/node/internal/update"
 )
 
 var version = "dev"

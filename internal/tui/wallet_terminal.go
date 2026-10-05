@@ -5,8 +5,8 @@ import (
 	"io"
 	"os/exec"
 
-	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // walletTerminal implements Bubble Tea's interactive command interface without

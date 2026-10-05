@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/virtualprivatenode/vpn/internal/installer"
-	"github.com/virtualprivatenode/vpn/internal/loginpassword"
+	"github.com/virtpriv/node/internal/installer"
+	"github.com/virtpriv/node/internal/loginpassword"
 )
 
 type fakeSession struct {

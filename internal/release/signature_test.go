@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/artifact/gpgtest"
+	"github.com/virtpriv/node/internal/artifact/gpgtest"
 )
 
 // The release key comes from a file in the repository and from the key

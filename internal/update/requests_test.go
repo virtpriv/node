@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/update/protocol"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 func saveReview(t *testing.T, root string, p prepared) string {

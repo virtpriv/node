@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/sshkeys"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/sshkeys"
+	"github.com/virtpriv/node/internal/system"
 )
 
 func buildHardeningDropIn(passwordAuth string) string {

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 const (

@@ -6,7 +6,7 @@ import (
 	"os/user"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 func TestOperatorAccountLookupRefusesUncertainState(t *testing.T) {

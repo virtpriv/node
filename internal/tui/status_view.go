@@ -3,9 +3,9 @@ package tui
 import (
 	"strings"
 
-	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/bitcoin"
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/bitcoin"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 func observationText[T any](o app.Observation[T], value string) string {

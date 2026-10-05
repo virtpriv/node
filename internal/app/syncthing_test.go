@@ -8,7 +8,7 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/virtualprivatenode/vpn/internal/syncthing"
+	"github.com/virtpriv/node/internal/syncthing"
 )
 
 type syncFake struct {

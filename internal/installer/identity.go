@@ -9,8 +9,8 @@ import (
 	"crypto/rand"
 	"fmt"
 
-	"github.com/virtualprivatenode/vpn/internal/host"
-	"github.com/virtualprivatenode/vpn/internal/loginpassword"
+	"github.com/virtpriv/node/internal/host"
+	"github.com/virtpriv/node/internal/loginpassword"
 )
 
 // ── Applying the decisions ───────────────────────────────

@@ -8,7 +8,7 @@ import (
 	qrterminal "github.com/mdp/qrterminal/v3"
 	"rsc.io/qr"
 
-	"github.com/virtualprivatenode/vpn/internal/theme"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 // ── Fullscreen overlays ────────────────────────────────

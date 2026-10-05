@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/system"
 )
 
 // buildBitcoinConfig renders the selected immutable network profile. RPC

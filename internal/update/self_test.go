@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/release"
+	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/release"
 )
 
 func TestSelfUpdateStopsAtFailedBoundary(t *testing.T) {
@@ -44,7 +44,7 @@ func TestSelfUpdateStopsAtFailedBoundary(t *testing.T) {
 			ops := selfUpdateOps{
 				download: func(url, dest string) error {
 					name := filepath.Base(dest)
-					if filepath.Dir(dest) != workDir || url != "https://github.com/virtualprivatenode/vpn/releases/download/v0.7.1/"+name {
+					if filepath.Dir(dest) != workDir || url != "https://github.com/virtpriv/node/releases/download/v0.7.1/"+name {
 						t.Fatalf("artifact escaped requested release/workspace: %s %s", url, dest)
 					}
 					return boundary(name)

@@ -15,7 +15,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 func TestConnectionInfoStagedContractAndIndependentFailures(t *testing.T) {

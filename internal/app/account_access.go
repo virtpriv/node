@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/accountaccess"
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/sshkeys"
+	"github.com/virtpriv/node/internal/accountaccess"
+	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/sshkeys"
 )
 
 type AccountDetails struct {

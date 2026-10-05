@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtpriv/node/internal/lndrpc"
 )
 
 type closeClient struct {

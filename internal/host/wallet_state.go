@@ -6,7 +6,7 @@ import (
 
 	"github.com/lightningnetwork/lnd/lnrpc"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtpriv/node/internal/config"
 )
 
 // WalletExists asks LND's always-running State service whether its wallet has

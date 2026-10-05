@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // AdminLoginObserved checks the existing first-login contract: any accepted SSH

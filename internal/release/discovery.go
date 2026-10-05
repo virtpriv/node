@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/system"
 )
 
 type githubRelease struct {
@@ -33,7 +33,7 @@ func CheckLatestVersion() string {
 	}
 	output, err := system.RunOutputWithTimeout(10*time.Second,
 		"torsocks", "curl", "-sL",
-		"https://api.github.com/repos/virtualprivatenode/vpn/releases/latest")
+		"https://api.github.com/repos/virtpriv/node/releases/latest")
 	if err != nil {
 		return ""
 	}

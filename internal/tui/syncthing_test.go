@@ -7,9 +7,9 @@ import (
 	"testing/synctest"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/syncthing"
+	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/syncthing"
 )
 
 func syncModel(t *testing.T) (Model, *SyncthingDeviceScreen, *SyncthingDeviceScreen) {

@@ -7,7 +7,7 @@ import (
 	"os/user"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtpriv/node/internal/config"
 )
 
 // Explicit dispatch: the command line alone decides the mode.
