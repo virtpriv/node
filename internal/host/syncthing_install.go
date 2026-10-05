@@ -107,10 +107,8 @@ func syncthingInstallSteps(
 			}},
 		{name: "Verifying Syncthing",
 			run: func() error {
-				if err := verifySyncthingSig(syncWork); err != nil {
-					return err
-				}
-				return verifySyncthingChecksum(syncWork)
+				return verifySyncthing(
+					component.SyncthingVersion, syncWork)
 			}},
 		{name: "Installing Syncthing",
 			run: func() error {

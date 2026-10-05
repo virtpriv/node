@@ -114,10 +114,7 @@ func StageUpdateComponent(c protocol.Component, a protocol.Artifact, dir string)
 	case protocol.Syncthing:
 		err = downloadSyncthing(a.Version, dir)
 		if err == nil {
-			err = verifySyncthingSig(dir)
-		}
-		if err == nil {
-			err = verifySyncthingChecksum(dir)
+			err = verifySyncthing(a.Version, dir)
 		}
 	}
 	if err != nil {
