@@ -60,7 +60,7 @@ func guardHelperOperation(verb string) (func(), error) {
 		helper.VerbPrepareUpdate, helper.VerbStartUpdate, helper.VerbResumeUpdate, helper.VerbCancelUpdate:
 		return func() {}, nil
 	case helper.VerbSelfUpdate:
-		return nil, errors.New("binary-only updating has been replaced; reopen the TUI and use Node Updates")
+		return nil, errors.New("this update method was replaced, reopen the TUI and use Node Updates")
 	}
 	unlock, err := files.Lock(update.LockPath)
 	if err != nil {

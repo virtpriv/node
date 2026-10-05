@@ -3,8 +3,10 @@ package tui
 import (
 	"slices"
 	"strings"
+	"unicode"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/virtpriv/node/internal/theme"
 )
@@ -256,10 +258,43 @@ func (p *paneBuilder) render() string {
 	return strings.Join(p.lines, "\n")
 }
 
-// renderWithBottomButtons pads the content to fill the
-// available height and pins a button row at the bottom.
-// Use instead of render() when buttons should stick to
-// the bottom of the content area.
+// fitText adds text as rows that fit the pane, broken between words. The
+// text's own line breaks are kept and its empty lines dropped. A word longer
+// than a row is split. Control characters other than line breaks become
+// spaces, so command output inside an error cannot move the cursor or clear
+// the screen. With maxRows above zero, at most that many rows are added and
+// the last one ends with "…". It reports whether text was left out.
+func (p *paneBuilder) fitText(
+	style lipgloss.Style, text string, maxRows int,
+) bool {
+	width := max(p.w-2, 16)
+	text = strings.Map(func(r rune) rune {
+		if r != '\n' && unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, text)
+	var rows []string
+	for line := range strings.SplitSeq(text, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			rows = append(rows, strings.Split(ansi.Wrap(line, width, ""), "\n")...)
+		}
+	}
+	cut := maxRows > 0 && len(rows) > maxRows
+	if cut {
+		rows = rows[:maxRows]
+		rows[maxRows-1] = ansi.Truncate(rows[maxRows-1]+" …", width, "…")
+	}
+	for _, row := range rows {
+		p.lines = append(p.lines, " "+style.Render(row))
+	}
+	return cut
+}
+
+// renderWithBottomButtons draws the content with the button row on the last
+// of h rows. Rows are counted as drawn: one entry may hold several. Content
+// that does not fit above the buttons loses its last rows, so the buttons
+// are always visible.
 func (p *paneBuilder) renderWithBottomButtons(
 	labels []string, activeIdx int,
 	focused bool, h int,
@@ -267,16 +302,13 @@ func (p *paneBuilder) renderWithBottomButtons(
 ) string {
 	btnLine := renderButtons(
 		labels, activeIdx, focused, p.w, disabled...)
-	contentH := len(p.lines)
-	pad := h - contentH - 1
-	if pad < 1 {
-		pad = 1
+	rows := strings.Split(strings.Join(p.lines, "\n"), "\n")
+	room := max(h-lipgloss.Height(btnLine), 0)
+	rows = rows[:min(len(rows), room)]
+	for len(rows) < room {
+		rows = append(rows, "")
 	}
-	for i := 0; i < pad; i++ {
-		p.lines = append(p.lines, "")
-	}
-	p.lines = append(p.lines, btnLine)
-	return strings.Join(p.lines, "\n")
+	return strings.Join(append(rows, btnLine), "\n")
 }
 
 // ── Shared button renderer ───────────────────────────────
@@ -300,13 +332,30 @@ func renderButtons(
 		perBtn = 8
 	}
 
+	// Buttons share the row equally. When that would wrap a label, each
+	// button takes the width of its own label instead, if the row has room.
+	widths := make([]int, numBtns)
+	needed, wraps := totalGap, false
+	for i, label := range labels {
+		widths[i] = perBtn
+		own := lipgloss.Width(label) + 2 // one column of padding each side
+		needed += own
+		wraps = wraps || own > perBtn
+	}
+	if wraps && needed <= btnW {
+		spare := (btnW - needed) / numBtns
+		for i, label := range labels {
+			widths[i] = lipgloss.Width(label) + 2 + spare
+		}
+	}
+
 	var parts []string
 	for i, label := range labels {
 		if slices.Contains(disabled, i) {
 			parts = append(parts,
 				lipgloss.NewStyle().
 					Foreground(theme.ColorGrayed).
-					Width(perBtn).
+					Width(widths[i]).
 					AlignHorizontal(lipgloss.Center).
 					Render(label))
 			continue
@@ -316,13 +365,13 @@ func renderButtons(
 		if isActive {
 			parts = append(parts,
 				theme.BtnFocused.
-					Width(perBtn).
+					Width(widths[i]).
 					AlignHorizontal(lipgloss.Center).
 					Render(label))
 		} else {
 			parts = append(parts,
 				theme.BtnNormal.
-					Width(perBtn).
+					Width(widths[i]).
 					AlignHorizontal(lipgloss.Center).
 					Render(label))
 		}

@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/virtpriv/node/internal/app"
 	"github.com/virtpriv/node/internal/release"
 	"github.com/virtpriv/node/internal/theme"
@@ -182,7 +183,7 @@ func (s *NodeUpdateScreen) buttons() []string {
 		}
 	}
 	if (!s.status.Active || !s.status.Running) && s.hasTarget() {
-		out = append(out, "Review update")
+		out = append(out, "Review")
 	}
 	if (!s.status.Active || s.status.Phase == "failed") && !(s.status.Phase == "complete" && s.status.Version != s.ctx.Version) {
 		out = append(out, "Select release")
@@ -226,7 +227,7 @@ func (s *NodeUpdateScreen) HandleKey(k string, msg tea.KeyPressMsg) (Screen, tea
 			s.selectStable()
 			s.button = 0
 			return s, s.request("status")
-		case "Review update":
+		case "Review":
 			return s, s.request("prepare")
 		case "Select release":
 			input := textinput.New()
@@ -317,18 +318,28 @@ func (s *NodeUpdateScreen) handleReleaseKey(k string, msg tea.KeyPressMsg) (Scre
 	return s, nil
 }
 
+// Row limits for the three messages the screen can show at once, so that they
+// fit above the buttons together with the fixed lines. A shortened failure
+// gets one more row that says where the whole text is.
+const (
+	nodeUpdateFailureRows = 7
+	nodeUpdateActionRows  = 4
+	nodeUpdateStatusRows  = 2
+)
+
 func (s *NodeUpdateScreen) View(w, h int) string {
 	p := newPane(w)
+	plain := lipgloss.NewStyle()
 	if s.releaseInput != nil {
 		p.title(theme.Header, "Select a Test Release")
-		p.line("Use only a disposable node without funds.")
-		p.line("Enter the exact published VPN release tag.")
+		p.line(" Use only a disposable node without funds.")
+		p.line(" Enter the exact published VPN release tag.")
 		p.blank()
 		s.releaseInput.SetWidth(min(40, max(1, w-8)))
-		p.line(s.releaseInput.View())
+		p.line(" " + s.releaseInput.View())
 		if s.err != nil {
 			p.blank()
-			p.line(theme.Warning.Render(s.err.Error()))
+			p.fitText(theme.Warning, s.err.Error(), nodeUpdateActionRows)
 		}
 		p.blank()
 		p.dim("This selects one update. Normal discovery stays stable.")
@@ -339,7 +350,7 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 		r := s.review
 		m := r.Manifest
 		if release.IsCandidate(m.Version) {
-			p.line(theme.Warning.Render("Release candidate: testing only, on a node without funds."))
+			p.fitText(theme.Warning, "Release candidate, for testing on a node without funds.", 0)
 		}
 		p.field("VPN: ", r.Source.VPN+" → "+m.Version)
 		for _, c := range protocol.Components {
@@ -348,54 +359,61 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 			}
 		}
 		p.blank()
-		p.line(m.Summary)
+		// The summary is what the operator approves, so it is never shortened.
+		p.fitText(plain, m.Summary, 0)
 		for _, step := range m.HostSteps {
 			p.field("Host change: ", step)
 		}
 		if r.KeyServerUnreachable {
 			p.blank()
-			p.line(theme.Warning.Render("Key server not reached. A new key revocation would be missed."))
+			p.fitText(theme.Warning, "Key server not reached. A new key revocation would be missed.", 0)
 		}
 		p.blank()
-		p.line("Affected services will restart. Downloads use Tor.")
-		p.line("Databases are preserved. A failed update may need repair.")
+		p.line(" Affected services will restart. Downloads use Tor.")
+		p.line(" Databases are preserved. A failed update may need repair.")
 	} else if s.status.ID != "" {
+		failure := strings.TrimSpace(s.status.Error)
 		p.field("Release: ", "v"+s.status.Version)
 		p.field("Status: ", s.status.Step)
 		if s.status.Active && !s.status.Running {
-			p.line("The worker is stopped. Review the failure before Retry.")
+			if failure != "" {
+				p.line(" The worker is stopped. Review the failure before Retry.")
+			} else {
+				p.line(" The update is not running. Retry continues it.")
+			}
 		}
-		if s.status.Error != "" {
-			p.line(theme.Warning.Render(s.status.Error))
+		// The worker also prints its failure, so the journal has the whole text.
+		if p.fitText(theme.Warning, failure, nodeUpdateFailureRows) {
+			p.dim("Full text: sudo journalctl -u " + protocol.WorkerUnit)
 		}
 	} else {
-		p.line("No update job has been accepted.")
+		p.line(" No update job has been accepted.")
 	}
 	if s.hasTarget() && s.review == nil {
 		p.blank()
-		if s.notice != "" {
-			p.line(s.notice)
-		}
+		p.fitText(plain, s.notice, 0)
 		p.field("Available: ", "v"+s.target)
 	}
 	if s.busy != "" {
 		p.blank()
 		if s.busy == "prepare" {
-			p.line("Downloading and verifying the release plan...")
+			p.line(" Downloading and verifying the release plan...")
 		} else {
-			p.line("Checking update state...")
+			p.line(" Checking update state...")
 		}
 	}
 	if s.err != nil {
 		p.blank()
-		p.line(theme.Warning.Render(s.err.Error()))
+		p.fitText(theme.Warning, s.err.Error(), nodeUpdateActionRows)
 	}
 	if s.statusErr != nil {
 		p.blank()
-		p.line(theme.Warning.Render(s.statusErr.Error()))
+		p.fitText(theme.Warning, s.statusErr.Error(), nodeUpdateStatusRows)
 	}
-	p.blank()
-	p.dim("You can close this screen and return to the saved update.")
+	if s.status.ID != "" && s.status.Active {
+		p.blank()
+		p.dim("You can close this screen and return to the saved update.")
+	}
 	buttons := s.buttons()
 	index := min(s.button, len(buttons)-1)
 	return p.renderWithBottomButtons(buttons, index, s.ctx.ContentFocused, h)

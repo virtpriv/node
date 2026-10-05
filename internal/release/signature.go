@@ -107,7 +107,7 @@ func verifySignature(workDir, fingerprint string, download func(url, dest string
 	if result.Bad {
 		logger.Verify("FAIL: bad signature detected")
 		return check, fmt.Errorf(
-			"bad signature detected: verification aborted")
+			"bad signature detected, verification aborted")
 	}
 
 	// An answer that is not the pinned key is no better than no answer.
@@ -123,7 +123,7 @@ func verifySignature(workDir, fingerprint string, download func(url, dest string
 		if len(result.Revoked) > 0 {
 			logger.Verify("FAIL: release signing key is revoked")
 			return check, fmt.Errorf(
-				"the key that signed this release has been revoked; do not install it")
+				"the key that signed this release is revoked, do not install it")
 		}
 		logger.Verify(
 			"FAIL: signature not from the release signing key")

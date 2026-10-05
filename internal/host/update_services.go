@@ -45,7 +45,7 @@ func ObserveUpdateVersions(vpn string, cfg *config.AppConfig) (protocol.Versions
 		return v, err
 	}
 	if strings.TrimSpace(installed) != vpn {
-		return v, errors.New("VPN executable changed; reconnect before reviewing an update")
+		return v, errors.New("VPN executable changed, reconnect before reviewing an update")
 	}
 	for _, c := range protocol.Components {
 		if c == protocol.Syncthing && !cfg.SyncthingEnabled {
@@ -192,7 +192,7 @@ func StopUpdateService(c protocol.Component) error {
 		return err
 	}
 	if p["MainPID"] != "0" || p["ControlPID"] != "0" || p["ActiveState"] != "inactive" || p["Result"] != "success" {
-		return fmt.Errorf("%s did not stop cleanly; no binaries replaced", c)
+		return fmt.Errorf("%s did not stop cleanly, no binaries were replaced", c)
 	}
 	return nil
 }
