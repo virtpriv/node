@@ -18,7 +18,7 @@ import (
 
 const Root = paths.PrivateDir + "/updates"
 const LockPath = paths.RuntimeDir + "/operations.lock"
-const Service = "vpn-update.service"
+const Service = protocol.WorkerUnit
 
 // A record is the part of current.json that the installed helper and the
 // retained launcher depend on. Both stay in service for every later release
@@ -167,7 +167,7 @@ func InstalledVersion(version string) error {
 		return err
 	}
 	if j != nil && j.Phase == "complete" && j.Review.Manifest.Version != version {
-		return errors.New("VPN was updated; reconnect to its helper")
+		return errors.New("VPN was updated, reconnect to its helper")
 	}
 	return nil
 }
@@ -230,7 +230,7 @@ func MutationGuard() error {
 		return err
 	}
 	if j != nil && j.active() {
-		return errors.New("a managed update needs completion; open Node Updates")
+		return errors.New("an update is unfinished, open Node Updates")
 	}
 	return nil
 }

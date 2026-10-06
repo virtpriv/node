@@ -132,7 +132,7 @@ func runJob(j *job, ops workflowOps) error {
 				// An uncertain start is never repeated automatically. If the
 				// process survived, verify it; otherwise require explicit Retry.
 				if err := ops.running(c); err != nil {
-					return fail(fmt.Errorf("%s startup was interrupted; inspect the failure and retry: %w", c, err))
+					return fail(fmt.Errorf("%s startup was interrupted, review the failure and retry: %w", c, err))
 				}
 			} else {
 				j.Started[c] = true
@@ -159,7 +159,7 @@ func runJob(j *job, ops workflowOps) error {
 		return fail(err)
 	}
 	j.Error = ""
-	if err := publish("complete", "Update complete; reopen the TUI"); err != nil {
+	if err := publish("complete", "Update complete, reopen the TUI"); err != nil {
 		return err
 	}
 	// Leftover downloads only cost space. They cannot fail a finished update.

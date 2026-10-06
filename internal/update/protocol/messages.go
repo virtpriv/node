@@ -1,5 +1,9 @@
 package protocol
 
+// WorkerUnit is the systemd unit that runs an update. Its journal holds the
+// full text of a worker failure.
+const WorkerUnit = "vpn-update.service"
+
 type Review struct {
 	Token    string   `json:"token"`
 	Digest   string   `json:"digest"`

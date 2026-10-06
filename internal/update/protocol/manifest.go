@@ -244,7 +244,7 @@ func Admission(data []byte, selected, current string, source Versions, network, 
 		if first := bridge(); first != "" {
 			return m, first, nil
 		}
-		return m, "", errors.New("this release needs a newer VPN first; see its release notes")
+		return m, "", errors.New("this release needs a newer VPN first, see its release notes")
 	}
 	if err := json.Unmarshal(data, &m); err != nil {
 		return m, "", err

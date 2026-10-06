@@ -320,7 +320,7 @@ func acceptUpdate(root, token string, ops admissionOps) error {
 		return err
 	}
 	if previous != nil && previous.active() && previous.Review.Digest == id {
-		return errors.New("this update is already accepted; use its saved status")
+		return errors.New("this update is already accepted, use its saved status")
 	}
 	failed := ""
 	if previous != nil && previous.active() {
@@ -330,7 +330,7 @@ func acceptUpdate(root, token string, ops admissionOps) error {
 		failed = previous.Review.Digest
 	}
 	if p.Previous != failed {
-		return errors.New("update state changed; review the release again")
+		return errors.New("update state changed, review the release again")
 	}
 	node, err := ops.observe()
 	if err != nil {
@@ -338,10 +338,10 @@ func acceptUpdate(root, token string, ops admissionOps) error {
 	}
 	source, cfg, configHash := node.source, node.config, node.configHash
 	if source != p.Review.Source || configHash != p.ConfigHash {
-		return errors.New("node changed since review; review the release again")
+		return errors.New("node changed since review, review the release again")
 	}
 	if failed != "" && (cfg.Network != previous.Review.Network || configHash != previous.ConfigHash) {
-		return errors.New("node configuration changed during the failed update; resolve that change before recovery")
+		return errors.New("node configuration changed during the failed update, resolve that change before recovery")
 	}
 	if err := p.Review.Manifest.AdmitInstalled(source, cfg.Network, failed); err != nil {
 		return err
@@ -417,7 +417,7 @@ func retryUpdate(root, id string) error {
 		return err
 	}
 	if j == nil || !j.active() || j.Review.Digest != id {
-		return errors.New("update identity changed; refresh its status")
+		return errors.New("update identity changed, refresh its status")
 	}
 	return amendRecord(root, map[string]any{"phase": "retry", "error": nil})
 }
@@ -477,10 +477,10 @@ func cancelUpdate(root, id string) error {
 		return err
 	}
 	if j == nil || j.Review.Digest != id {
-		return errors.New("update identity changed; refresh its status")
+		return errors.New("update identity changed, refresh its status")
 	}
 	if !j.active() || j.HostChanges {
-		return errors.New("host changes may have begun; complete or repair this update")
+		return errors.New("host changes may have begun, complete or repair this update")
 	}
 	return amendRecord(root, map[string]any{"phase": "cancelled", "step": "Update cancelled before host changes", "error": nil})
 }

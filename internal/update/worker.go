@@ -278,7 +278,7 @@ func checkSpaceNeeds(needs []spaceNeed, observe func(path string) (dev, avail ui
 	}
 	for _, t := range totals {
 		if required := t.floor + t.write; t.avail < required {
-			return fmt.Errorf("at least %d MiB free space is required on %s; %d MiB is available", (required+1<<20-1)>>20, t.path, t.avail>>20)
+			return fmt.Errorf("at least %d MiB free space is required on %s, %d MiB is available", (required+1<<20-1)>>20, t.path, t.avail>>20)
 		}
 	}
 	return nil
@@ -428,7 +428,7 @@ func waitHealth(j *job, c protocol.Component, cfg *config.AppConfig) error {
 				}
 			}
 			if time.Now().After(deadline) {
-				return fmt.Errorf("%s did not become ready; inspect its service journal before retrying", c)
+				return fmt.Errorf("%s did not become ready, check its service journal before Retry", c)
 			}
 		}
 		time.Sleep(2 * time.Second)

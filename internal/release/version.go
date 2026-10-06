@@ -41,8 +41,8 @@ func Newer(current, target string) (bool, error) {
 func SameMajor(current, target string) (bool, error) {
 	if !ValidVersion(current) {
 		return false, fmt.Errorf(
-			"running version %q is not a release build; "+
-				"self-update requires one", current)
+			"running version %q is not a release build, "+
+				"updating needs one", current)
 	}
 	if !ValidVersion(target) {
 		return false, fmt.Errorf(
