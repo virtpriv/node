@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 
 	"github.com/virtpriv/node/internal/config"
@@ -252,9 +251,10 @@ type nodeObservation struct {
 
 // Admission owns the approved record and its durable successor. Host reads and
 // launcher installation are separate boundaries, called under the mutation lock.
+// Admission does not ask whether the affected services run: the worker does,
+// before it changes anything.
 type admissionOps struct {
 	observe  func() (nodeObservation, error)
-	identify func(*job, *config.AppConfig) error
 	launcher func() error
 }
 
@@ -272,7 +272,6 @@ func startLocked(current, token string) error {
 			hash, err := files.Hash(paths.ConfigFile)
 			return nodeObservation{source: source, config: cfg, configHash: hash}, err
 		},
-		identify: recordUpdateIdentity,
 		launcher: func() error {
 			// Retain the working executable as the boot/recovery launcher.
 			self, err := os.Executable()
@@ -285,28 +284,6 @@ func startLocked(current, token string) error {
 			return installWorkerUnit()
 		},
 	})
-}
-
-func recordUpdateIdentity(j *job, cfg *config.AppConfig) error {
-	for _, c := range j.Affected {
-		if err := host.CheckUpdateProcess(c); err != nil {
-			return fmt.Errorf("start %s before updating, or use the saved recovery job: %w", c, err)
-		}
-	}
-	if slices.Contains(j.Affected, protocol.LND) {
-		var err error
-		j.WalletPresent, err = host.WalletExists(cfg.Network)
-		if err != nil {
-			return err
-		}
-	}
-	if slices.Contains(j.Affected, protocol.Syncthing) {
-		j.SyncthingID = host.SyncthingDeviceID()
-		if j.SyncthingID == "" {
-			return errors.New("cannot establish Syncthing device identity")
-		}
-	}
-	return nil
 }
 
 func acceptUpdate(root, token string, ops admissionOps) error {
@@ -362,8 +339,6 @@ func acceptUpdate(root, token string, ops admissionOps) error {
 		// reads the remaining duties from the record retained below, which a
 		// later worker may have written in a form this helper cannot interpret.
 		j.HostChanges = previous.HostChanges
-	} else if err := ops.identify(j, cfg); err != nil {
-		return err
 	}
 
 	if previous != nil {

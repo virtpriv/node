@@ -29,7 +29,7 @@ func saveReview(t *testing.T, root string, p prepared) string {
 }
 
 func TestStartRechecksNodeAndWorkerBeforeAcceptingReview(t *testing.T) {
-	for _, change := range []string{"", "configuration", "source", "worker", "plan", "observation", "identity", "launcher"} {
+	for _, change := range []string{"", "configuration", "source", "worker", "plan", "observation", "launcher"} {
 		t.Run("change="+change, func(t *testing.T) {
 			j := workflowFixture()
 			root, _ := workerFiles(t, j)
@@ -39,7 +39,7 @@ func TestStartRechecksNodeAndWorkerBeforeAcceptingReview(t *testing.T) {
 			cfg.Network = j.Review.Network
 			node := nodeObservation{source: j.Review.Source, config: cfg, configHash: j.ConfigHash}
 			wantError := ""
-			wantIdentities, wantLaunches := 0, 0
+			wantLaunches := 0
 			switch change {
 			case "configuration":
 				node.configHash = strings.Repeat("b", 64)
@@ -59,25 +59,16 @@ func TestStartRechecksNodeAndWorkerBeforeAcceptingReview(t *testing.T) {
 				wantError = "integrity verification"
 			case "observation":
 				wantError = "node unavailable"
-			case "identity":
-				wantError, wantIdentities = "identity unavailable", 1
 			case "launcher":
-				wantError, wantIdentities, wantLaunches = "launcher unavailable", 1, 1
+				wantError, wantLaunches = "launcher unavailable", 1
 			}
-			identities, launches := 0, 0
+			launches := 0
 			ops := admissionOps{
 				observe: func() (nodeObservation, error) {
 					if change == "observation" {
 						return nodeObservation{}, errors.New(wantError)
 					}
 					return node, nil
-				},
-				identify: func(*job, *config.AppConfig) error {
-					identities++
-					if change == "identity" {
-						return errors.New(wantError)
-					}
-					return nil
 				},
 				launcher: func() error {
 					launches++
@@ -92,12 +83,12 @@ func TestStartRechecksNodeAndWorkerBeforeAcceptingReview(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), wantError) {
 					t.Fatalf("wrong refusal: %v", err)
 				}
-				if _, err := os.Stat(filepath.Join(root, "current.json")); !os.IsNotExist(err) || identities != wantIdentities || launches != wantLaunches {
+				if _, err := os.Stat(filepath.Join(root, "current.json")); !os.IsNotExist(err) || launches != wantLaunches {
 					t.Fatal("rejected review advanced admission", err)
 				}
 				return
 			}
-			if err != nil || identities != 1 || launches != 1 {
+			if err != nil || launches != 1 {
 				t.Fatalf("valid review not accepted: %v", err)
 			}
 			accepted, err := loadJob(root)
@@ -126,7 +117,6 @@ func TestHelperAcceptsReviewOfPlanWithLaterNames(t *testing.T) {
 		observe: func() (nodeObservation, error) {
 			return nodeObservation{source: j.Review.Source, config: cfg, configHash: j.ConfigHash}, nil
 		},
-		identify: func(*job, *config.AppConfig) error { return nil },
 		launcher: func() error { return nil },
 	})
 	if err != nil {
@@ -143,7 +133,6 @@ func TestHelperAcceptsReviewOfPlanWithLaterNames(t *testing.T) {
 		observe: func() (nodeObservation, error) {
 			return nodeObservation{source: j.Review.Source, config: cfg, configHash: j.ConfigHash}, nil
 		},
-		identify: func(*job, *config.AppConfig) error { return nil },
 		launcher: func() error { return nil },
 	}) == nil {
 		t.Fatal("later names admitted a node on a network the plan does not list")
@@ -201,10 +190,6 @@ func TestCorrectiveAdmissionPreservesFailedUpdateObligations(t *testing.T) {
 			err = acceptUpdate(root, token, admissionOps{
 				observe: func() (nodeObservation, error) {
 					return nodeObservation{source: p.Review.Source, config: cfg, configHash: p.ConfigHash}, nil
-				},
-				identify: func(*job, *config.AppConfig) error {
-					t.Fatal("recovery tried to replace pre-update wallet/device identity")
-					return nil
 				},
 				launcher: func() error { launches++; return nil },
 			})
@@ -344,7 +329,6 @@ func TestKeyServerNoticeIsApprovedButNotKeptInTheJob(t *testing.T) {
 		observe: func() (nodeObservation, error) {
 			return nodeObservation{source: j.Review.Source, config: cfg, configHash: j.ConfigHash}, nil
 		},
-		identify: func(*job, *config.AppConfig) error { return nil },
 		launcher: func() error { return nil },
 	})
 	if err != nil {

@@ -191,8 +191,11 @@ through an update and still be resumed.
 
 The helper likewise ignores plan fields it does not know, and network and
 service names it does not know, and still enforces the exact source, its own
-network, newer-version and recovery checks. The worker reads the
-approved plan bytes in full and refuses a plan it does not completely
+network, newer-version and recovery checks. It also accepts a component version
+written in a format it does not know, as long as the text is short and safe to
+show, and it reads such a version from an installed program. It still refuses a
+component downgrade when it knows the format of both versions. The worker reads
+the approved plan bytes in full and refuses a plan it does not completely
 understand. A plan with a `protocol` number the helper does not know is refused,
 unless it names a `bridge` the node can install first. A corrective worker reads
 the failed update's retained record for the services it affected, what may have
@@ -206,11 +209,17 @@ storing it in update records. Chain synchronization is separate runtime progress
 VPN's installed binary is replaced last. Normal updates restart services; they
 do not request a host reboot.
 
-Ordinary component updates require affected services to be running before
-acceptance. A failed managed update instead uses its recorded wallet/device
-identity. Corrective releases must acknowledge the exact failed release and the
-observed executable combination; retained databases are used by the corrective
-release. A corrective release is not a generic force-update or rollback option.
+When an update starts, and at a Retry before any change, the worker requires
+each affected service to be running its installed program, and records the
+wallet and device identity. A stopped service refuses the update while it can
+still be cancelled. A download resumed after a reboot does not ask again. This
+rule belongs to the worker of each release, not to the installed helper, so a
+release that repairs a service which cannot start can leave it out. A repair of
+a failed update uses the identity recorded before that update changed the node,
+and reads the node itself when that update changed nothing.
+Corrective releases must acknowledge the exact failed release and the observed
+executable combination. The corrective release uses the retained databases. A
+corrective release is not a generic force-update or rollback option.
 
 ## Validation still required before release
 

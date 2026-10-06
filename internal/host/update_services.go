@@ -70,17 +70,7 @@ func ObserveUpdateVersions(vpn string, cfg *config.AppConfig) (protocol.Versions
 		if err != nil {
 			return v, fmt.Errorf("read %s version: %w", c, err)
 		}
-		version := ""
-		for _, word := range strings.Fields(out) {
-			word = strings.TrimPrefix(word, "v")
-			if c == protocol.Bitcoin && strings.Count(word, ".") == 2 {
-				word = strings.TrimSuffix(word, ".0")
-			}
-			if protocol.ValidVersion(c, word) {
-				version = word
-				break
-			}
-		}
+		version := componentVersion(c, out)
 		if version == "" {
 			return v, fmt.Errorf("unrecognized %s version", c)
 		}
@@ -94,6 +84,29 @@ func ObserveUpdateVersions(vpn string, cfg *config.AppConfig) (protocol.Versions
 		}
 	}
 	return v, nil
+}
+
+// componentVersion finds the version in a program's own version output. A
+// version in the format this build knows is preferred, so known releases read
+// as they always have. Otherwise the first word that looks like a version is
+// returned: after a failed update this helper must still name a program that a
+// later release installed, so that its repair release can be reviewed.
+func componentVersion(c protocol.Component, out string) string {
+	later := ""
+	for _, word := range strings.Fields(out) {
+		word = strings.TrimPrefix(word, "v")
+		known := word
+		if c == protocol.Bitcoin && strings.Count(word, ".") == 2 {
+			known = strings.TrimSuffix(word, ".0")
+		}
+		if protocol.ValidVersion(c, known) {
+			return known
+		}
+		if later == "" && strings.Contains(word, ".") && protocol.SafeVersion(word) {
+			later = word
+		}
+	}
+	return later
 }
 
 func permitPath(c protocol.Component) string {

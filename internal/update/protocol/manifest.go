@@ -94,6 +94,7 @@ var core = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\.(0|[1-9][0-9]
 var lnd = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta$`)
 var digest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var hostStep = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
+var safeVersion = regexp.MustCompile(`^[0-9][0-9A-Za-z.+-]{0,31}$`)
 
 func ValidDigest(s string) bool { return digest.MatchString(s) }
 func ValidVersion(c Component, s string) bool {
@@ -107,6 +108,11 @@ func ValidVersion(c Component, s string) bool {
 	}
 	return false
 }
+
+// SafeVersion accepts a version in a format this build may not know. Such text
+// is only shown, stored and compared for equality, so it must be short and
+// free of control and path characters.
+func SafeVersion(s string) bool { return safeVersion.MatchString(s) }
 
 func Decode(data []byte) (Manifest, error) {
 	var m Manifest
@@ -129,8 +135,16 @@ func (m Manifest) Validate() error { return m.validate(true) }
 
 // validate with strict false is the installed helper's check. It accepts
 // network and service names added by later releases: the helper needs only its
-// own network, and the newer worker checks every name it acts on.
+// own network, and the newer worker checks every name it acts on. It accepts a
+// component version in a later format for the same reason: the helper only
+// shows and compares versions, and the worker builds file names from them.
 func (m Manifest) validate(strict bool) error {
+	accepted := func(c Component, s string) bool {
+		if strict {
+			return ValidVersion(c, s)
+		}
+		return SafeVersion(s)
+	}
 	if m.Protocol != Protocol || m.Platform != "debian-13-amd64" || !release.ValidVersion(m.Version) {
 		return errors.New("unsupported release protocol, platform or version")
 	}
@@ -155,7 +169,7 @@ func (m Manifest) validate(strict bool) error {
 	}
 	for _, c := range Components {
 		a := m.Artifact(c)
-		if !ValidVersion(c, a.Version) || !ValidDigest(a.SHA256) {
+		if !accepted(c, a.Version) || !ValidDigest(a.SHA256) {
 			return fmt.Errorf("invalid %s artifact", c)
 		}
 	}
@@ -167,7 +181,10 @@ func (m Manifest) validate(strict bool) error {
 			if c == Syncthing && v.Syncthing == "" {
 				continue
 			}
-			if !ValidVersion(c, v.Get(c)) || semver.Compare("v"+m.Artifact(c).Version, "v"+v.Get(c)) < 0 {
+			from, to := v.Get(c), m.Artifact(c).Version
+			// Order is only defined between two versions in a known format.
+			// The strict check has required that format of both by here.
+			if !accepted(c, from) || (ValidVersion(c, from) && ValidVersion(c, to) && semver.Compare("v"+to, "v"+from) < 0) {
 				return fmt.Errorf("unsupported source or downgrade for %s", c)
 			}
 		}

@@ -227,6 +227,22 @@ func TestInstalledHelperAdmitsLaterPlanWithoutWeakeningAdmission(t *testing.T) {
 		{name: "unknown protocol cannot route a stable release through a candidate", change: func(p map[string]any) { p["protocol"] = 2; p["bridge"] = "0.7.0-rc.1" },
 			current: "0.6.9", source: func(v *Versions) { v.VPN = "0.6.9" }, refused: "newer VPN"},
 		{name: "unknown protocol without a usable bridge", change: func(p map[string]any) { p["protocol"] = 2 }, refused: "newer VPN"},
+		{name: "component version in a later format", change: func(p map[string]any) { p["lnd"].(map[string]any)["version"] = "0.22.0" }},
+		{name: "installed version in a later format", change: func(p map[string]any) {
+			p["sources"].([]any)[0].(map[string]any)["lnd"] = "0.22.0"
+			p["lnd"].(map[string]any)["version"] = "0.22.1"
+		}, source: func(v *Versions) { v.LND = "0.22.0" }},
+		{name: "untested combination in a later format", change: func(p map[string]any) {
+			p["sources"].([]any)[0].(map[string]any)["lnd"] = "0.22.0"
+			p["lnd"].(map[string]any)["version"] = "0.22.1"
+		}, refused: "no tested transition"},
+		{name: "downgrade in a format this helper knows", change: func(p map[string]any) { p["lnd"].(map[string]any)["version"] = "0.21.0-beta" }, refused: "downgrade"},
+		{name: "version with control characters", change: func(p map[string]any) { p["lnd"].(map[string]any)["version"] = "0.22.0\x1b[2J" }, refused: "invalid lnd artifact"},
+		{name: "version with a path", change: func(p map[string]any) { p["lnd"].(map[string]any)["version"] = "0.22.0/../../lnd" }, refused: "invalid lnd artifact"},
+		{name: "version too long to show", change: func(p map[string]any) { p["lnd"].(map[string]any)["version"] = "0." + strings.Repeat("9", 40) }, refused: "invalid lnd artifact"},
+		{name: "installed version with control characters", change: func(p map[string]any) {
+			p["sources"].([]any)[0].(map[string]any)["lnd"] = "0.21.1\x1b[2J"
+		}, refused: "unsupported source"},
 		{name: "bridge must be older than its release", change: func(p map[string]any) { p["bridge"] = "0.7.1" }, refused: "bridge"},
 		{name: "stable release cannot route through a candidate", change: func(p map[string]any) { p["bridge"] = "0.7.1-rc.1" }, refused: "bridge"},
 	} {

@@ -66,7 +66,10 @@ func RunWorker(version string) error {
 		return recordWorkerFailure(j, errors.New("node configuration changed during update"))
 	}
 	return runJob(j, workflowOps{
-		save:  func(j *job) error { return saveJob(Root, j) },
+		save: func(j *job) error { return saveJob(Root, j) },
+		identify: func(j *job) error {
+			return observeIdentity(j, host.CheckUpdateProcess, func() (bool, error) { return host.WalletExists(cfg.Network) }, host.SyncthingDeviceID)
+		},
 		stage: func(j *job) error { return stageJob(j) },
 		capacity: func(j *job) error {
 			needs, err := spaceNeeds(Root, paths.BinaryPath, j)
@@ -168,6 +171,33 @@ func inheritFailed(root string, j *job) error {
 	})
 	j.Affected, j.MayHaveRun, j.WalletPresent, j.SyncthingID, j.HostChanges = affected, mayHaveRun, wallet, device, hostChanges
 	j.Completed["inherited"] = true
+	return nil
+}
+
+// observeIdentity requires every affected service to run its installed
+// executable, then records the wallet and device identity that the health
+// checks compare against after the update. This rule belongs to the worker so
+// that a release can change it: a helper that enforced it would keep a node
+// from the very update that repairs a service which cannot start.
+func observeIdentity(j *job, running func(protocol.Component) error, wallet func() (bool, error), device func() string) error {
+	for _, c := range j.Affected {
+		if err := running(c); err != nil {
+			return fmt.Errorf("cancel this update and restart %s first: %w", c, err)
+		}
+	}
+	if slices.Contains(j.Affected, protocol.LND) {
+		var err error
+		j.WalletPresent, err = wallet()
+		if err != nil {
+			return err
+		}
+	}
+	if slices.Contains(j.Affected, protocol.Syncthing) {
+		j.SyncthingID = device()
+		if j.SyncthingID == "" {
+			return errors.New("cannot establish Syncthing device identity")
+		}
+	}
 	return nil
 }
 

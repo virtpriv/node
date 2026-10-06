@@ -13,7 +13,10 @@ import (
 // workflowOps marks the actual trust, storage and service boundaries. Tests
 // interrupt those boundaries and restart with the last durable record.
 type workflowOps struct {
-	save       func(*job) error
+	save func(*job) error
+	// identify reads what the node is before any change: whether each affected
+	// service runs its installed executable, and the wallet and device identity.
+	identify   func(*job) error
 	stage      func(*job) error
 	capacity   func(*job) error
 	discard    func(*job) error
@@ -71,6 +74,17 @@ func runJob(j *job, ops workflowOps) error {
 		j.Phase = "accepted"
 		if j.Completed["staged"] {
 			j.Phase = "installing"
+		}
+	}
+	if !j.HostChanges && j.Phase == "accepted" {
+		// A new job, or a Retry before any host change: the node is still as
+		// it was found, so its services can say what they are. The reading is
+		// saved with the next phase. A later phase therefore always has one,
+		// and a download resumed at boot does not ask services that are still
+		// starting. Once host changes have begun the saved identity stands,
+		// also when an earlier helper or a failed update recorded it.
+		if err := ops.identify(j); err != nil {
+			return refuse(err)
 		}
 	}
 	if !j.Completed["staged"] {
