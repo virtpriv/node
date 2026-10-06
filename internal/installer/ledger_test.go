@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/virtpriv/node/internal/config"
 )
 
 const validLedgerJSON = `{
@@ -187,5 +189,43 @@ func TestLedgerDbCacheImmutable(t *testing.T) {
 	}
 	if err := l.setDbCache(123); err == nil {
 		t.Fatal("invalid dbcache accepted")
+	}
+}
+
+// The record accepts only step sets this installer can produce. With the
+// package upgrade behind Tor, an install stopped just before or just after it
+// must resume, and a record in the earlier order is refused, not reinterpreted.
+func TestLedgerFollowsThePackageUpgradeBehindTor(t *testing.T) {
+	beforeUpgrade := []string{"binary.install", "apt.base", "firewall", "host.prep", "identity.access",
+		"service-identities.v1", "ipv6.disable", "tor.configure", "tor.gate", "apt.torproxy"}
+	record := func(keys ...string) *installLedger {
+		t.Helper()
+		l := testLedger()
+		for _, key := range keys {
+			if err := l.markDone(key, "0.7.0"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return l
+	}
+	stopped := record(beforeUpgrade...)
+	if err := validateLedger(stopped); err != nil {
+		t.Fatal("install stopped before the package upgrade cannot resume:", err)
+	}
+	steps := buildInstallSteps(config.Default(), &InstallDecisions{})
+	var runs []string
+	for i, p := range planRun(steps, stopped) {
+		if p.Run && steps[i].Kind != StepGate {
+			runs = append(runs, steps[i].Key)
+		}
+	}
+	if len(runs) == 0 || runs[0] != "base.upgrade" {
+		t.Fatal("resume does not continue with the package upgrade:", runs)
+	}
+	if err := validateLedger(record(append(beforeUpgrade, "base.upgrade")...)); err != nil {
+		t.Fatal("install stopped after the package upgrade cannot resume:", err)
+	}
+	if validateLedger(record("binary.install", "apt.base", "firewall", "base.upgrade")) == nil {
+		t.Fatal("accepted a record in the earlier order, where the upgrade ran before Tor")
 	}
 }

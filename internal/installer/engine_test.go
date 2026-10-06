@@ -11,7 +11,9 @@ import (
 
 // testSteps builds a miniature install list with the shapes
 // that matter: plain mutations, a gate, and a 3-member
-// pipeline group. Fns count executions into calls.
+// pipeline group. Fns count executions into calls. The keys are
+// the first seven of the real install, in its order, because the
+// ledger accepts only step sets a real install can reach.
 func testSteps(calls map[string]int) []InstallStep {
 	fn := func(key string) func() error {
 		return func() error {
@@ -26,14 +28,14 @@ func testSteps(calls map[string]int) []InstallStep {
 			Fn: fn("apt.base")},
 		{Key: "firewall", Name: "Verifying firewall",
 			Kind: StepGate, Fn: fn("firewall")},
-		{Key: "base.upgrade", Group: "pipeline", Name: "Downloading",
-			Fn: fn("base.upgrade")},
-		{Key: "host.prep", Group: "pipeline", Name: "Verifying",
+		{Key: "host.prep", Group: "pipeline", Name: "Downloading",
 			Fn: fn("host.prep")},
-		{Key: "identity.access", Group: "pipeline", Name: "Installing",
+		{Key: "identity.access", Group: "pipeline", Name: "Verifying",
 			Fn: fn("identity.access")},
-		{Key: "service-identities.v1", Name: "Service identities",
+		{Key: "service-identities.v1", Group: "pipeline", Name: "Installing",
 			Fn: fn("service-identities.v1")},
+		{Key: "ipv6.disable", Name: "Disabling IPv6",
+			Fn: fn("ipv6.disable")},
 	}
 }
 
@@ -100,8 +102,8 @@ func TestValidateSteps(t *testing.T) {
 
 func TestPlanScenarios(t *testing.T) {
 	all := []string{"binary.install", "apt.base", "firewall",
-		"base.upgrade", "host.prep", "identity.access",
-		"service-identities.v1"}
+		"host.prep", "identity.access", "service-identities.v1",
+		"ipv6.disable"}
 
 	cases := []struct {
 		name    string
@@ -121,18 +123,18 @@ func TestPlanScenarios(t *testing.T) {
 		{
 			name: "resume after step 2: gate re-runs, rest forward",
 			done: []string{"binary.install", "apt.base"},
-			wantRun: []string{"firewall", "base.upgrade",
-				"host.prep", "identity.access", "service-identities.v1"},
+			wantRun: []string{"firewall", "host.prep",
+				"identity.access", "service-identities.v1", "ipv6.disable"},
 		},
 		{
 			// THE group test: download+verify recorded but the
-			// terminal (identity.access) is not — the whole group
-			// re-runs (the workdir died with the old process).
+			// terminal (service-identities.v1) is not, so the whole
+			// group re-runs (the workdir died with the old process).
 			name: "incomplete group re-runs whole",
 			done: []string{"binary.install", "apt.base",
-				"firewall", "base.upgrade", "host.prep"},
-			wantRun: []string{"firewall", "base.upgrade",
-				"host.prep", "identity.access", "service-identities.v1"},
+				"firewall", "host.prep", "identity.access"},
+			wantRun: []string{"firewall", "host.prep",
+				"identity.access", "service-identities.v1", "ipv6.disable"},
 		},
 		{
 			// Terminal recorded: the group is complete even if
@@ -140,16 +142,16 @@ func TestPlanScenarios(t *testing.T) {
 			// consulted for group members).
 			name: "group judged by terminal only",
 			done: []string{"binary.install", "apt.base",
-				"firewall", "identity.access"},
-			wantRun: []string{"firewall", "service-identities.v1"},
+				"firewall", "service-identities.v1"},
+			wantRun: []string{"firewall", "ipv6.disable"},
 		},
 		{
 			name: "unknown ledger keys ignored",
 			done: []string{"binary.install", "no.such.step",
 				"another.ghost"},
 			wantRun: []string{"apt.base", "firewall",
-				"base.upgrade", "host.prep", "identity.access",
-				"service-identities.v1"},
+				"host.prep", "identity.access", "service-identities.v1",
+				"ipv6.disable"},
 		},
 	}
 
@@ -372,8 +374,8 @@ func TestRunInstallUnattendedFailureStops(t *testing.T) {
 		t.Errorf("failed at %d, want 3", res.StepNum)
 	}
 	// Nothing after the failure ran.
-	for _, k := range []string{"base.upgrade", "host.prep",
-		"identity.access", "service-identities.v1"} {
+	for _, k := range []string{"host.prep", "identity.access",
+		"service-identities.v1", "ipv6.disable"} {
 		if calls[k] != 0 {
 			t.Errorf("%s ran after the failure", k)
 		}
@@ -394,18 +396,18 @@ func TestWillRun(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/ledger.json"
 	steps := []InstallStep{
-		{Key: "identity.access", Name: "a", Fn: func() error { return nil }},
+		{Key: "service-identities.v1", Name: "a", Fn: func() error { return nil }},
 		{Key: "btc.install", Name: "b", Fn: func() error { return nil }},
 	}
 	led := testLedger()
-	if err := led.markDone("identity.access", "1.0"); err != nil {
+	if err := led.markDone("service-identities.v1", "1.0"); err != nil {
 		t.Fatal(err)
 	}
 	r, err := newStepRunner(steps, "1.0", led, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.willRun("identity.access") {
+	if r.willRun("service-identities.v1") {
 		t.Error("recorded step reported as will-run")
 	}
 	if !r.willRun("btc.install") {
