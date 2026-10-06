@@ -87,7 +87,7 @@ var newInstallStartupDependencies = productionInstallStartupDependencies
 func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 	if os.Geteuid() != 0 {
 		return errors.New(
-			"the installer must run as root — run: sudo vpn install")
+			"the installer must run as root, run: sudo vpn install")
 	}
 	if opts.UntilBake && !opts.Unattended {
 		return errors.New(
@@ -118,13 +118,13 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 		return err
 	}
 	if lifecycle.Disposition == lifecycleCompleted {
-		fmt.Println("\n  Virtual Private Node is already installed; no changes were made.")
+		fmt.Println("\n  Virtual Private Node is already installed. No changes were made.")
 		return nil
 	}
 	if lifecycle.Disposition != lifecyclePristine &&
 		!opts.Unattended && passwordPending() {
 		return errors.New(
-			"an interrupted unattended install still owes password delivery — resume with: sudo vpn install --unattended")
+			"an interrupted unattended install still owes password delivery, resume with: sudo vpn install --unattended")
 	}
 
 	if !opts.Unattended && frontend == nil {
@@ -153,7 +153,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 		ctx := *lifecycle.BootstrapContext
 		if opts.Network != "" && opts.Network != ctx.Network {
 			return fmt.Errorf(
-				"--%s conflicts with the interrupted install network %q — drop the flag to resume the recorded lifecycle",
+				"--%s conflicts with the interrupted install network %q, drop the flag to resume the recorded lifecycle",
 				opts.Network, ctx.Network)
 		}
 		ledger, err = resumeLifecycleBootstrap(fs, lookup, ctx)
@@ -162,12 +162,12 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 		}
 	} else if opts.Network != "" && opts.Network != ledger.Context.Network {
 		return fmt.Errorf(
-			"--%s conflicts with the interrupted install network %q — drop the flag to resume the recorded lifecycle",
+			"--%s conflicts with the interrupted install network %q, drop the flag to resume the recorded lifecycle",
 			opts.Network, ledger.Context.Network)
 	}
 	if lifecycle.Disposition == lifecycleCompletionPending && opts.UntilBake {
 		return errors.New(
-			"base installation is awaiting finalization — resume without --until=bake")
+			"base installation is awaiting finalization, resume without --until=bake")
 	}
 
 	// General configuration is reconstructed from immutable lifecycle context
@@ -231,7 +231,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 	if lifecycle.Disposition == lifecycleCompletionPending {
 		res = RunResult{Outcome: RunComplete, Total: len(allSteps)}
 	} else if opts.Unattended {
-		fmt.Printf("\n  Virtual Private Node — unattended install\n\n")
+		fmt.Printf("\n  Virtual Private Node, unattended install\n\n")
 		res, err = RunInstallUnattended(
 			steps, appVersion, ledger, paths.InstallStateFile)
 	} else {
@@ -259,11 +259,11 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 		// The log trail must not just stop (commit-5 addendum):
 		// record how far the run got, and that a re-run resumes.
 		logger.Install(
-			"install INTERRUPTED at step %d/%d: %s — "+
+			"install INTERRUPTED at step %d/%d: %s, "+
 				"run again to resume", res.StepNum, res.Total,
 			res.StepName)
 		return fmt.Errorf(
-			"install interrupted at step %d/%d (%s) — "+
+			"install interrupted at step %d/%d (%s), "+
 				"run again to resume", res.StepNum, res.Total,
 			res.StepName)
 	}
@@ -273,8 +273,8 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 		// completing: first-boot steps (identity, hardware fit,
 		// SSH hardening) are still owed on the deployed box.
 		logger.Install(
-			"bake phase complete (%d steps) — install NOT marked "+
-				"complete; first-boot steps pending", res.Total)
+			"bake phase complete (%d steps), install NOT marked "+
+				"complete, first-boot steps pending", res.Total)
 		fmt.Printf("\n  Bake phase complete (%d steps).\n", res.Total)
 		return nil
 	}
@@ -299,7 +299,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 			}
 			dec.PasswordApplied = true
 			logger.Install("admin password re-applied at " +
-				"completion — an earlier pass applied one that " +
+				"completion, because an earlier pass applied one that " +
 				"was never displayed")
 		}
 	}
@@ -376,7 +376,7 @@ func prepareInstallCompletion(
 	if ledger.done("identity.access") {
 		observed, err := host.AdminLoginObserved()
 		if err != nil {
-			logger.Install("SSH login evidence unavailable; leaving verification pending: %v", err)
+			logger.Install("SSH login evidence unavailable, leaving verification pending: %v", err)
 		}
 		if err := host.SetKeyVerificationPending(!observed || err != nil); err != nil {
 			return fmt.Errorf("prepare SSH login verification: %w", err)
@@ -407,7 +407,7 @@ func publishTerminalLedger(ledger *installLedger) error {
 
 func printGeneratedPassword(password string) error {
 	_, err := fmt.Fprintf(os.Stdout,
-		"\n  Login password for %q (SAVE IT — it will not be shown again):\n\n    %s\n",
+		"\n  Login password for %q (SAVE IT, it will not be shown again):\n\n    %s\n",
 		paths.AdminUser, password)
 	if err != nil {
 		return fmt.Errorf("display generated login password: %w", err)
@@ -436,6 +436,19 @@ func fillGeneratedPassword(dec *InstallDecisions) error {
 	return nil
 }
 
+// The package upgrade step calls these through variables so that a test can
+// stand in for apt and for Tor. After an upgrade only Tor's own readiness is
+// asked again. The exit probe of the Tor gate is not repeated: a restart of
+// Tor does not change whether torsocks intercepts, and the next download
+// refuses to run without Tor in any case.
+var (
+	refreshPackageLists   = host.RefreshPackageLists
+	upgradeBasePackages   = host.UpgradePackages
+	verifyTorAfterUpgrade = func() error {
+		return waitForTorBootstrap(torStallWindow, torBootstrapCeiling)
+	}
+)
+
 // buildInstallSteps returns the initial-install step list. Every
 // step carries a stable Key (the ledger identity — versionless),
 // a Kind (gates re-run every pass), a Group where steps hand
@@ -446,10 +459,11 @@ func fillGeneratedPassword(dec *InstallDecisions) error {
 // per-box state that an image build box cannot know).
 //
 // Order (ruling xvi(b)): the firewall step sits immediately
-// after the single clearnet apt op — default-deny lands before
-// the base upgrade, the longest pre-Tor phase. Outbound stays
-// default-allow so Tor can bootstrap behind it; established SSH
-// sessions are unaffected by `ufw enable`.
+// after the single clearnet apt op, so default-deny lands before
+// anything else. Outbound stays default-allow so Tor can
+// bootstrap behind it; established SSH sessions are unaffected
+// by `ufw enable`. The base upgrade, which on a stale image is a
+// large download, waits until apt has been sent through Tor.
 func buildInstallSteps(
 	cfg *config.AppConfig, dec *InstallDecisions,
 ) []InstallStep {
@@ -471,9 +485,6 @@ func buildInstallSteps(
 			Fn:   host.InstallBasePackages},
 		{Key: "firewall", Name: "Configuring firewall",
 			Fn: func() error { return host.ConfigureInitialFirewall(cfg) }},
-		{Key: "base.upgrade",
-			Name: "Upgrading base packages",
-			Fn:   host.UpgradePackages},
 		{Key: "host.prep",
 			Name: "Configuring hostname and clock sync",
 			Fn:   host.PrepareBaseHost},
@@ -514,6 +525,23 @@ func buildInstallSteps(
 					return err
 				}
 				return host.EnsureGPG()
+			}},
+		// Through Tor, like every later apt operation. The package lists
+		// are fetched again first: those from the first step can be days
+		// old when an install resumes, and a superseded package can no
+		// longer be downloaded. An upgrade can restart Tor, for example
+		// with a library Tor uses, so the step reports done only once Tor
+		// is ready again. The next step downloads through it.
+		{Key: "base.upgrade",
+			Name: "Upgrading base packages",
+			Fn: func() error {
+				if err := refreshPackageLists(); err != nil {
+					return err
+				}
+				if err := upgradeBasePackages(); err != nil {
+					return err
+				}
+				return verifyTorAfterUpgrade()
 			}},
 		{Key: "btc.download", Group: "btc",
 			Name: "Downloading Bitcoin Core " + component.BitcoinCoreVersion,

@@ -384,7 +384,7 @@ For the full setup guide, see
 - Channel backups cross through a dedicated `lnd` publisher into the project-owned `/var/lib/vpn/exports` boundary; Syncthing can read only the completed `channel.backup`, cannot write the export, and cannot read `/var/lib/lnd` or private staging
 - GPG signature verification for all software, any bad signature is a hard stop
 - Unattended security upgrades with auto-reboot
-- Base packages upgraded during install — behind the firewall, which comes up first — to close CVE windows on stale server images
+- Base packages upgraded during install, through Tor and behind the firewall, to close CVE windows on stale server images
 - Syncthing backup sync: mutual TLS device approval, web UI only via Tor
 - Bitcoin Core wallet disabled
 - All downloads and apt operations route through Tor once Tor is up (verified by a hard gate before any download)
@@ -394,29 +394,30 @@ For the full setup guide, see
 - Mandatory seed confirmation ("I SAVED MY SEED") during wallet creation
 - Auto-unlock (optional) uses an `lnd:lnd` 0400 local password file, never sends the password over the network, and verifies a new LND invocation before publishing success
 
-### Privacy — Network Traffic
+### Privacy & Network Traffic
 
 Downloading the `vpn` binary and signing key is
-ordinary clearnet traffic — Tor does not exist on the box yet.
+ordinary clearnet traffic, because Tor does not exist on the box yet.
 After that, the installer makes two types of network calls:
 
 **Phase 1 (clearnet, unavoidable):**
-- `apt-get update` — Debian package index refresh
-- one `apt-get install` — Tor, torsocks, ufw and base tools,
+- `apt-get update`: Debian package index refresh
+- one `apt-get install`: Tor, torsocks, ufw and base tools,
   from Debian package mirrors
-- `apt-get upgrade` — Debian security updates (runs behind the
-  freshly enabled firewall)
-- NTP time sync enablement — ongoing clock sync queries to the
+- NTP time sync enablement: ongoing clock sync queries to the
   Debian NTP pool (continues after install)
 
 **Phase 2 (all through Tor, hard-gated):**
+- Debian package index refresh and package upgrade (behind the
+  firewall, which is enabled in Phase 1)
 - Bitcoin Core and LND downloads
 - Syncthing download (when Syncthing is installed)
 - All subsequent apt operations
 
-Before the first Phase-2 download, the installer verifies Tor
+Before the first Phase 2 download, the installer verifies Tor
 routing on Tor's own control port and refuses to continue if it
-cannot confirm it — on every run, including resumes.
+cannot confirm it. It does so on every run, including resumes,
+and again after the package upgrade.
 
 After install, the only ongoing clearnet traffic is NTP clock
 sync (to the Debian NTP pool), Syncthing sync (port 22000) if

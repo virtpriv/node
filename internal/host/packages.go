@@ -23,6 +23,13 @@ func upgradePackages(run func(string, ...string) error) error {
 		"-o", "Dpkg::Options::=--force-confold")
 }
 
+// RefreshPackageLists fetches the package lists by whatever route apt is
+// configured to use. Unlike a runtime package update it tolerates a source
+// that cannot be reached: apt then keeps the list it has.
+func RefreshPackageLists() error {
+	return system.RunRoot("apt-get", "update", "-qq")
+}
+
 // UpdatePackages completes accepted package work independently of the observer.
 // Do not attach the terminal's cancellation to apt/dpkg: a lost connection must
 // not interrupt package configuration. Apt retains its installed Tor routing,

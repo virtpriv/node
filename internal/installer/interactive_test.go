@@ -281,10 +281,10 @@ func TestInteractiveResumeExecutesGateAndPublishesSkips(t *testing.T) {
 			skips++
 		}
 	}
-	if skips != 5 || len(calls) != 2 || calls["firewall"] != 1 || calls["service-identities.v1"] != 1 {
+	if skips != 5 || len(calls) != 2 || calls["firewall"] != 1 || calls["ipv6.disable"] != 1 {
 		t.Fatalf("resume skips=%d calls=%v", skips, calls)
 	}
-	if !mustReadLedger(t, path).done("service-identities.v1") {
+	if !mustReadLedger(t, path).done("ipv6.disable") {
 		t.Fatal("resume did not publish remaining progress")
 	}
 }

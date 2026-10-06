@@ -30,7 +30,6 @@ var baseInstallStepKeys = []string{
 	"binary.install",
 	"apt.base",
 	"firewall",
-	"base.upgrade",
 	"host.prep",
 	"identity.access",
 	"service-identities.v1",
@@ -38,6 +37,7 @@ var baseInstallStepKeys = []string{
 	"tor.configure",
 	"tor.gate",
 	"apt.torproxy",
+	"base.upgrade",
 	"btc.download",
 	"btc.verify",
 	"btc.install",
@@ -62,13 +62,13 @@ var bakeInstallStepKeys = []string{
 	"binary.install",
 	"apt.base",
 	"firewall",
-	"base.upgrade",
 	"host.prep",
 	"service-identities.v1",
 	"ipv6.disable",
 	"tor.configure",
 	"tor.gate",
 	"apt.torproxy",
+	"base.upgrade",
 	"btc.download",
 	"btc.verify",
 	"btc.install",
@@ -282,7 +282,7 @@ func (l *installLedger) setDbCache(v int) error {
 		return fmt.Errorf("invalid db cache %d", v)
 	}
 	if l.Context.DbCacheMB != nil && *l.Context.DbCacheMB != v {
-		return fmt.Errorf("db cache is already recorded as %d; refusing %d",
+		return fmt.Errorf("db cache is already recorded as %d, refusing %d",
 			*l.Context.DbCacheMB, v)
 	}
 	l.Context.DbCacheMB = &v

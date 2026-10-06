@@ -298,3 +298,99 @@ func unexpectedInstallFrontend(t *testing.T) InstallFrontend {
 		return false, nil
 	}
 }
+
+// On a stale image the package upgrade is a large download. It must wait
+// until apt has been told to use Tor, in the full install and in an image
+// build alike, and the firewall must still come up right after the only
+// package step that runs without Tor.
+func TestPackageUpgradeRunsBehindTorAndFirewallStaysFirst(t *testing.T) {
+	steps := buildInstallSteps(config.Default(), &InstallDecisions{})
+	for name, list := range map[string][]InstallStep{"full": steps, "bake": FilterPhase(steps, PhaseBake)} {
+		t.Run(name, func(t *testing.T) {
+			at := func(key string) int {
+				t.Helper()
+				for i, s := range list {
+					if s.Key == key {
+						return i
+					}
+				}
+				t.Fatalf("step %q is missing", key)
+				return -1
+			}
+			if at("firewall") != at("apt.base")+1 {
+				t.Fatal("the firewall no longer follows the first package step directly")
+			}
+			if at("apt.torproxy") < at("tor.gate") {
+				t.Fatal("apt is sent through Tor before Tor routing is verified")
+			}
+			if at("base.upgrade") < at("apt.torproxy") {
+				t.Fatal("the package upgrade runs before apt uses Tor")
+			}
+			if at("btc.download") < at("base.upgrade") {
+				t.Fatal("the package upgrade runs after the node software downloads")
+			}
+		})
+	}
+}
+
+// An upgrade can restart Tor. The step must not report done until Tor routes
+// again, or the next download starts into a Tor that is still coming back.
+func TestPackageUpgradeConfirmsTorBeforeItReportsDone(t *testing.T) {
+	refresh, upgrade, verify := refreshPackageLists, upgradeBasePackages, verifyTorAfterUpgrade
+	t.Cleanup(func() {
+		refreshPackageLists, upgradeBasePackages, verifyTorAfterUpgrade = refresh, upgrade, verify
+	})
+	for _, tc := range []struct {
+		refreshed, upgraded, torReturns bool
+		want                            string
+	}{
+		// The list from the first step can be days old when an install
+		// resumes, so it is fetched again, now through Tor.
+		{true, true, true, "refresh, upgrade, verify Tor"},
+		{true, true, false, "refresh, upgrade, verify Tor"},
+		// A failed upgrade must fail the step, or it is recorded as done.
+		{true, false, true, "refresh, upgrade"},
+		{false, true, true, "refresh"},
+	} {
+		torReturns := tc.torReturns
+		var calls []string
+		refreshPackageLists = func() error {
+			calls = append(calls, "refresh")
+			if !tc.refreshed {
+				return errors.New("apt failed")
+			}
+			return nil
+		}
+		upgradeBasePackages = func() error {
+			calls = append(calls, "upgrade")
+			if !tc.upgraded {
+				return errors.New("apt failed")
+			}
+			return nil
+		}
+		verifyTorAfterUpgrade = func() error {
+			calls = append(calls, "verify Tor")
+			if !torReturns {
+				return errors.New("Tor is not routing")
+			}
+			return nil
+		}
+		var step *InstallStep
+		steps := buildInstallSteps(config.Default(), &InstallDecisions{})
+		for i := range steps {
+			if steps[i].Key == "base.upgrade" {
+				step = &steps[i]
+			}
+		}
+		if step == nil {
+			t.Fatal("no package upgrade step")
+		}
+		err := step.Fn()
+		if strings.Join(calls, ", ") != tc.want {
+			t.Fatalf("step did %q, want %q", calls, tc.want)
+		}
+		if (err == nil) != (tc.refreshed && tc.upgraded && torReturns) {
+			t.Fatalf("refreshed=%v, upgraded=%v, Tor routing=%v, but the step returned %v", tc.refreshed, tc.upgraded, torReturns, err)
+		}
+	}
+}
