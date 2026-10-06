@@ -253,11 +253,12 @@ command="$1"; shift
 case "$command" in
     env) test "$*" = GOVERSION; echo "$RELEASE_TEST_GO_VERSION" ;;
     build)
-        readonly_mod=0; trimpath=0; output=; flags=; package=
+        readonly_mod=0; trimpath=0; buildvcs=1; output=; flags=; package=
         while [ "$#" -gt 0 ]; do
             case "$1" in
                 -mod=readonly) readonly_mod=1 ;;
                 -trimpath) trimpath=1 ;;
+                -buildvcs=false) buildvcs=0 ;;
                 -ldflags=*) flags="${1#-ldflags=}" ;;
                 -o) shift; output="$1" ;;
                 -o=*) output="${1#-o=}" ;;
@@ -266,7 +267,7 @@ case "$command" in
             esac
             shift
         done
-        test "$readonly_mod:$trimpath:$package" = 1:1:./cmd/
+        test "$readonly_mod:$trimpath:$buildvcs:$package" = 1:1:0:./cmd/
         test -n "$output"
         for required in '-s' '-w' "-X main.version=$RELEASE_TEST_VERSION"; do
             case " $flags " in *" $required "*) ;; *) exit 1 ;; esac

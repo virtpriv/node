@@ -84,7 +84,11 @@ func run(args []string) error {
 		return err
 	}
 	binary := filepath.Join(work, "vpn")
-	cmd := goCommand("build", "-mod=readonly", "-trimpath", "-ldflags=-s -w -X main.version="+version, "-o", binary, "./cmd/")
+	// Without -buildvcs=false Go records a module version taken from the Git
+	// tags it finds, so the same commit builds a different executable
+	// depending on which tags are present. The source of a release is
+	// identified by its signed tag, not by a stamp inside the executable.
+	cmd := goCommand("build", "-mod=readonly", "-trimpath", "-buildvcs=false", "-ldflags=-s -w -X main.version="+version, "-o", binary, "./cmd/")
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("build VPN: %w", err)
@@ -109,7 +113,7 @@ func run(args []string) error {
 	if release.IsCandidate(version) {
 		fmt.Println("Mark it as a prerelease before publishing for testing.")
 	} else {
-		fmt.Println("Publish with the prerelease flag for final validation by exact tag; after validation, clear that flag and mark it latest.")
+		fmt.Println("Publish with the prerelease flag for final validation by exact tag. After validation, clear that flag and mark it latest.")
 	}
 	fmt.Println("Keep published assets unchanged. Use a new version for revisions.")
 	return nil
@@ -140,7 +144,7 @@ func checkToolchain() error {
 		return err
 	}
 	if got, want := strings.TrimSpace(string(b)), "go"+m.Go.Version; got != want {
-		return fmt.Errorf("release build requires %s; found %s", want, got)
+		return fmt.Errorf("release build requires %s, found %s", want, got)
 	}
 	return nil
 }
