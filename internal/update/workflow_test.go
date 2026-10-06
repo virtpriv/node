@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -30,6 +31,23 @@ type workflowHarness struct {
 	failure   string
 	// crash, when set, is asked after each durable save whether power is lost.
 	crash func(*job) bool
+	// wallet and device are what the live node would answer. identifies and
+	// walletReads count the readings, and eventsBeforeIdentity is how much had
+	// happened by the last one.
+	wallet               bool
+	device               string
+	identifies           int
+	walletReads          int
+	eventsBeforeIdentity int
+}
+
+// identify runs the worker's own rule against the fixture's services.
+func (h *workflowHarness) identify(j *job) error {
+	h.identifies++
+	h.eventsBeforeIdentity = len(h.events)
+	return observeIdentity(j, h.checkRunning,
+		func() (bool, error) { h.walletReads++; return h.wallet, nil },
+		func() string { return h.device })
 }
 
 func (h *workflowHarness) checkpoint(j *job) error {
@@ -76,6 +94,7 @@ func (h *workflowHarness) effect(name string, fn func() error) error {
 func (h *workflowHarness) ops() workflowOps {
 	return workflowOps{
 		save:     h.checkpoint,
+		identify: h.identify,
 		stage:    func(*job) error { return h.effect("stage", nil) },
 		capacity: func(*job) error { return h.effect("capacity", nil) },
 		discard:  func(*job) error { return h.effect("discard", nil) },
@@ -110,7 +129,7 @@ func (h *workflowHarness) ops() workflowOps {
 }
 func newHarness(t *testing.T, j *job) *workflowHarness {
 	root, binary := workerFiles(t, j)
-	h := &workflowHarness{t: t, root: root, binary: binary, running: map[protocol.Component]bool{}}
+	h := &workflowHarness{t: t, root: root, binary: binary, running: map[protocol.Component]bool{}, device: "fixture device"}
 	for _, c := range j.Affected {
 		h.running[c] = true
 	}
@@ -397,5 +416,158 @@ func TestFailedCleanupDoesNotUndoCompletion(t *testing.T) {
 	h.failure = "discard"
 	if err := runJob(j, h.ops()); err != nil || h.reload().Phase != "complete" {
 		t.Fatal("leftover downloads failed a completed update", err)
+	}
+}
+
+// The worker reads the node's identity itself, once, before it changes
+// anything. After host changes begin, a stopped LND could no longer say
+// whether it has a wallet.
+func TestWorkerReadsIdentityOnlyBeforeHostChanges(t *testing.T) {
+	t.Run("read once before any download or service change", func(t *testing.T) {
+		j := workflowFixture()
+		h := newHarness(t, j)
+		h.wallet, h.device = true, "device"
+		if err := runJob(j, h.ops()); err != nil {
+			t.Fatal(err)
+		}
+		if h.identifies != 1 || h.eventsBeforeIdentity != 0 {
+			t.Fatalf("identity read %d times, after %d host steps", h.identifies, h.eventsBeforeIdentity)
+		}
+		if saved := h.reload(); !saved.WalletPresent || saved.SyncthingID != "device" {
+			t.Fatal("identity was not saved with the job")
+		}
+	})
+	t.Run("a stopped service is refused without touching the others, and the refusal can be cancelled or retried", func(t *testing.T) {
+		for _, answer := range []string{"cancel", "retry"} {
+			j := workflowFixture()
+			h := newHarness(t, j)
+			h.running[protocol.LND] = false
+			if runJob(j, h.ops()) == nil {
+				t.Fatal("a node with a stopped service was updated")
+			}
+			if saved := h.reload(); saved.Phase != "failed" || saved.HostChanges || len(h.events) != 0 {
+				t.Fatal("refusal reached the host:", saved.Phase, saved.HostChanges, h.events)
+			}
+			if h.walletReads != 0 {
+				t.Fatal("asked a stopped LND about its wallet")
+			}
+			if !h.running[protocol.Bitcoin] || !h.running[protocol.Syncthing] {
+				t.Fatal("refusal stopped a running service")
+			}
+			if answer == "cancel" {
+				if err := cancelUpdate(h.root, j.Review.Digest); err != nil {
+					t.Fatal("refusal could not be cancelled:", err)
+				}
+				continue
+			}
+			if err := retryUpdate(h.root, j.Review.Digest); err != nil {
+				t.Fatal(err)
+			}
+			h.running[protocol.LND], h.wallet = true, true
+			if err := runJob(h.reload(), h.ops()); err != nil || h.reload().Phase != "complete" {
+				t.Fatal("retry after the refusal did not complete:", err)
+			}
+			if h.identifies != 2 || !h.reload().WalletPresent {
+				t.Fatal("retry did not read the node again")
+			}
+		}
+	})
+	t.Run("a device without an identity is refused", func(t *testing.T) {
+		j := workflowFixture()
+		h := newHarness(t, j)
+		h.device = ""
+		if runJob(j, h.ops()) == nil || h.reload().HostChanges || len(h.events) != 0 {
+			t.Fatal("updated Syncthing with no identity to compare afterwards", h.events)
+		}
+	})
+	t.Run("an update that leaves LND alone does not need LND", func(t *testing.T) {
+		j := workflowFixture()
+		j.Review.Source.Bitcoin, j.Review.Source.LND = j.Review.Manifest.Bitcoin.Version, j.Review.Manifest.LND.Version
+		j.Review.Manifest.Sources = []protocol.Versions{j.Review.Source}
+		j.Affected = j.Review.Manifest.Affected(j.Review.Source)
+		h := newHarness(t, j)
+		if err := runJob(j, h.ops()); err != nil {
+			t.Fatal(err)
+		}
+		if h.walletReads != 0 || !slices.Equal(j.Affected, []protocol.Component{protocol.Syncthing}) {
+			t.Fatal("asked LND about its wallet for an update that does not touch it", j.Affected)
+		}
+	})
+	t.Run("not read again after host changes began", func(t *testing.T) {
+		j := workflowFixture()
+		h := newHarness(t, j)
+		h.wallet = true
+		h.failure = "start:lnd"
+		if runJob(j, h.ops()) == nil {
+			t.Fatal("fixture did not fail")
+		}
+		if err := retryUpdate(h.root, j.Review.Digest); err != nil {
+			t.Fatal(err)
+		}
+		h.failure = ""
+		if err := runJob(h.reload(), h.ops()); err != nil {
+			t.Fatal(err)
+		}
+		if h.identifies != 1 || !h.reload().WalletPresent {
+			t.Fatal("retry read a stopped node and lost the wallet record")
+		}
+	})
+	t.Run("a job from an earlier helper keeps the identity that helper saved", func(t *testing.T) {
+		j := workflowFixture()
+		j.WalletPresent, j.SyncthingID = true, "original device"
+		j.HostChanges, j.Phase = true, "retry"
+		j.Completed["staged"] = true
+		h := newHarness(t, j)
+		h.running = map[protocol.Component]bool{}
+		if err := runJob(j, h.ops()); err != nil {
+			t.Fatal(err)
+		}
+		if saved := h.reload(); h.identifies != 0 || !saved.WalletPresent || saved.SyncthingID != "original device" {
+			t.Fatal("identity saved by the earlier helper was replaced")
+		}
+	})
+}
+
+// A repair inherits the identity saved before the failed update changed the
+// host. If that update failed before it changed anything, nothing was saved
+// and the node is still as it was, so the repair reads it.
+func TestRepairReadsIdentityOnlyWhenTheFailedUpdateChangedNothing(t *testing.T) {
+	for _, changed := range []bool{true, false} {
+		t.Run(fmt.Sprintf("host changed=%v", changed), func(t *testing.T) {
+			failed := workflowFixture()
+			failed.Phase, failed.HostChanges = "failed", changed
+			if changed {
+				failed.WalletPresent, failed.SyncthingID = true, "original device"
+				failed.MayHaveRun[protocol.LND] = true
+			}
+			j := workflowFixture()
+			j.Review.Digest, j.Previous = strings.Repeat("b", 64), failed.Review.Digest
+			j.HostChanges = changed
+			h := newHarness(t, j)
+			h.wallet, h.device = true, "device read now"
+			if changed {
+				// The failed update left its services stopped.
+				h.running = map[protocol.Component]bool{}
+			}
+			if err := os.Mkdir(failed.dir(h.root), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeJSON(filepath.Join(failed.dir(h.root), "result.json"), failed); err != nil {
+				t.Fatal(err)
+			}
+			if err := inheritFailed(h.root, j); err != nil {
+				t.Fatal(err)
+			}
+			if err := runJob(j, h.ops()); err != nil {
+				t.Fatal(err)
+			}
+			saved := h.reload()
+			if changed && (h.identifies != 0 || !saved.WalletPresent || saved.SyncthingID != "original device") {
+				t.Fatal("repair replaced the identity saved before the failed update")
+			}
+			if !changed && (h.identifies != 1 || h.eventsBeforeIdentity != 0 || !saved.WalletPresent || saved.SyncthingID != "device read now") {
+				t.Fatal("repair went ahead without an identity")
+			}
+		})
 	}
 }
