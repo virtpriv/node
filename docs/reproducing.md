@@ -28,7 +28,8 @@ GOTOOLCHAIN=local go run ./cmd/release 0.7.0
 ```
 
 Substitute the version being released. The command checks the exact compiler
-version, builds for Linux amd64 with CGO disabled, creates the archive and
+version, builds for Linux amd64 with CGO disabled and without Git data, so
+the result does not depend on which tags a clone holds, creates the archive and
 checksums, and signs locally with the VPN release key. GPG must be installed
 and that key available in your local keyring. Signing can prompt through your
 normal GPG setup. Verification uses an isolated keyring and the same pinned
@@ -44,7 +45,7 @@ Never replace files already published under a release tag.
 Versions must be canonical `MAJOR.MINOR.PATCH` or `MAJOR.MINOR.PATCH-rc.N`,
 where N is a positive integer without leading zeros. RCs use the same packaging
 and signing process as stable releases. Archive member metadata is fixed so
-local timestamps and user/group IDs do not change its checksum; GPG signatures
+local timestamps and user/group IDs do not change its checksum. GPG signatures
 have their own creation timestamps.
 
 Node updates additionally require a tested plan as the second argument.
@@ -58,7 +59,7 @@ GOTOOLCHAIN=local go run ./cmd/release VERSION path/to/tested-update-plan.json
 The command validates the plan against the build's component pins and supported
 host operations, then includes those exact bytes as `update.json` in the signed
 archive. See [managed updates](updating.md) for the release contract and
-required integration validation. The tool prepares files locally; publication
+required integration validation. The tool prepares files locally. Publication
 on GitHub is a separate step.
 
 This packaging contract matches the VPN updater. Reproduction against the
@@ -140,7 +141,7 @@ Change into the project folder and build:
 cd node
 VERSION="${GIT_TAG#v}"
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -trimpath \
+    go build -trimpath -buildvcs=false \
     -ldflags="-s -w -X main.version=${VERSION}" \
     -o rlvpn ./cmd/
 ```
@@ -204,6 +205,7 @@ If the checksums do not match, check the following:
 | --- | --- |
 | Different Go version | Check `go.mod` and use the exact version listed |
 | Missing `-trimpath` | Local filesystem paths get embedded in the binary |
+| Missing `-buildvcs=false` | Git tags and commit data get embedded in the binary |
 | CGO enabled | Set `CGO_ENABLED=0` explicitly |
 | Different `ldflags` | Must include `-s -w -X main.version=VERSION` |
 | OS/arch mismatch | Must build with `GOOS=linux GOARCH=amd64` |
