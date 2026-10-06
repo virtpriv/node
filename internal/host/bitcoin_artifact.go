@@ -60,9 +60,10 @@ func InstallBitcoinCoreBinaries(version, workDir string) error {
 // bitcoinCoreSigners are the trusted Bitcoin Core builder keys.
 // Source: github.com/bitcoin-core/guix.sigs/tree/main/builder-keys
 // Cross-check: each key's fingerprint against the .gpg file at
-// the listed URL. Verified against Bitcoin Core 29.3 SHA256SUMS.asc
-// on a live install (June 4 2026). Primary-key fingerprints, not
-// subkeys. Threshold: 2 of 5 distinct signers required.
+// the listed URL. Verified against the Bitcoin Core 29.4
+// SHA256SUMS.asc, which all five signed (October 6 2026).
+// Primary-key fingerprints, not subkeys. Threshold: 2 of 5
+// distinct signers required.
 var bitcoinCoreSigners = []struct {
 	name        string
 	fingerprint string
@@ -152,7 +153,7 @@ func VerifyBitcoinCore(workDir string) error {
 	if hasBadSig {
 		logger.Verify("FAIL: bad signature detected")
 		return fmt.Errorf(
-			"bad signature detected — verification aborted")
+			"bad signature detected, verification aborted")
 	}
 
 	logger.Verify(
@@ -165,7 +166,7 @@ func VerifyBitcoinCore(workDir string) error {
 			distinct, minValid, len(result.Revoked))
 		if len(result.Revoked) > 0 {
 			return fmt.Errorf(
-				"insufficient valid signatures: got %d, need %d; %d pinned signer key(s) revoked, a newer VPN release is needed",
+				"insufficient valid signatures: got %d, need %d. %d pinned signer key(s) revoked, a newer VPN release is needed",
 				distinct, minValid, len(result.Revoked))
 		}
 		return fmt.Errorf(

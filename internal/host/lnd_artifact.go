@@ -58,9 +58,9 @@ func InstallLNDBinaries(version, workDir string) error {
 // lndSigner is the trusted LND release signer.
 // Source: github.com/lightningnetwork/lnd/tree/master/scripts/keys
 // Cross-check: roasbeef.asc at the listed URL. Verified against
-// the LND v0.21.2-beta manifest signature during release intake
-// (August 28, 2026). Primary-key fingerprint; the signing
-// subkey (2962...) is owned by this primary.
+// the LND v0.21.4-beta manifest signature (October 6 2026).
+// Primary-key fingerprint. The signing subkey (2962...) is
+// owned by this primary.
 var lndSigner = struct {
 	name        string
 	fingerprint string
@@ -113,13 +113,13 @@ func VerifyLND(version, workDir string) error {
 	distinct, hasBadSig := result.Signers, result.Bad
 	if !hasBadSig && distinct < 1 && len(result.Revoked) > 0 {
 		logger.Verify("FAIL: LND release signing key is revoked")
-		return fmt.Errorf("LND's release signing key has been revoked; a newer VPN release is needed")
+		return fmt.Errorf("LND's release signing key has been revoked, a newer VPN release is needed")
 	}
 
 	if hasBadSig {
 		logger.Verify("FAIL: bad LND signature detected")
 		return fmt.Errorf(
-			"bad LND signature detected — verification aborted")
+			"bad LND signature detected, verification aborted")
 	}
 
 	if distinct < 1 {

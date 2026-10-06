@@ -2,7 +2,7 @@
 package component
 
 const (
-	BitcoinCoreVersion = "29.3"
-	LNDVersion         = "0.21.2-beta"
+	BitcoinCoreVersion = "29.4"
+	LNDVersion         = "0.21.4-beta"
 	SyncthingVersion   = "2.1.5"
 )
