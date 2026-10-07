@@ -32,6 +32,8 @@ func RecognizedType(t string) bool {
 	return false
 }
 
+const invalidRSA = "invalid RSA key, use a key of 1024 to 8192 bits"
+
 // Parse accepts one bare public key. Options, certificates and multiple lines are unsupported.
 func Parse(line string) (Key, error) {
 	// Accept a single line terminator and OpenSSH's space/tab separators.
@@ -59,17 +61,22 @@ func Parse(line string) (Key, error) {
 	}
 	key, err := ssh.ParsePublicKey(data)
 	if err != nil {
+		// The library limits an RSA modulus to 8192 bits and reports it only
+		// in its error text. Any other wording keeps the general message.
+		if strings.Contains(err.Error(), "rsa modulus too large") {
+			return Key{}, errors.New(invalidRSA)
+		}
 		return Key{}, errors.New("invalid public key data")
 	}
 	if key.Type() != fields[0] {
 		return Key{}, errors.New("public key type does not match its data")
 	}
 	if key.Type() == ssh.KeyAlgoRSA {
-		// ParsePublicKey checks the RSA exponent but not the modulus. Match
-		// OpenSSH's 1024-bit minimum and 16384-bit wire limit; RSA needs an odd N.
+		// ParsePublicKey checks the RSA exponent and limits the modulus to
+		// 8192 bits. The 1024-bit minimum matches OpenSSH. RSA needs an odd N.
 		public := key.(ssh.CryptoPublicKey).CryptoPublicKey().(*rsa.PublicKey)
-		if public.N.Sign() <= 0 || public.N.Bit(0) == 0 || public.N.BitLen() < 1024 || public.N.BitLen() > 16384 {
-			return Key{}, errors.New("invalid RSA modulus; require a positive odd value of 1024 to 16384 bits")
+		if public.N.Sign() <= 0 || public.N.Bit(0) == 0 || public.N.BitLen() < 1024 {
+			return Key{}, errors.New(invalidRSA)
 		}
 		// RFC 4251 forbids redundant integer padding. Otherwise a numerically
 		// small value could carry an encoding larger than OpenSSH can read.
@@ -127,7 +134,7 @@ func (s Store) WithLock(action func() error) error {
 	}
 	defer f.Close()
 	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		return fmt.Errorf("SSH access is busy or cannot be locked; retry after checking current state: %w", err)
+		return fmt.Errorf("SSH access is busy or cannot be locked, check the current state and retry: %w", err)
 	}
 	defer unix.Flock(int(f.Fd()), unix.LOCK_UN)
 	return action()
