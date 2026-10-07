@@ -228,8 +228,8 @@ func TestParseRSAParametersAndEncoding(t *testing.T) {
 		{"even", new(big.Int).Sub(modulus(2048), big.NewInt(1)), 65537, false},
 		{"below minimum", modulus(1023), 65537, false},
 		{"minimum", modulus(1024), 65537, true},
-		{"maximum", modulus(16384), 65537, true},
-		{"above maximum", modulus(16385), 65537, false},
+		{"maximum", modulus(8192), 65537, true},
+		{"above maximum", modulus(8193), 65537, false},
 		{"invalid exponent", modulus(2048), 2, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
