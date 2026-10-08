@@ -133,37 +133,69 @@ func RunRootSilent(name string, args ...string) error {
 	return RunSilent(name, args...)
 }
 
-// WriteFileRoot creates a private, exclusive input temporary file, then requires
-// root to install its content and mode at a fixed .<base>.tmp destination and
-// move that file onto path. Callers must ensure the destination is suitable.
-// The destination staging name is not exclusive, close errors are ignored and
-// files are not fsynced. This is not a general crash-safe replacement primitive.
-// Install and move failures are logged centrally.
+// WriteFileRoot requires root and replaces path with content and mode perm,
+// so that a power cut leaves either the old file or the complete new one.
+// The new file is root owned. Callers must ensure the destination is suitable.
+// Failures are logged centrally.
 func WriteFileRoot(path string, content []byte, perm os.FileMode) error {
-	tmpFile, err := os.CreateTemp("", "vpn-write-")
+	err := requireRoot("write " + path)
+	if err == nil {
+		err = writeFile(path, content, perm)
+	}
 	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
+		logger.System("%v", err)
 	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
+	return err
+}
 
-	if _, err := tmpFile.Write(content); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("write temp file: %w", err)
+// writeFile writes a private temporary file with an unused random name in the
+// target's folder, sets the final mode, saves it to disk, renames it over the
+// target and then saves the folder. The rename replaces a link at the target
+// instead of writing through it. If a step before the rename fails, the target
+// is left as it was and the temporary file is removed. A failure to save the
+// folder is returned after the target has been replaced.
+func writeFile(path string, content []byte, perm os.FileMode) error {
+	fail := func(step string, err error) error {
+		return fmt.Errorf("write %s: %s: %w", path, step, err)
 	}
-	tmpFile.Close()
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+"-*.tmp")
+	if err != nil {
+		return fail("create temporary", err)
+	}
+	tmpPath := tmp.Name()
+	published := false
+	defer func() {
+		if !published {
+			tmp.Close()
+			os.Remove(tmpPath)
+		}
+	}()
 
-	tmpDest := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".tmp")
-	if err := RunRoot("install", "-m", fmt.Sprintf("%04o", perm),
-		tmpPath, tmpDest); err != nil {
-		RunRootSilent("rm", "-f", tmpDest)
-		logger.System("write %s: install: %v", path, err)
-		return err
+	if _, err := tmp.Write(content); err != nil {
+		return fail("write temporary", err)
 	}
-	if err := RunRoot("mv", tmpDest, path); err != nil {
-		RunRootSilent("rm", "-f", tmpDest)
-		logger.System("write %s: mv: %v", path, err)
-		return err
+	if err := tmp.Chmod(perm); err != nil {
+		return fail("set mode", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fail("sync temporary", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fail("close temporary", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fail("replace", err)
+	}
+	published = true
+
+	folder, err := os.Open(dir)
+	if err != nil {
+		return fail("open folder", err)
+	}
+	defer folder.Close()
+	if err := folder.Sync(); err != nil {
+		return fail("sync folder", err)
 	}
 	return nil
 }
