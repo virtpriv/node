@@ -167,8 +167,8 @@ stop and disable; any failure of those actions is reported separately.
 - Check that the folder is shared with both devices
 - Node side should be **Send Only**
 - Local side should be **Receive Only**
-- Check the Node's export service with
-  `sudo systemctl status lnd-backup-export.service`
+- Check the Node's backup copy job and its timer with
+  `sudo systemctl status lnd-backup-export.service lnd-backup-check.timer`
 - Check Syncthing logs: **Actions → Logs** in the web UI
 
 **Web UI access on Node:**

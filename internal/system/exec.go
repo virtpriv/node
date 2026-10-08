@@ -23,7 +23,7 @@ func Run(name string, args ...string) error {
 	return nil
 }
 
-// requireRoot checks the process's effective UID; it never elevates privileges.
+// requireRoot checks the process's effective UID. It never elevates privileges.
 // Root installer, helper and credential-staging commands can use these wrappers.
 // Unprivileged callers must use the helper's fixed operations for root work.
 func requireRoot(name string) error {
@@ -33,7 +33,7 @@ func requireRoot(name string) error {
 	return fmt.Errorf(
 		"%s requires root: this operation must go through "+
 			"the node's root helper (vpn helperd), not run "+
-			"directly — this is a bug worth reporting", name)
+			"directly. This is a bug worth reporting", name)
 }
 
 // RunRoot requires the process to be root, then executes the command directly.
@@ -64,15 +64,23 @@ func RunRootOutput(name string, args ...string) (string, error) {
 	return RunOutput(name, args...)
 }
 
-// RunOutputWithTimeout returns trimmed stdout on success using its own timeout;
-// it does not accept a caller context. Output is discarded on error.
-// Expiry interrupts the command, but descendant-held output pipes can delay
-// return because no WaitDelay is set.
+// commandWaitDelay bounds how long a command's output is still read after
+// its timeout, or after it exits, when a child process it left behind keeps
+// the output open.
+const commandWaitDelay = 2 * time.Second
+
+// RunOutputWithTimeout returns trimmed stdout on success using its own timeout.
+// It does not accept a caller context. Output is discarded on error.
+// Expiry kills the command. A child process that still holds the output then
+// delays the return by at most commandWaitDelay. A command that exits but
+// leaves a child holding its output or error stream for longer than that
+// fails, and its output is discarded.
 func RunOutputWithTimeout(timeout time.Duration, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stderr = nil
+	cmd.WaitDelay = commandWaitDelay
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
@@ -81,7 +89,7 @@ func RunOutputWithTimeout(timeout time.Duration, name string, args ...string) (s
 }
 
 // RunRootOutputWithTimeout requires root and uses RunOutputWithTimeout's
-// output and timeout behavior, including its output-pipe wait limitation.
+// output and timeout behavior, including its bounded wait for output.
 func RunRootOutputWithTimeout(timeout time.Duration, name string, args ...string) (string, error) {
 	if err := requireRoot(name); err != nil {
 		return "", err
@@ -129,7 +137,7 @@ func RunRootSilent(name string, args ...string) error {
 // root to install its content and mode at a fixed .<base>.tmp destination and
 // move that file onto path. Callers must ensure the destination is suitable.
 // The destination staging name is not exclusive, close errors are ignored and
-// files are not fsynced; this is not a general crash-safe replacement primitive.
+// files are not fsynced. This is not a general crash-safe replacement primitive.
 // Install and move failures are logged centrally.
 func WriteFileRoot(path string, content []byte, perm os.FileMode) error {
 	tmpFile, err := os.CreateTemp("", "vpn-write-")
@@ -168,7 +176,7 @@ func Download(url, dest string) error {
 
 // DownloadRequireTor fetches a URL and fails if torsocks is unavailable.
 // It makes up to three attempts, with two-second gaps. Tool-specific limits
-// apply within each attempt; the wget path has no overall deadline.
+// apply within each attempt. The wget path has no overall deadline.
 func DownloadRequireTor(url, dest string) error {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
@@ -184,14 +192,14 @@ func DownloadRequireTor(url, dest string) error {
 }
 
 // doDownload runs one fetch using wget when available, otherwise curl.
-// Wget has 60-second DNS, connect and read-idle timeouts and three tries;
-// these do not bound the whole transfer. Curl has a 60-second connect timeout
+// Wget has 60-second DNS, connect and read-idle timeouts and three tries.
+// These do not bound the whole transfer. Curl has a 60-second connect timeout
 // and an 1800-second transfer limit. Helper socket deadlines do not bound
 // this synchronous subprocess work.
 func doDownload(url, dest string, requireTor bool) error {
 	wrapper := torWrapper()
 	if requireTor && wrapper == "" {
-		return fmt.Errorf("torsocks not available — cannot download over Tor")
+		return fmt.Errorf("torsocks not available, cannot download over Tor")
 	}
 	if _, err := exec.LookPath("wget"); err == nil {
 		wgetArgs := []string{"--timeout=60", "--tries=3",
@@ -221,7 +229,7 @@ func torWrapper() string {
 
 // ReadFileRoot requires the process to be root and returns os.ReadFile's result,
 // preserving errors for os.IsNotExist checks. Ordinary unprivileged TUI reads use
-// staged files; separate helper operations can refresh privileged evidence.
+// staged files. Separate helper operations can refresh privileged evidence.
 func ReadFileRoot(path string) ([]byte, error) {
 	if os.Geteuid() == 0 {
 		return os.ReadFile(path)

@@ -27,6 +27,7 @@ type workflowOps struct {
 	running    func(protocol.Component) error
 	health     func(*job, protocol.Component) error
 	commit     func(*job) error
+	backup     func() error
 	quarantine func([]protocol.Component) error
 }
 
@@ -69,7 +70,7 @@ func runJob(j *job, ops workflowOps) error {
 	}
 	if j.Phase == "retry" {
 		// The installed helper only records the request. Starts are attempted
-		// afresh; downloads and the history of what may have run are kept.
+		// afresh. Downloads and the history of what may have run are kept.
 		j.Started = map[protocol.Component]bool{}
 		j.Phase = "accepted"
 		if j.Completed["staged"] {
@@ -144,7 +145,7 @@ func runJob(j *job, ops workflowOps) error {
 		for _, c := range affected {
 			if j.Started[c] {
 				// An uncertain start is never repeated automatically. If the
-				// process survived, verify it; otherwise require explicit Retry.
+				// process survived, verify it. Otherwise require explicit Retry.
 				if err := ops.running(c); err != nil {
 					return fail(fmt.Errorf("%s startup was interrupted, review the failure and retry: %w", c, err))
 				}
@@ -171,6 +172,13 @@ func runJob(j *job, ops workflowOps) error {
 	}
 	if err := ops.commit(j); err != nil {
 		return fail(err)
+	}
+	// The commit ends with a systemd reload, during which the watcher of
+	// LND's channel backup sees no change. LND writes that backup when its
+	// wallet unlocks, which is the moment the update waited for. A failed
+	// export cannot fail a finished update.
+	if err := ops.backup(); err != nil {
+		fmt.Fprintln(os.Stderr, "LND backup copy failed after the update:", err)
 	}
 	j.Error = ""
 	if err := publish("complete", "Update complete, reopen the TUI"); err != nil {

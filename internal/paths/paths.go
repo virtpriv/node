@@ -18,15 +18,15 @@ const (
 	// StateDir is the staging board: root-written files that
 	// carry privileged facts (staged credentials) to the
 	// unprivileged admin user. The directory is root:vpn
-	// 0750; each file root:vpn 0640. Root (the installer and
-	// the helper) writes; the admin user reads. Every file is
+	// 0750, each file root:vpn 0640. Root (the installer and
+	// the helper) writes, the admin user reads. Every file is
 	// re-written by whatever operation changes the fact it
-	// carries — a reader that finds a file missing or
+	// carries. A reader that finds a file missing or
 	// unreadable reports the feature unavailable and logs
 	// why, never guesses.
 	//
 	// Mostly facts consumed at MACHINE cadence (per RPC call,
-	// per dial) live here — credentials, which fail closed at
+	// per dial) live here: credentials, which fail closed at
 	// the moment of use when stale, so a stale copy cannot
 	// hide. Display facts consumed at HUMAN cadence (onion
 	// addresses, the Syncthing device ID, the SSH
@@ -43,14 +43,14 @@ const (
 	//
 	// The board lives under /var/lib/vpn rather than /etc/vpn so desired
 	// configuration and staged credentials have separate, auditable
-	// authorities. Both trees have root-controlled ancestors; the TUI can read
+	// authorities. Both trees have root-controlled ancestors. The TUI can read
 	// the specific group-readable files but cannot replace either directory.
 	VarLibVPN = "/var/lib/vpn"
 	StateDir  = VarLibVPN + "/state"
 
 	// PrivateDir contains root-authoritative lifecycle and
 	// security-workflow state. Every ancestor remains root
-	// controlled; the vpn operator cannot replace these files.
+	// controlled. The vpn operator cannot replace these files.
 	PrivateDir = VarLibVPN + "/private"
 
 	// LayoutVersion records the exact supported base-install
@@ -106,7 +106,7 @@ const (
 
 // Each loopback endpoint is defined exactly once, and BOTH
 // ends of every connection use the same constant: lnd.conf
-// binds LND to these values, and every client dials them —
+// binds LND to these values, and every client dials them,
 // so the two ends cannot silently disagree.
 //
 // The values are literal IPv4 addresses, never the name
@@ -114,7 +114,7 @@ const (
 // Debian's /etc/hosts still maps localhost to ::1, and that
 // file is not ours to correct (cloud provider tooling may
 // regenerate it). Reaching loopback by name can therefore
-// resolve to an IPv6 address the box cannot use; on a node
+// resolve to an IPv6 address the box cannot use. On a node
 // that disables IPv6, loopback is always dialed by address.
 const (
 	// LNDGRPCEndpoint is LND's gRPC server. Dialed by the
@@ -123,7 +123,7 @@ const (
 	LNDGRPCEndpoint = "127.0.0.1:10009"
 
 	// LNDRESTEndpoint is LND's REST server. Dialed by the
-	// installer's readiness probe; the Tor hidden service
+	// installer's readiness probe. The Tor hidden service
 	// forwards the REST onion here.
 	LNDRESTEndpoint = "127.0.0.1:8080"
 
@@ -212,9 +212,10 @@ const (
 	SyncthingService    = "/etc/systemd/system/syncthing.service"
 	BackupWatchPath     = "/etc/systemd/system/lnd-backup-watch.path"
 	BackupExportService = "/etc/systemd/system/lnd-backup-export.service"
+	BackupCheckTimer    = "/etc/systemd/system/lnd-backup-check.timer"
 
 	// The LND TLS certificate watch. At startup LND replaces an
-	// expired tls.cert; tlsautorefresh also replaces one whose
+	// expired tls.cert, and tlsautorefresh also replaces one whose
 	// configured SAN inputs changed. No TUI-requested operation is
 	// involved, so no operation can re-stage the TUI's
 	// copy. This path unit closes that gap at the source: a
@@ -228,7 +229,7 @@ const (
 	// The root helper's socket-activated units. The socket
 	// node's ownership and mode (root:vpn 0660, created by
 	// systemd before the helper ever runs) ARE the
-	// authentication for privileged operations; the service
+	// authentication for privileged operations. The service
 	// is started by traffic and exits when idle.
 	HelperSocket         = "/run/vpn-helperd.sock"
 	HelperSocketUnit     = "/etc/systemd/system/vpn-helperd.socket"
@@ -253,11 +254,11 @@ const (
 	UFWDefault         = "/etc/default/ufw"
 	SSHDConfig         = "/etc/ssh/sshd_config"
 	// SSHDDropIn precedes ordinary provider drop-ins. Its Match blocks scope
-	// owner authentication; effective policy is verified before SSH restarts.
+	// owner authentication. Effective policy is verified before SSH restarts.
 	SSHDDropIn = "/etc/ssh/sshd_config.d/00-vpn-hardening.conf"
 
 	// OldSSHDDropIn is the pre-rename path. Its presence is
-	// lifecycle-conflict evidence; v0.7.0 refuses it and never
+	// lifecycle-conflict evidence. v0.7.0 refuses it and never
 	// deletes, adopts, or rewrites it.
 	OldSSHDDropIn = "/etc/ssh/sshd_config.d/00-rlvpn-hardening.conf"
 
@@ -271,9 +272,9 @@ const (
 // ── User ─────────────────────────────────────────────────
 
 const (
-	// AdminUser is the node's admin login — same name as the
-	// binary, one name to know (ruling vi: clean break from
-	// the old ripsline user). Existing old identities are
+	// AdminUser is the node's admin login, the same name as the
+	// binary, so there is one name to know. It is a clean break
+	// from the old ripsline user. Existing old identities are
 	// refused by the fresh-install lifecycle classifier.
 	AdminUser          = "vpn"
 	AdminHome          = "/home/" + AdminUser

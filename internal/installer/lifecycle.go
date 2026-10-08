@@ -125,6 +125,7 @@ func productionLifecycleFS() lifecycleFS {
 			paths.ExportDir,
 			paths.BackupWatchPath,
 			paths.BackupExportService,
+			paths.BackupCheckTimer,
 			paths.LNDCertWatchPath,
 			paths.LNDCertStageService,
 			paths.HelperSocketUnit,
@@ -202,7 +203,7 @@ func classifyLifecycleState(
 	}
 	if string(marker) != layoutVersionContent {
 		return lifecycleState{}, fmt.Errorf(
-			"unsupported or invalid layout version in %s — refusing to modify the host",
+			"unsupported or invalid layout version in %s, refusing to modify the host",
 			fs.layoutVersion)
 	}
 	for _, stage := range []string{
@@ -213,7 +214,7 @@ func classifyLifecycleState(
 			return lifecycleState{}, err
 		} else if present {
 			return lifecycleState{}, fmt.Errorf(
-				"lifecycle bootstrap staging residue %s exists without its bootstrap authority — refusing to modify the host",
+				"lifecycle bootstrap staging residue %s exists without its bootstrap authority, refusing to modify the host",
 				stage)
 		}
 	}
@@ -234,7 +235,7 @@ func classifyLifecycleState(
 	}
 	if len(conflicts) > 0 {
 		return lifecycleState{}, fmt.Errorf(
-			"conflicting prior-generation state found (%s) — automatic migration is not supported; no installation changes were made",
+			"conflicting prior-generation state found (%s), automatic migration is not supported, no installation changes were made",
 			strings.Join(conflicts, ", "))
 	}
 
@@ -301,7 +302,7 @@ func inspectLifecycleBootstrap(
 		path := filepath.Join(bootstrapDir, entry.Name())
 		if strings.HasPrefix(entry.Name(), prefix) && !known[path] {
 			return nil, fmt.Errorf(
-				"unsupported or ambiguous lifecycle bootstrap %s — refusing to modify the host",
+				"unsupported or ambiguous lifecycle bootstrap %s, refusing to modify the host",
 				path)
 		}
 	}
@@ -317,7 +318,7 @@ func inspectLifecycleBootstrap(
 		}
 		if found != nil {
 			return nil, fmt.Errorf(
-				"conflicting lifecycle bootstrap state found (%s, %s) — refusing to modify the host",
+				"conflicting lifecycle bootstrap state found (%s, %s), refusing to modify the host",
 				found.path, candidate.path)
 		}
 		if err := validateBootstrapFile(candidate.path, 0); err != nil {
@@ -345,7 +346,7 @@ func classifyBootstrapLifecycle(
 	found = append(found, identities...)
 	if len(found) > 0 {
 		return lifecycleState{}, fmt.Errorf(
-			"lifecycle bootstrap conflicts with existing project state (%s) — refusing to modify the host",
+			"lifecycle bootstrap conflicts with existing project state (%s), refusing to modify the host",
 			strings.Join(found, ", "))
 	}
 	if err := validateBootstrapTree(fs, bootstrap.context); err != nil {
@@ -374,7 +375,7 @@ func classifyUnmarkedLifecycle(
 		return lifecycleState{Disposition: lifecyclePristine}, nil
 	}
 	return lifecycleState{}, fmt.Errorf(
-		"existing unmarked vpn/rlvpn state found (%s) — v0.7.0 supports only a fresh machine or a recognized interrupted v0.7.0 install; no installation changes were made",
+		"existing unmarked vpn/rlvpn state found (%s), v0.7.0 supports only a fresh machine or a recognized interrupted v0.7.0 install, no installation changes were made",
 		strings.Join(found, ", "))
 }
 

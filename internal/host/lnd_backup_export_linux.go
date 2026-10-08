@@ -29,20 +29,24 @@ const (
 
 // PublishLNDBackup is the internal service operation used by
 // lnd-backup-export.service. The caller selects only a supported
-// Bitcoin network; all filesystem paths and identity names are
+// Bitcoin network. All filesystem paths and identity names are
 // fixed here. The process must already be the lnd service user
 // with the unit-local vpn-lnd-backup supplementary group.
-func PublishLNDBackup(network string) error {
+//
+// The unit is started on every change of LND's backup and once a minute.
+// It reports false without touching the export when LND has written no
+// backup yet, or when the export already equals it.
+func PublishLNDBackup(network string) (bool, error) {
 	profile, err := config.NetworkConfigFromName(network)
 	if err != nil {
-		return err
+		return false, err
 	}
 	ids, err := resolveBackupPublisherIdentity()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := verifyBackupPublisherCaller(ids); err != nil {
-		return err
+		return false, err
 	}
 	return publishLNDBackup(
 		productionBackupPublisherSpec(profile.LNDNetwork, ids), ids,
@@ -175,8 +179,8 @@ func productionBackupPublisherSpec(
 	return spec
 }
 
-// publisherHooks are test-only fault seams. Production passes the zero value;
-// there is deliberately no environment variable or command-line failure hook.
+// publisherHooks are test-only fault seams. Production passes the zero value.
+// There is deliberately no environment variable or command-line failure hook.
 type publisherHooks struct {
 	fail     func(string) error
 	tempName func() (string, error)
@@ -203,7 +207,22 @@ func (h publisherHooks) nextTempName() (string, error) {
 const secureResolve = unix.RESOLVE_BENEATH |
 	unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_SYMLINKS
 
+// errNothingToPublish ends a run that found no work. It never leaves
+// publishLNDBackup.
+var errNothingToPublish = errors.New("nothing to publish")
+
 func publishLNDBackup(
+	spec backupPublisherSpec, ids backupPublisherIdentity,
+	hooks publisherHooks,
+) (bool, error) {
+	err := publishLNDBackupFile(spec, ids, hooks)
+	if errors.Is(err, errNothingToPublish) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func publishLNDBackupFile(
 	spec backupPublisherSpec, ids backupPublisherIdentity,
 	hooks publisherHooks,
 ) (retErr error) {
@@ -232,6 +251,11 @@ func publishLNDBackup(
 	sourceFD, err := openAtNoSymlinks(
 		sourceDirFD, backupFileName,
 		unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	if errors.Is(err, unix.ENOENT) {
+		// LND has written no backup yet. A symlink or any other object
+		// in its place is still refused below.
+		return errNothingToPublish
+	}
 	if err != nil {
 		return fmt.Errorf("open source %s: %w", spec.sourceDisplay, err)
 	}
@@ -306,6 +330,37 @@ func publishLNDBackup(
 	if err := validateExistingDestination(
 		finalFD, ids, spec.finalDisplay); err != nil {
 		return err
+	}
+
+	if err := hooks.check("destination-compare"); err != nil {
+		return fmt.Errorf("compare existing destination: %w", err)
+	}
+	current, err := exportEqualsSource(
+		finalFD, source, &sourceInitial, ids, spec.finalDisplay)
+	if err != nil {
+		return err
+	}
+	if current {
+		// Equal bytes count only for a source that is still the one
+		// opened, exactly as a publication requires.
+		if err := hooks.check("source-stability"); err != nil {
+			return fmt.Errorf("verify source stability: %w", err)
+		}
+		if err := verifySourceSnapshot(
+			sourceFD, &sourceInitial, spec.sourceDisplay); err != nil {
+			return err
+		}
+		if err := hooks.check("source-path-verify"); err != nil {
+			return fmt.Errorf("verify source pathname: %w", err)
+		}
+		if err := verifySourcePath(
+			sourceDirFD, &sourceInitial, ids, spec.sourceDisplay); err != nil {
+			return err
+		}
+		return errNothingToPublish
+	}
+	if _, err := source.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("rewind source: %w", err)
 	}
 
 	var temp *os.File
@@ -678,6 +733,48 @@ func validateExistingDestination(
 			"refusing to replace malformed destination: %w", err)
 	}
 	return nil
+}
+
+// exportEqualsSource reports whether a well-formed export already holds the
+// bytes of the opened source. A missing export is simply not equal.
+func exportEqualsSource(
+	finalFD int, source io.Reader, sourceInitial *unix.Stat_t,
+	ids backupPublisherIdentity, display string,
+) (bool, error) {
+	// A FIFO must reach the regular-file check without waiting for a writer.
+	fd, err := openAtNoSymlinks(
+		finalFD, backupFileName,
+		unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	if errors.Is(err, unix.ENOENT) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("open existing destination %s: %w", display, err)
+	}
+	existing := os.NewFile(uintptr(fd), display)
+	defer existing.Close()
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		return false, fmt.Errorf("stat existing destination %s: %w", display, err)
+	}
+	if err := validatePublishedStat(&st, ids, display); err != nil {
+		return false, fmt.Errorf(
+			"refusing to replace malformed destination: %w", err)
+	}
+	if st.Size != sourceInitial.Size {
+		return false, nil
+	}
+	sourceHash, existingHash := sha256.New(), sha256.New()
+	sourceBytes, err := io.Copy(sourceHash, source)
+	if err != nil {
+		return false, fmt.Errorf("read source for comparison: %w", err)
+	}
+	existingBytes, err := io.Copy(existingHash, existing)
+	if err != nil {
+		return false, fmt.Errorf("read existing destination %s: %w", display, err)
+	}
+	return sourceBytes == existingBytes &&
+		hashEqual(sourceHash, existingHash), nil
 }
 
 func verifySourceSnapshot(
