@@ -240,7 +240,7 @@ func enableAutoUnlock(password string, ops autoUnlockOps) autounlock.Result {
 	}
 
 	// The password has now been proved. Removing the override and reloading
-	// changes only the policy PID 1 applies to a future failure; the verified
+	// changes only the policy PID 1 applies to a future failure. The verified
 	// LND invocation stays online and is checked again below.
 	if err := ops.removeVerifyDrop(); err != nil {
 		return fail(autounlock.VerificationFailed,
@@ -669,7 +669,7 @@ func stopStartAndVerifyInvocation(
 }
 
 // stopAndVerifyNoProcess accepts systemd's two quiescent unit states. An
-// inactive unit stopped normally; a failed unit is also inactive but retains
+// inactive unit stopped normally. A failed unit is also inactive but retains
 // the unsuccessful result for diagnosis. Restart=no is required so a failed
 // candidate cannot enter an automatic restart transition between samples.
 // Neither state is sufficient on its own: both the service's main process and
@@ -704,7 +704,7 @@ func stopAndVerifyNoProcess(ops autoUnlockOps) error {
 // until it reports RPC_ACTIVE or SERVER_ACTIVE. After systemctl start returns,
 // VPN gets a short independent window to bind the process to the loaded unit
 // and prove that native wallet-state postcondition. Network-profile validation
-// is an installer concern; tying password verification to a chain-dependent
+// is an installer concern. Tying password verification to a chain-dependent
 // RPC would make a valid RPC_ACTIVE state depend on blockchain synchronization.
 func startAndVerifyInvocation(
 	ops autoUnlockOps, previousID string, withUnlock bool,
@@ -844,7 +844,7 @@ func verifyLockedStatus(ops autoUnlockOps, status lndUnitStatus) error {
 
 // verifyStableProcessArgs binds the inspected /proc argument vector to one
 // systemd invocation. Type=notify guarantees that the service reached LND's
-// native RPC-readiness notification before a successful start returns; the
+// native RPC-readiness notification before a successful start returns. The
 // second status sample proves that the PID did not exit or change while its
 // arguments were being inspected.
 func verifyStableProcessArgs(
@@ -1491,7 +1491,14 @@ func SetupAutoUnlock(password autounlock.Password) (autounlock.Result, error) {
 	if err != nil {
 		return repairRequired("initialize auto-unlock operation", err), nil
 	}
-	return enableAutoUnlock(password.Text(), ops), nil
+	result := enableAutoUnlock(password.Text(), ops)
+	// The transition restarts LND unlocked and then reloads systemd, so the
+	// watcher of LND's channel backup can miss the write made at the unlock.
+	// The auto-unlock result does not depend on that copy.
+	if err := RefreshLNDBackupExport(); err != nil {
+		logger.System("auto-unlock: LND backup copy failed after the change: %v", err)
+	}
+	return result, nil
 }
 
 // DisableAutoUnlock proves a locked invocation before durably removing the secret.

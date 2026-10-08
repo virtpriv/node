@@ -232,7 +232,7 @@ assert_equal "RUN Syncthing backup folder healthy" \
     "${syncthing_runtime}" "idle||0"
 
 for unit in lnd.service lnd-backup-export.service \
-    lnd-backup-watch.path syncthing.service; do
+    lnd-backup-watch.path lnd-backup-check.timer syncthing.service; do
     if systemd-analyze verify "${unit}" >/dev/null 2>&1; then
         pass "SYS verify ${unit}"
     else
@@ -277,6 +277,21 @@ assert_contains "Syncthing export group" \
 
 assert_equal "Backup watcher active" \
     "$(systemctl is-active lnd-backup-watch.path 2>/dev/null || true)" active
+# The watcher can miss a change, so a timer starts the same publisher every
+# minute. The publisher pulls the watcher back in and has no start limit, so
+# a burst of backup changes cannot leave the watcher failed.
+assert_equal "Backup check timer active" \
+    "$(systemctl is-active lnd-backup-check.timer 2>/dev/null || true)" active
+assert_equal "Backup check timer enabled" \
+    "$(systemctl is-enabled lnd-backup-check.timer 2>/dev/null || true)" enabled
+assert_equal "Backup check timer targets exporter" \
+    "$(systemctl show -p Unit --value lnd-backup-check.timer)" \
+    lnd-backup-export.service
+assert_contains "Publisher pulls in the watcher" \
+    "$(systemctl show -p Wants --value lnd-backup-export.service)" \
+    lnd-backup-watch.path
+assert_equal "Publisher has no start limit" \
+    "$(systemctl show -p StartLimitIntervalUSec --value lnd-backup-export.service)" 0
 assert_equal "Publisher last result" \
     "$(systemctl show -p Result --value lnd-backup-export.service)" success
 

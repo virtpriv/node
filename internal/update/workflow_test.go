@@ -117,6 +117,7 @@ func (h *workflowHarness) ops() workflowOps {
 				return commitJob(h.root, h.binary, j, h.checkRunning, func([]protocol.Component) error { return nil })
 			})
 		},
+		backup: func() error { return h.effect("backup", nil) },
 		quarantine: func(components []protocol.Component) error {
 			return h.effect("quarantine", func() error {
 				for _, c := range components {
@@ -179,6 +180,29 @@ func TestWorkflowStagesBeforeDowntimeAndCommitsVPNLast(t *testing.T) {
 	h.events = nil
 	if err := runJob(h.reload(), h.ops()); err != nil || len(h.events) != 0 {
 		t.Fatal("completed job repeated host changes on relaunch", err, h.events)
+	}
+}
+
+// The reload that ends an update can hide LND's backup write from its watcher,
+// so the worker asks for one export afterwards. A finished update stays
+// finished when that export fails.
+func TestBackupExportFollowsCommitAndCannotFailAFinishedUpdate(t *testing.T) {
+	for _, failure := range []string{"", "backup"} {
+		t.Run("failure="+failure, func(t *testing.T) {
+			j := workflowFixture()
+			h := newHarness(t, j)
+			h.failure = failure
+			if err := runJob(j, h.ops()); err != nil {
+				t.Fatal(err)
+			}
+			commit, backup := slices.Index(h.events, "commit"), slices.Index(h.events, "backup")
+			if commit < 0 || backup < commit {
+				t.Fatalf("the export must follow the commit: %v", h.events)
+			}
+			if saved := h.reload(); saved.Phase != "complete" || saved.Error != "" {
+				t.Fatalf("finished update saved as %q with error %q", saved.Phase, saved.Error)
+			}
+		})
 	}
 }
 
@@ -385,8 +409,8 @@ func TestSpaceRefusalLeavesServicesAsFound(t *testing.T) {
 			if slices.ContainsFunc(h.events, func(e string) bool { return e != "stage" && e != "capacity" && e != "discard" }) {
 				t.Fatalf("space refusal touched services: %v", h.events)
 			}
-			// Downloads are returned only while no host change can have begun;
-			// afterwards Retry still needs them.
+			// Downloads are returned only while no host change can have begun.
+			// Afterwards Retry still needs them.
 			if slices.Contains(h.events, "discard") != tc.discards {
 				t.Fatalf("wrong download retention: %v", h.events)
 			}
@@ -399,7 +423,7 @@ func TestSpaceRefusalLeavesServicesAsFound(t *testing.T) {
 					t.Fatal("space refusal changed service state", c, h.running)
 				}
 			}
-			// Removed downloads must be fetched again; kept ones must not be.
+			// Removed downloads must be fetched again, kept ones must not be.
 			if saved.Completed["staged"] == tc.discards {
 				t.Fatal("download record disagrees with the files on disk")
 			}

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -66,7 +68,7 @@ func TestSyncthingDirectoryIdentityBoundary(t *testing.T) {
 
 func TestChannelBackupUnitIdentityBoundary(t *testing.T) {
 	source := paths.ChannelBackup("mainnet")
-	pathUnit, exportUnit, err := channelBackupUnits("mainnet")
+	pathUnit, exportUnit, _, err := channelBackupUnits("mainnet")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +109,7 @@ func TestChannelBackupUnitIdentityBoundary(t *testing.T) {
 	if strings.Contains(exportUnit, "UMask=0077") {
 		t.Error("publisher inherited the private-daemon umask")
 	}
-	if _, _, err := channelBackupUnits("mainnet /tmp/source"); err == nil {
+	if _, _, _, err := channelBackupUnits("mainnet /tmp/source"); err == nil {
 		t.Error("backup unit accepted a caller-supplied path as a network")
 	}
 }
@@ -118,7 +120,7 @@ func TestChannelBackupUnitsMapProfileToLNDState(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		pathUnit, exportUnit, err := channelBackupUnits(network)
+		pathUnit, exportUnit, _, err := channelBackupUnits(network)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -214,5 +216,27 @@ func TestSyncthingFailSafeAttemptsStopAndDisableAndReportsFailure(t *testing.T) 
 		if failAt == "" && !strings.Contains(err.Error(), "stopped and disabled") {
 			t.Fatal("successful fail-safe omitted:", err)
 		}
+	}
+}
+
+// A node without the Syncthing add-on has no export unit. Asking for an
+// export there must do nothing, so an update on such a node is not disturbed.
+func TestRefreshLNDBackupExportOnlyActsWhereTheExportIsInstalled(t *testing.T) {
+	unit := filepath.Join(t.TempDir(), "lnd-backup-export.service")
+	started := 0
+	injected := errors.New("injected start failure")
+	oldPath, oldStart := backupExportUnitPath, startBackupExport
+	t.Cleanup(func() { backupExportUnitPath, startBackupExport = oldPath, oldStart })
+	backupExportUnitPath = unit
+	startBackupExport = func() error { started++; return injected }
+
+	if err := RefreshLNDBackupExport(); err != nil || started != 0 {
+		t.Fatalf("no add-on: started %d times, err=%v", started, err)
+	}
+	if err := os.WriteFile(unit, []byte("[Unit]\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RefreshLNDBackupExport(); !errors.Is(err, injected) || started != 1 {
+		t.Fatalf("installed add-on: started %d times, err=%v", started, err)
 	}
 }

@@ -88,6 +88,7 @@ func RunWorker(version string) error {
 		commit: func(j *job) error {
 			return commitJob(Root, paths.BinaryPath, j, host.CheckUpdateProcess, host.ReleaseUpdateGuards)
 		},
+		backup:     host.RefreshLNDBackupExport,
 		quarantine: quarantine,
 	})
 }

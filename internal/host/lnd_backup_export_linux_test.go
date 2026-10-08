@@ -130,7 +130,8 @@ func runPublisher(
 	if hooks.tempName == nil {
 		hooks.tempName = fixedTemp(".channel.backup.tmp-test")
 	}
-	return publishLNDBackup(f.spec, f.ids, hooks)
+	_, err := publishLNDBackup(f.spec, f.ids, hooks)
+	return err
 }
 
 func assertNoPublisherTemps(t *testing.T, stage string) {
@@ -195,7 +196,7 @@ func TestProductionBackupPublisherPathsAreFixed(t *testing.T) {
 			t.Errorf("unexpected final export %q", got)
 		}
 	}
-	if err := PublishLNDBackup("signet"); err == nil ||
+	if _, err := PublishLNDBackup("signet"); err == nil ||
 		!strings.Contains(err.Error(), "unknown network") {
 		t.Errorf("unsupported network did not fail closed: %v", err)
 	}
@@ -350,6 +351,11 @@ func TestPublishLNDBackupRejectsFIFO(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
+				// An export that already equals the source is left alone, so
+				// only a changed source reaches the rename.
+				if err := replaceSource(t, f, []byte("a newer complete backup")); err != nil {
+					t.Fatal(err)
+				}
 				fifoPath = f.finalPath
 				hooks.fail = func(point string) error {
 					if point == "open-final" {
@@ -379,7 +385,8 @@ func TestPublishLNDBackupCleansOwnedTempOnPrePublishFailures(t *testing.T) {
 	points := []string{
 		"open-source", "source-metadata-verify", "open-stage",
 		"lock-stage", "open-final-directory",
-		"destination-metadata-verify", "create-temp", "source-read",
+		"destination-metadata-verify", "destination-compare",
+		"create-temp", "source-read",
 		"temp-write", "temp-chown", "temp-chmod",
 		"temp-metadata-verify", "source-stability", "source-reread",
 		"source-path-verify", "temp-sync", "temp-close", "source-close",
@@ -685,5 +692,214 @@ func awaitPublisherResult(t *testing.T, done <-chan error) error {
 	case <-time.After(5 * time.Second):
 		t.Fatal("publisher test worker did not finish")
 		return nil
+	}
+}
+
+func publishOnce(
+	t *testing.T, f publisherFixture, hooks publisherHooks,
+) (bool, error) {
+	t.Helper()
+	if hooks.tempName == nil {
+		hooks.tempName = fixedTemp(".channel.backup.tmp-test")
+	}
+	return publishLNDBackup(f.spec, f.ids, hooks)
+}
+
+func publishedIdentity(t *testing.T, f publisherFixture) unix.Stat_t {
+	t.Helper()
+	var st unix.Stat_t
+	if err := unix.Lstat(f.finalPath, &st); err != nil {
+		t.Fatalf("stat published backup: %v", err)
+	}
+	return st
+}
+
+func replaceSource(t *testing.T, f publisherFixture, content []byte) error {
+	t.Helper()
+	replacement := f.sourcePath + ".replacement"
+	if err := os.WriteFile(replacement, content, 0600); err != nil {
+		return err
+	}
+	if err := os.Chmod(replacement, 0600); err != nil {
+		return err
+	}
+	return os.Rename(replacement, f.sourcePath)
+}
+
+// The publisher also runs every minute. An export that already equals the
+// source must stay the same file, or Syncthing would see a change each time.
+func TestPublishLNDBackupLeavesAnEqualExportUntouched(t *testing.T) {
+	first := []byte("first-complete-backup")
+	f := newPublisherFixture(t, first)
+	noTemp := publisherHooks{tempName: func() (string, error) {
+		return "", errors.New("an equal export must not be staged again")
+	}}
+
+	if published, err := publishOnce(t, f, publisherHooks{}); err != nil || !published {
+		t.Fatalf("first publication: published=%t err=%v", published, err)
+	}
+	assertPublished(t, f, first)
+	before := publishedIdentity(t, f)
+
+	if published, err := publishOnce(t, f, noTemp); err != nil || published {
+		t.Fatalf("equal export: published=%t err=%v", published, err)
+	}
+	after := publishedIdentity(t, f)
+	if after.Ino != before.Ino || after.Mtim != before.Mtim || after.Ctim != before.Ctim {
+		t.Error("an equal export was rewritten")
+	}
+	assertPublished(t, f, first)
+	assertNoPublisherTemps(t, f.stagePath)
+
+	// Same length, different bytes: size alone must not decide equality.
+	second := []byte("other-complete-backup")
+	if err := replaceSource(t, f, second); err != nil {
+		t.Fatal(err)
+	}
+	if published, err := publishOnce(t, f, publisherHooks{}); err != nil || !published {
+		t.Fatalf("changed source: published=%t err=%v", published, err)
+	}
+	assertPublished(t, f, second)
+}
+
+// Equal bytes do not make a malformed export acceptable, also when it turns
+// malformed between the first inspection and the compare.
+func TestPublishLNDBackupNeverAcceptsAMalformedExportAsEqual(t *testing.T) {
+	for _, damage := range []string{"mode", "fifo"} {
+		t.Run(damage, func(t *testing.T) {
+			// A subprocess bounds a blocking open of the FIFO without leaving
+			// a stuck goroutine. Its fixtures belong to the parent's tree.
+			if os.Getenv("VPN_TEST_BACKUP_EQUAL_CHILD") != "1" {
+				executable, err := os.Executable()
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, executable,
+					"-test.run=^TestPublishLNDBackupNeverAcceptsAMalformedExportAsEqual$/^"+damage+"$")
+				cmd.Env = append(os.Environ(), "VPN_TEST_BACKUP_EQUAL_CHILD=1",
+					"TMPDIR="+t.TempDir())
+				output, err := cmd.CombinedOutput()
+				if ctx.Err() != nil {
+					t.Fatalf("compare did not refuse a %s export in time: %v\n%s",
+						damage, ctx.Err(), output)
+				}
+				if err != nil {
+					t.Fatalf("malformed equal export: %v\n%s", err, output)
+				}
+				return
+			}
+
+			content := []byte("complete backup")
+			f := newPublisherFixture(t, content)
+			if _, err := publishOnce(t, f, publisherHooks{}); err != nil {
+				t.Fatal(err)
+			}
+			published, err := publishOnce(t, f, publisherHooks{
+				fail: func(point string) error {
+					if point != "destination-compare" {
+						return nil
+					}
+					if damage == "mode" {
+						return os.Chmod(f.finalPath, 0644)
+					}
+					if err := os.Remove(f.finalPath); err != nil {
+						return err
+					}
+					return unix.Mkfifo(f.finalPath, 0640)
+				},
+			})
+			if err == nil || published {
+				t.Fatalf("malformed equal export: published=%t err=%v", published, err)
+			}
+			info, statErr := os.Lstat(f.finalPath)
+			if statErr != nil {
+				t.Fatal(statErr)
+			}
+			if damage == "fifo" && info.Mode()&os.ModeNamedPipe == 0 {
+				t.Fatalf("refused FIFO was replaced: %s", info.Mode())
+			}
+			if damage == "mode" && info.Mode().Perm() != 0644 {
+				t.Fatalf("refused export was changed: %s", info.Mode())
+			}
+			assertNoPublisherTemps(t, f.stagePath)
+		})
+	}
+}
+
+// A source that changes while it is compared must never end as a clean skip
+// that leaves the older export in place.
+func TestPublishLNDBackupSourceChangeDuringCompareIsNotASkip(t *testing.T) {
+	old := []byte("opened source")
+	changed := []byte("newer source!")
+	rewritten := []byte("a newer and longer source")
+	for name, change := range map[string]func(t *testing.T, f publisherFixture) error{
+		"replaced": func(t *testing.T, f publisherFixture) error {
+			return replaceSource(t, f, changed)
+		},
+		// A longer rewrite, so the result does not rest on timestamp
+		// granularity.
+		"rewritten in place": func(t *testing.T, f publisherFixture) error {
+			return os.WriteFile(f.sourcePath, rewritten, 0600)
+		},
+	} {
+		for _, point := range []string{"source-stability", "source-path-verify"} {
+			t.Run(name+"/"+point, func(t *testing.T) {
+				f := newPublisherFixture(t, old)
+				if _, err := publishOnce(t, f, publisherHooks{}); err != nil {
+					t.Fatal(err)
+				}
+				fired := false
+				published, err := publishOnce(t, f, publisherHooks{
+					fail: func(got string) error {
+						if got != point || fired {
+							return nil
+						}
+						fired = true
+						return change(t, f)
+					},
+				})
+				if !fired {
+					t.Fatal("the source was never changed during the compare")
+				}
+				if err == nil && !published {
+					t.Fatal("a changed source was reported as an equal export")
+				}
+				// A refusal keeps the old complete export. Publishing the
+				// newer bytes would also be correct.
+				if err != nil {
+					assertPublished(t, f, old)
+				}
+				assertNoPublisherTemps(t, f.stagePath)
+			})
+		}
+	}
+}
+
+// LND has written no backup yet: nothing to publish, and nothing is damaged.
+func TestPublishLNDBackupSkipsCleanlyWithoutASource(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing=%t", existing), func(t *testing.T) {
+			old := []byte("previous complete backup")
+			f := newPublisherFixture(t, old)
+			if existing {
+				if _, err := publishOnce(t, f, publisherHooks{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Remove(f.sourcePath); err != nil {
+				t.Fatal(err)
+			}
+			if published, err := publishOnce(t, f, publisherHooks{}); err != nil || published {
+				t.Fatalf("missing source: published=%t err=%v", published, err)
+			}
+			if existing {
+				assertPublished(t, f, old)
+			} else if _, err := os.Lstat(f.finalPath); !os.IsNotExist(err) {
+				t.Errorf("an export appeared without a source: %v", err)
+			}
+			assertNoPublisherTemps(t, f.stagePath)
+		})
 	}
 }

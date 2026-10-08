@@ -33,13 +33,14 @@ var syncthingResiduePaths = []string{
 	paths.TorSyncthingSync,
 	paths.BackupWatchPath,
 	paths.BackupExportService,
+	paths.BackupCheckTimer,
 	paths.LNDBackupStage,
 	paths.LNDBackupExport,
 }
 
 // syncthingResiduePresent conservatively detects known add-on artifacts before
-// a fresh install attempt. It does not classify, adopt, clean, or repair them;
-// any evidence causes refusal without mutation. Retained-state recovery is
+// a fresh install attempt. It does not classify, adopt, clean, or repair them.
+// Any evidence causes refusal without mutation. Retained-state recovery is
 // not supported.
 func syncthingResiduePresent() (bool, error) {
 	for _, path := range syncthingResiduePaths {
@@ -159,10 +160,10 @@ func initializeSyncthingConfig(password string) error {
 	// 1. Crypto identity only: TLS cert/key + device ID. The
 	//    generated config.xml is read for its identity values,
 	//    then overwritten by the authored template. Explicit
-	//    binary path: never PATH resolution: so a leftover
+	//    binary path, never PATH resolution, so a leftover
 	//    apt-installed /usr/bin/syncthing can never be the one
 	//    that generates the identity. runuser (util-linux)
-	//    drops from root to the service user; this box has no
+	//    drops from root to the service user. This box has no
 	//    sudo rules to borrow.
 	if err := system.RunRoot("runuser", "-u", syncthingUser, "--",
 		"/usr/local/bin/syncthing",
@@ -237,7 +238,7 @@ func initializeSyncthingConfig(password string) error {
 // Gate (b): field check: every privacy field must be PRESENT
 // with its exact intended value, with single <gui>/<options>
 // blocks and a single listen address. An absent field means the
-// schema assumption broke; refusing to start converts a silent
+// schema assumption broke. Refusing to start converts a silent
 // leak into a loud install failure.
 func verifySyncthingConfig() error {
 	// (a) binary version, using the same service environment as update review.
@@ -281,8 +282,8 @@ func verifySyncthingConfig() error {
 	for _, want := range required {
 		if !strings.Contains(content, want) {
 			return fmt.Errorf(
-				"config self-verify failed: %s missing or wrong "+
-					"— refusing to start Syncthing", want)
+				"config self-verify failed: %s missing or wrong, "+
+					"refusing to start Syncthing", want)
 		}
 	}
 
@@ -293,8 +294,8 @@ func verifySyncthingConfig() error {
 	} {
 		if got := strings.Count(content, tag); got != n {
 			return fmt.Errorf(
-				"config self-verify failed: %d %s blocks, want %d "+
-					"— refusing to start Syncthing", got, tag, n)
+				"config self-verify failed: %d %s blocks, want %d, "+
+					"refusing to start Syncthing", got, tag, n)
 		}
 	}
 
@@ -310,7 +311,7 @@ func setupChannelBackupWatcher(cfg *config.AppConfig) error {
 		return fmt.Errorf("configure LND backup publisher: %w", err)
 	}
 
-	pathUnit, exportService, err := channelBackupUnits(network)
+	pathUnit, exportService, checkTimer, err := channelBackupUnits(network)
 	if err != nil {
 		return err
 	}
@@ -321,6 +322,10 @@ func setupChannelBackupWatcher(cfg *config.AppConfig) error {
 
 	if err := system.WriteFileRoot(paths.BackupExportService,
 		[]byte(exportService), 0644); err != nil {
+		return err
+	}
+	if err := system.WriteFileRoot(paths.BackupCheckTimer,
+		[]byte(checkTimer), 0644); err != nil {
 		return err
 	}
 
@@ -347,21 +352,31 @@ func setupChannelBackupWatcher(cfg *config.AppConfig) error {
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("inspect LND channel backup: %w", err)
 	}
-	return nil
+	return system.RunRoot("systemctl", "enable", "--now",
+		"lnd-backup-check.timer")
 }
 
-// channelBackupUnits renders the watcher and the only service
-// allowed to cross from LND state into the project-owned export.
+// channelBackupUnits renders the watcher, the timer and the only
+// service allowed to cross from LND state into the project-owned export.
 // The normal lnd.service has no backup-group access, and Syncthing
 // has no access to /var/lib/lnd or the private staging directory.
-// The service accepts only the closed network selector; every
+// The service accepts only the closed network selector. Every
 // filesystem path is fixed inside the publisher implementation.
+//
+// The watcher exports a change at once, but systemd drops its watch during
+// a daemon-reload and while the export runs, so it can miss a change. The
+// timer starts the same export every minute, which compares before it
+// copies. The export pulls the watcher back in when it is not active.
+// Changes can arrive in bursts, one per channel event, so the export has no
+// start limit: hitting one would leave the watcher failed. A run that finds
+// nothing to do stays out of the journal: only notices and worse are kept,
+// and the publisher's own line about a real publication is a notice.
 func channelBackupUnits(network string) (
-	pathUnit, exportService string, err error,
+	pathUnit, exportService, checkTimer string, err error,
 ) {
 	profile, err := config.NetworkConfigFromName(network)
 	if err != nil {
-		return "", "", fmt.Errorf(
+		return "", "", "", fmt.Errorf(
 			"render LND backup units: %w", err)
 	}
 	backupSource := paths.ChannelBackup(profile.LNDNetwork)
@@ -378,6 +393,8 @@ WantedBy=multi-user.target
 
 	exportService = fmt.Sprintf(`[Unit]
 Description=Export LND channel backup
+Wants=lnd-backup-watch.path
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
@@ -385,15 +402,55 @@ User=%s
 Group=%s
 SupplementaryGroups=%s
 UMask=0027
+SyslogLevel=notice
+LogLevelMax=notice
 ExecStart=%s publish-lnd-backup %s
 `, lndUser, lndUser, backupGroup, paths.BinaryPath, network)
-	return pathUnit, exportService, nil
+
+	checkTimer = `[Unit]
+Description=Check the LND channel backup copy every minute
+
+[Timer]
+OnCalendar=minutely
+AccuracySec=1s
+Unit=lnd-backup-export.service
+
+[Install]
+WantedBy=timers.target
+`
+	return pathUnit, exportService, checkTimer, nil
+}
+
+// backupExportTimeout bounds one export requested by VPN itself. The
+// publisher copies one small file.
+const backupExportTimeout = 30 * time.Second
+
+var (
+	backupExportUnitPath = paths.BackupExportService
+	startBackupExport    = func() error {
+		_, err := system.RunRootOutputWithTimeout(backupExportTimeout,
+			"systemctl", "start", "--no-ask-password",
+			"lnd-backup-export.service")
+		return err
+	}
+)
+
+// RefreshLNDBackupExport runs one export after VPN reloaded systemd at a
+// moment when LND writes its backup, because the watcher cannot see a change
+// made during the reload. A node without the Syncthing add-on has no export.
+func RefreshLNDBackupExport() error {
+	if _, err := os.Lstat(backupExportUnitPath); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect LND backup export unit: %w", err)
+	}
+	return startBackupExport()
 }
 
 var syncthingServiceCommand = system.RunRoot
 
 // stopSyncthingFailSafe attempts both stop and disable so an unverified daemon
-// cannot silently return on reboot. Failures remain explicit; retained residue
+// cannot silently return on reboot. Failures remain explicit. Retained residue
 // is not repaired by retrying installation.
 func stopSyncthingFailSafe() error {
 	stopErr := syncthingServiceCommand("systemctl", "stop", "syncthing")
@@ -403,7 +460,7 @@ func stopSyncthingFailSafe() error {
 
 func failSyncthingPrivacy(cause error) error {
 	if err := stopSyncthingFailSafe(); err != nil {
-		return errors.Join(cause, fmt.Errorf("could not confirm Syncthing stop/disable; administrator action is required: %w", err))
+		return errors.Join(cause, fmt.Errorf("could not confirm Syncthing stop/disable, administrator action is required: %w", err))
 	}
 	return fmt.Errorf("syncthing stopped and disabled: %w", cause)
 }
@@ -441,8 +498,8 @@ func startSyncthing() error {
 }
 
 // verifySyncthingPrivacyOrStop checks effective network, reporting and GUI
-// settings after startup. Any error attempts to stop and disable the service;
-// failures of those protective actions are included in the returned error.
+// settings after startup. Any error attempts to stop and disable the service.
+// Failures of those protective actions are included in the returned error.
 func verifySyncthingPrivacyOrStop() error {
 	apiKey, err := SyncthingAPIKey()
 	if err == nil {

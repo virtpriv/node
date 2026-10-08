@@ -21,10 +21,10 @@ import (
 
 var version = "dev"
 
-// Explicit dispatch (IA-1-8's fix): what the binary does is
-// decided by what the operator TYPED, never by sniffing box
-// state. `vpn` is the node TUI; `sudo vpn install` is the
-// installer; nothing infers one from the other.
+// Explicit dispatch: what the binary does is decided by what
+// the operator TYPED, never by sniffing box state. `vpn` is the
+// node TUI and `sudo vpn install` is the installer. Nothing
+// infers one from the other.
 func main() {
 	installer.SetVersion(version)
 
@@ -53,7 +53,7 @@ func main() {
 		}
 	case cmdHelperd:
 		// The root helper. Started by systemd when traffic
-		// arrives on its socket — never by hand; it verifies
+		// arrives on its socket, never by hand. It verifies
 		// both conditions itself and explains if they don't
 		// hold.
 		if err := helperd.Serve(version); err != nil {
@@ -62,29 +62,29 @@ func main() {
 		}
 	case cmdStageLNDCert:
 		// Run by systemd's certificate watch (a path unit on
-		// LND's tls.cert) — never by hand. LND rewrites its
-		// certificate on its own (tlsautorefresh); this
+		// LND's tls.cert), never by hand. LND rewrites its
+		// certificate on its own (tlsautorefresh), and this
 		// refreshes the TUI's staged copy to match. Its
 		// output lands in this oneshot unit's own journal
 		// (journalctl -u vpn-lnd-cert-stage.service), which is
-		// where watcher-driven restages are audited — the
+		// where watcher-driven restages are audited. The
 		// helper's journal only records operations that went
 		// through the helper's socket.
 		if os.Geteuid() != 0 {
 			fmt.Fprintln(os.Stderr,
 				"vpn stage-lnd-cert runs as root via its "+
-					"systemd unit — it is not meant to be "+
+					"systemd unit, it is not meant to be "+
 					"started by hand")
 			os.Exit(1)
 		}
-		// Explicit dispatch, nothing inferred — but refuse
+		// Explicit dispatch, nothing inferred. But refuse
 		// fast and clearly on a box this command cannot apply
 		// to, instead of waiting out the stager's stability
 		// window against a file that will never appear.
 		if _, err := os.Stat(config.DefaultPath); err != nil {
 			fmt.Fprintf(os.Stderr,
-				"vpn stage-lnd-cert: no configuration at %s "+
-					"— this node is not installed\n",
+				"vpn stage-lnd-cert: no configuration at %s, "+
+					"this node is not installed\n",
 				config.DefaultPath)
 			os.Exit(1)
 		}
@@ -96,13 +96,17 @@ func main() {
 	case cmdPublishLNDBackup:
 		// Intended for lnd-backup-export.service. The publisher
 		// validates the exact lnd identity and unit-local backup
-		// group itself; this dispatch grants no privileges.
-		if err := host.PublishLNDBackup(opts.Network); err != nil {
+		// group itself. This dispatch grants no privileges.
+		published, err := host.PublishLNDBackup(opts.Network)
+		if err != nil {
 			fmt.Fprintf(os.Stderr,
 				"vpn publish-lnd-backup: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Println("published LND channel backup")
+		// The unit also runs every minute. Only a real publication is logged.
+		if published {
+			fmt.Println("published LND channel backup")
+		}
 	case cmdVersion:
 		fmt.Println(version)
 	case cmdHelp:
@@ -135,9 +139,9 @@ func loadConsoleConfig(
 }
 
 // runConsole is the bare `vpn` path: the node TUI for the
-// admin user. Fail-stop on an unloadable config (IA-1-C1): the
+// admin user. Fail-stop on an unloadable config: the
 // error names the file and the reason, and Default() is NEVER
-// substituted — a TUI running on defaults would render a
+// substituted. A TUI running on defaults would render a
 // mainnet node's screens over a testnet4 node's services and
 // write the wrong answers back on its first save.
 func runConsole() {
@@ -153,7 +157,7 @@ func runConsole() {
 	if err != nil {
 		if os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr,
-				"  No configuration found at %s — this node is "+
+				"  No configuration found at %s, this node is "+
 					"not installed.\n  To install: sudo vpn install\n",
 				config.DefaultPath)
 		} else {
@@ -161,7 +165,7 @@ func runConsole() {
 				"  Cannot start: configuration at %s is "+
 					"unreadable:\n    %v\n"+
 					"  Refusing to run with default settings in its "+
-					"place — fix or restore the file.\n",
+					"place. Fix or restore the file.\n",
 				config.DefaultPath, err)
 		}
 		os.Exit(1)
@@ -169,7 +173,7 @@ func runConsole() {
 	prefs, err := config.LoadPreferences()
 	if err != nil {
 		fmt.Fprintf(os.Stderr,
-			"  Warning: TUI preferences are unreadable (%v); using dark theme for this session.\n",
+			"  Warning: TUI preferences are unreadable (%v), using dark theme for this session.\n",
 			err)
 		prefs = config.DefaultPreferences()
 	}
@@ -190,7 +194,7 @@ const (
 	cmdUpdateWorker
 )
 
-// parseArgs maps the command line to a command. Pure —
+// parseArgs maps the command line to a command. Pure and
 // unit-tested.
 func parseArgs(
 	args []string,

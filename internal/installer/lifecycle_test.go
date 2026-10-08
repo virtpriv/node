@@ -362,6 +362,7 @@ func TestProductionLifecycleEvidenceInventory(t *testing.T) {
 		paths.ExportDir,
 		paths.BackupWatchPath,
 		paths.BackupExportService,
+		paths.BackupCheckTimer,
 		paths.LNDCertWatchPath,
 		paths.LNDCertStageService,
 		paths.HelperSocketUnit,
