@@ -123,7 +123,7 @@ func createSyncthingDirs() error {
 func syncthingServiceUnit() string {
 	return fmt.Sprintf(`[Unit]
 Description=Syncthing File Synchronization
-After=network-online.target tor.service
+After=network-online.target tor@default.service
 Wants=network-online.target
 
 [Service]

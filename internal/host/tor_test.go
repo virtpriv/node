@@ -3,6 +3,7 @@ package host
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -130,6 +131,8 @@ func withTorAddonTestDeps(t *testing.T) {
 	oldWrite := writeTorConfigForAddon
 	oldRun := runTorServiceAction
 	oldFirewallCheck := requireActiveFirewallForAddon
+	oldWriteRule := writeTorRestartRule
+	oldReload := reloadSystemdForTor
 	t.Cleanup(func() {
 		torBinaryPresentForAddon = oldPresent
 		torServiceEnabledForAddon = oldEnabled
@@ -141,6 +144,8 @@ func withTorAddonTestDeps(t *testing.T) {
 		writeTorConfigForAddon = oldWrite
 		runTorServiceAction = oldRun
 		requireActiveFirewallForAddon = oldFirewallCheck
+		writeTorRestartRule = oldWriteRule
+		reloadSystemdForTor = oldReload
 	})
 }
 
@@ -391,18 +396,81 @@ func TestSyncthingTorRollbackFailureIsSurfaced(t *testing.T) {
 	}
 }
 
-func TestInitialTorOperationEnablesThenRestarts(t *testing.T) {
+// systemd must have loaded the retry rule before Tor is restarted, so the rule
+// applies from the first crash. A rule that cannot be written or loaded fails
+// the step before Tor is touched, so a resume runs it again.
+func TestInitialTorOperationLoadsRetryRuleBeforeRestart(t *testing.T) {
 	withTorAddonTestDeps(t)
-	var actions []string
-	runTorServiceAction = func(action string) error {
-		actions = append(actions, action)
-		return nil
+	for _, tc := range []struct {
+		name      string
+		writeErr  error
+		reloadErr error
+		wantSteps []string
+	}{
+		{"rule written", nil, nil, []string{"write retry rule", "daemon-reload", "enable", "restart"}},
+		{"rule not written", errors.New("disk full"), nil, []string{"write retry rule"}},
+		{"rule not loaded", nil, errors.New("reload failed"), []string{"write retry rule", "daemon-reload"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var steps []string
+			writeTorRestartRule = func() error {
+				steps = append(steps, "write retry rule")
+				return tc.writeErr
+			}
+			reloadSystemdForTor = func() error {
+				steps = append(steps, "daemon-reload")
+				return tc.reloadErr
+			}
+			runTorServiceAction = func(action string) error {
+				steps = append(steps, action)
+				return nil
+			}
+			err := EnableAndRestartTor()
+			wantErr := tc.writeErr != nil || tc.reloadErr != nil
+			if (err != nil) != wantErr {
+				t.Fatalf("err=%v, want error %t", err, wantErr)
+			}
+			if !reflect.DeepEqual(steps, tc.wantSteps) {
+				t.Fatalf("steps=%v want=%v", steps, tc.wantSteps)
+			}
+		})
 	}
-	if err := EnableAndRestartTor(); err != nil {
-		t.Fatal(err)
+}
+
+// Debian's tor.service only runs /bin/true and stays active while the real
+// Tor, tor@default.service, is stopped. The Syncthing install must follow the
+// real Tor in both directions.
+func TestSyncthingTorCheckReadsTheRealTor(t *testing.T) {
+	withTorAddonTestDeps(t)
+	cfg := config.Default()
+	torBinaryPresentForAddon = func() bool { return true }
+	torServiceEnabledForAddon = func() bool { return true }
+	readTorConfigForAddon = func(string) ([]byte, error) {
+		return []byte(mustBuildTorConfig(t, cfg)), nil
 	}
-	if want := []string{"enable", "restart"}; !reflect.DeepEqual(actions, want) {
-		t.Fatalf("Tor actions=%v want=%v", actions, want)
+	for _, tc := range []struct {
+		name            string
+		wrapper, worker string
+		wantRefused     bool
+	}{
+		{"real Tor stopped, wrapper active", "0", "3", true},
+		{"real Tor running, wrapper inactive", "3", "0", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			script := "#!/bin/sh\ncase \"$*\" in\n" +
+				" 'is-active --quiet tor@default.service') exit " + tc.worker + ";;\n" +
+				" 'is-active --quiet tor.service'|'is-active --quiet tor') exit " + tc.wrapper + ";;\n" +
+				" *) exit 2;;\nesac\n"
+			if err := os.WriteFile(filepath.Join(dir, "systemctl"), []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir)
+			err := verifySyncthingTorPrerequisite(cfg)
+			if (err != nil) != tc.wantRefused {
+				t.Fatalf("err=%v, want refused %t", err, tc.wantRefused)
+			}
+		})
 	}
 }
 
