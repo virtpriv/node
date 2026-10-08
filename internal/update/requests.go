@@ -353,7 +353,7 @@ func acceptUpdate(root, token string, ops admissionOps) error {
 }
 
 func installWorkerUnit() error {
-	const body = "[Unit]\nDescription=VPN managed update\nAfter=local-fs.target network-online.target tor.service\nWants=network-online.target\n\n[Service]\nType=exec\nExecStart=" + Root + "/launcher update-launch\nRestart=no\nUMask=0077\nPrivateTmp=yes\nProtectHome=read-only\n\n[Install]\nWantedBy=multi-user.target\n"
+	const body = "[Unit]\nDescription=VPN managed update\nAfter=local-fs.target network-online.target tor@default.service\nWants=network-online.target\n\n[Service]\nType=exec\nExecStart=" + Root + "/launcher update-launch\nRestart=no\nUMask=0077\nPrivateTmp=yes\nProtectHome=read-only\n\n[Install]\nWantedBy=multi-user.target\n"
 	if err := files.Write("/etc/systemd/system/"+Service, []byte(body), 0644); err != nil {
 		return err
 	}

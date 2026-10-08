@@ -2,14 +2,18 @@ package host
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/servicecontrol"
 	"github.com/virtpriv/node/internal/system"
 )
 
@@ -24,13 +28,13 @@ func BuildTorConfig(cfg *config.AppConfig) (string, error) {
 	}
 
 	var b strings.Builder
-	b.WriteString("# Virtual Private Node — Tor Configuration\n")
+	b.WriteString("# Virtual Private Node, Tor configuration\n")
 	b.WriteString("SOCKSPort 9050\n")
 
-	// Control port: always emitted. Two consumers: the install-path
-	// Tor routing gate (torgate.go reads bootstrap progress here,
-	// unconditionally) and LND's P2P onion management. Loopback-only,
-	// cookie-authenticated; emitting it without LND adds no exposure.
+	// The control port is always written. Two parts use it: the installer's
+	// Tor routing check, which reads bootstrap progress here, and LND's P2P
+	// onion management. It listens on loopback only and needs the cookie, so
+	// writing it without LND adds no exposure.
 	b.WriteString("\n# Control port (install routing gate + LND onion management)\n")
 	b.WriteString("ControlPort 9051\n")
 	b.WriteString("CookieAuthentication 1\n")
@@ -120,8 +124,10 @@ var (
 		return system.RunSilent(
 			"systemctl", "is-enabled", "--quiet", "tor") == nil
 	}
+	// Debian's tor.service only runs /bin/true and stays active while the
+	// real Tor is stopped, so the check reads the real Tor.
 	torServiceActiveForAddon = func() bool {
-		return system.IsServiceActive("tor")
+		return system.IsServiceActive(servicecontrol.Unit("tor"))
 	}
 	readTorConfigForAddon      = os.ReadFile
 	readSyncthingOnionForAddon = os.ReadFile
@@ -131,11 +137,56 @@ var (
 	runTorServiceAction        = func(action string) error {
 		return system.RunRoot("systemctl", action, "tor")
 	}
+	writeTorRestartRule = writeTorRestartDropIn
+	reloadSystemdForTor = func() error {
+		return system.RunRoot("systemctl", "daemon-reload")
+	}
 )
 
+// torRestartRule replaces systemd's default restart wait of 100 ms for the
+// real Tor. With that wait systemd's default start limit, five starts in ten
+// seconds, stops the retries and Tor stays off until a reboot or a manual
+// start. Thirty seconds apart, systemd
+// never reaches that limit and keeps trying after a crash. A clean stop is
+// not restarted.
+const torRestartRule = "# Restart Tor 30 seconds after a crash, without giving up\n" +
+	"[Service]\nRestartSec=30\n"
+
+// writeTorRestartDropIn writes the rule for fresh installs only. Nodes
+// installed earlier keep Debian's rule.
+func writeTorRestartDropIn() error {
+	dir := filepath.Dir(paths.TorRestartDropIn)
+	if err := os.Mkdir(dir, 0o755); err == nil {
+		if err := os.Chmod(dir, 0o755); err != nil {
+			return fmt.Errorf("set Tor drop-in directory mode: %w", err)
+		}
+	} else if !errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("create Tor drop-in directory: %w", err)
+	}
+	if info, err := os.Lstat(dir); err != nil {
+		return err
+	} else if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", dir)
+	}
+	// Saved every time, so a resume after a failed save still saves it.
+	if err := syncDir(filepath.Dir(dir)); err != nil {
+		return err
+	}
+	return system.WriteFileRoot(paths.TorRestartDropIn,
+		[]byte(torRestartRule), 0o644)
+}
+
 // EnableAndRestartTor belongs to initial installation. That operation owns
-// establishing Tor's boot persistence as part of the base node.
+// establishing Tor's boot persistence as part of the base node. systemd
+// loads the restart rule before Tor is restarted, so the rule applies from
+// the first crash.
 func EnableAndRestartTor() error {
+	if err := writeTorRestartRule(); err != nil {
+		return err
+	}
+	if err := reloadSystemdForTor(); err != nil {
+		return err
+	}
 	if err := runTorServiceAction("enable"); err != nil {
 		return err
 	}
@@ -148,13 +199,13 @@ func EnableAndRestartTor() error {
 // a disabled service or overwrite unexplained base-config divergence.
 func verifySyncthingTorPrerequisite(cfg *config.AppConfig) error {
 	if !torBinaryPresentForAddon() {
-		return fmt.Errorf("Tor is not installed — refusing Syncthing installation")
+		return fmt.Errorf("Syncthing installation refused: Tor is not installed")
 	}
 	if !torServiceEnabledForAddon() {
-		return fmt.Errorf("Tor is not enabled — refusing Syncthing installation")
+		return fmt.Errorf("Syncthing installation refused: Tor is not enabled")
 	}
 	if !torServiceActiveForAddon() {
-		return fmt.Errorf("Tor is not active — refusing Syncthing installation")
+		return fmt.Errorf("Syncthing installation refused: Tor is not active")
 	}
 	current, err := readTorConfigForAddon(paths.Torrc)
 	if err != nil {
@@ -165,9 +216,8 @@ func verifySyncthingTorPrerequisite(cfg *config.AppConfig) error {
 		return fmt.Errorf("build expected Tor configuration: %w", err)
 	}
 	if !bytes.Equal(current, []byte(expected)) {
-		return fmt.Errorf(
-			"Tor configuration does not match the expected base node — " +
-				"refusing Syncthing installation")
+		return fmt.Errorf("Syncthing installation refused: " + paths.Torrc +
+			" differs from the configuration this version of vpn writes")
 	}
 	return nil
 }
@@ -175,8 +225,8 @@ func verifySyncthingTorPrerequisite(cfg *config.AppConfig) error {
 var requireActiveFirewallForAddon = RequireActiveFirewall
 
 // verifySyncthingInstallPrerequisites is the root helper's before-mutation
-// gate. UFW and Tor must already be healthy base-node facilities; the optional
-// add-on never installs, enables, or globally repairs either one.
+// gate. UFW and Tor must already be healthy parts of the base node. The
+// optional add-on never installs, enables or repairs either one.
 func verifySyncthingInstallPrerequisites(cfg *config.AppConfig) error {
 	if err := requireActiveFirewallForAddon(); err != nil {
 		return err
@@ -186,7 +236,7 @@ func verifySyncthingInstallPrerequisites(cfg *config.AppConfig) error {
 	}
 
 	// Validate the complete proposed add-on configuration before any
-	// Syncthing installation step mutates the  The transaction below
+	// Syncthing installation step changes the node. The transaction below
 	// validates it again immediately before the authoritative write.
 	proposedCfg := *cfg
 	proposedCfg.SyncthingEnabled = true
@@ -237,11 +287,11 @@ func rollbackSyncthingTorConfig(previous []byte) error {
 
 func syncthingTorFailure(previous []byte, cause error) error {
 	if rollbackErr := rollbackSyncthingTorConfig(previous); rollbackErr != nil {
-		return fmt.Errorf("apply Syncthing Tor configuration: %w; rollback failed: %v",
+		return fmt.Errorf("apply Syncthing Tor configuration: %w, rollback failed: %v",
 			cause, rollbackErr)
 	}
 	return fmt.Errorf(
-		"apply Syncthing Tor configuration: %w; previous configuration restored",
+		"apply Syncthing Tor configuration: %w, previous configuration restored",
 		cause)
 }
 
@@ -267,9 +317,8 @@ func configureAndReloadTorForSyncthing(cfg *config.AppConfig) error {
 		return fmt.Errorf("build expected base Tor configuration: %w", err)
 	}
 	if !bytes.Equal(previous, []byte(expectedBase)) {
-		return fmt.Errorf(
-			"Tor configuration changed during prerequisite validation — " +
-				"refusing Syncthing installation")
+		return fmt.Errorf("Syncthing installation refused: " + paths.Torrc +
+			" changed during the checks")
 	}
 
 	proposed, err := BuildTorConfig(cfg)

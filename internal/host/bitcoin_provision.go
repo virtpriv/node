@@ -38,7 +38,7 @@ func createBitcoinDirs(username string) error {
 func bitcoindServiceUnit(username string) string {
 	return fmt.Sprintf(`[Unit]
 Description=Bitcoin Core
-After=network-online.target tor.service
+After=network-online.target tor@default.service
 Wants=network-online.target
 
 [Service]

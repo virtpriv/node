@@ -209,6 +209,10 @@ const (
 	// published.
 	LNDVerificationDropIn = LNDServiceDropInDir +
 		"/90-vpn-auto-unlock-verification.conf"
+	// TorRestartDropIn makes systemd wait 30 seconds between restarts of the
+	// real Tor after a crash. With systemd's defaults it gives up after five
+	// quick tries.
+	TorRestartDropIn    = "/etc/systemd/system/tor@default.service.d/90-vpn-restart.conf"
 	SyncthingService    = "/etc/systemd/system/syncthing.service"
 	BackupWatchPath     = "/etc/systemd/system/lnd-backup-watch.path"
 	BackupExportService = "/etc/systemd/system/lnd-backup-export.service"
