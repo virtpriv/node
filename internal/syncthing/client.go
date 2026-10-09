@@ -65,7 +65,7 @@ func (c *Client) Request(ctx context.Context, method, endpoint, body string) (st
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		hint := ""
 		if resp.StatusCode == http.StatusForbidden {
-			hint = "; API key rejected, administrator inspection is required"
+			hint = ", API key rejected, administrator inspection is required"
 		}
 		return fail(fmt.Errorf("HTTP %d%s", resp.StatusCode, hint))
 	}
@@ -209,8 +209,124 @@ func withMutationLock(dir string, action func() error) error {
 	}
 	defer f.Close()
 	if err = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		return errors.New("another VPN Syncthing operation is active or the lock is unavailable; retry after checking its result")
+		return errors.New("another VPN Syncthing operation is active or the lock is unavailable, retry after checking its result")
 	}
 	defer unix.Flock(int(f.Fd()), unix.LOCK_UN)
 	return action()
+}
+
+// DeliveryState is what a paired device holds of the backup folder, as far as
+// this node's Syncthing knows right now.
+type DeliveryState int
+
+const (
+	DeliveryNotShared DeliveryState = iota
+	DeliveryUpToDate
+	DeliveryReceiving
+	DeliveryNotConnected
+	DeliveryNotAccepted
+	DeliveryPaused
+	DeliveryChecking
+	// DeliveryOutOfSync: a device changed the folder, so the newest version
+	// is no longer the node's copy and no device can be said to hold it.
+	DeliveryOutOfSync
+)
+
+// Delivery is one device's state. Percent is set while receiving. LastSeen is
+// Syncthing's record of the last connection or disconnection, zero if none.
+type Delivery struct {
+	State     DeliveryState
+	Percent   int
+	Connected bool
+	LastSeen  time.Time
+}
+
+// BackupDelivery reports, for every device, whether it holds the backup
+// folder as this node shares it. A device's view is known only while it is
+// connected: Syncthing forgets it on disconnect, so an offline device is never
+// up to date here. Any failed read fails the whole answer.
+func (c *Client) BackupDelivery(ctx context.Context, devices []Device) (map[string]Delivery, error) {
+	var connections struct {
+		Connections map[string]struct {
+			Connected bool `json:"connected"`
+			Paused    bool `json:"paused"`
+		} `json:"connections"`
+	}
+	if err := c.read(ctx, "/rest/system/connections", &connections); err != nil {
+		return nil, err
+	}
+	var stats map[string]struct {
+		LastSeen time.Time `json:"lastSeen"`
+	}
+	if err := c.read(ctx, "/rest/stats/device", &stats); err != nil {
+		return nil, err
+	}
+	// The node's folder is send only. If the node itself needs anything, a
+	// device changed the file and Syncthing's newest version is not the node's.
+	var local struct {
+		NeedBytes   int64 `json:"needBytes"`
+		NeedItems   int   `json:"needItems"`
+		NeedDeletes int   `json:"needDeletes"`
+	}
+	if err := c.read(ctx, "/rest/db/completion?folder=lnd-backup", &local); err != nil {
+		return nil, err
+	}
+	nodeBehind := local.NeedBytes != 0 || local.NeedItems != 0 || local.NeedDeletes != 0
+	result := make(map[string]Delivery, len(devices))
+	for _, device := range devices {
+		if !device.BackupKnown {
+			return nil, errors.New("backup folder membership unavailable")
+		}
+		link := connections.Connections[device.DeviceID]
+		d := Delivery{State: DeliveryNotShared, Connected: link.Connected}
+		// Syncthing stores a device never seen as the zero time or the Unix epoch.
+		if seen := stats[device.DeviceID].LastSeen; seen.Year() > 1970 {
+			d.LastSeen = seen
+		}
+		switch {
+		case !device.BackupShared:
+		case link.Paused:
+			d.State = DeliveryPaused
+		case !link.Connected:
+			d.State = DeliveryNotConnected
+		default:
+			var err error
+			if d.State, d.Percent, err = c.folderCompletion(ctx, device.DeviceID); err != nil {
+				return nil, err
+			}
+			if nodeBehind && (d.State == DeliveryUpToDate || d.State == DeliveryReceiving) {
+				d.State, d.Percent = DeliveryOutOfSync, 0
+			}
+		}
+		result[device.DeviceID] = d
+	}
+	return result, nil
+}
+
+func (c *Client) folderCompletion(ctx context.Context, id string) (DeliveryState, int, error) {
+	var comp struct {
+		Completion  float64 `json:"completion"`
+		NeedBytes   int64   `json:"needBytes"`
+		NeedItems   int     `json:"needItems"`
+		NeedDeletes int     `json:"needDeletes"`
+		RemoteState string  `json:"remoteState"`
+	}
+	endpoint := "/rest/db/completion?folder=lnd-backup&device=" + url.QueryEscape(id)
+	if err := c.read(ctx, endpoint, &comp); err != nil {
+		return 0, 0, err
+	}
+	switch comp.RemoteState {
+	case "notSharing":
+		return DeliveryNotAccepted, 0, nil
+	case "paused":
+		return DeliveryPaused, 0, nil
+	case "valid":
+	default:
+		// Connected, but the device has not sent its folder index yet.
+		return DeliveryChecking, 0, nil
+	}
+	if comp.NeedBytes == 0 && comp.NeedItems == 0 && comp.NeedDeletes == 0 {
+		return DeliveryUpToDate, 100, nil
+	}
+	return DeliveryReceiving, min(max(int(comp.Completion), 0), 99), nil
 }

@@ -5,15 +5,18 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/virtpriv/node/internal/app"
 	"github.com/virtpriv/node/internal/bitcoin"
 	"github.com/virtpriv/node/internal/lndrpc"
 	"github.com/virtpriv/node/internal/release"
 	"github.com/virtpriv/node/internal/servicecontrol"
+	"github.com/virtpriv/node/internal/system"
 	"github.com/virtpriv/node/internal/theme"
 )
 
@@ -21,7 +24,7 @@ import (
 // Section home for System. Two focus zones: buttons
 // and scrollable service list with hotkey actions.
 //
-// Buttons are dynamic; only actionable buttons appear:
+// Buttons are dynamic. Only actionable buttons appear:
 //   Update Packages and Accounts (always),
 //   Node Updates (always, including saved recovery), Reboot (when required).
 //
@@ -450,10 +453,10 @@ func (s *SystemHomeScreen) View(
 			svcLine += "  " +
 				theme.Dim.Render(servicePendingText(s.svcPending.request))
 		} else if isSelected && s.svcPending == nil {
-			// Standard service hints — dim
+			// Standard service hints, dim
 			hint := theme.Dim.Render(
 				"  r restart  s stop  a start  l logs")
-			// LND-specific destructive hotkeys —
+			// LND-specific destructive hotkeys:
 			// the hotkey letter itself is rendered
 			// in red so users see they're sensitive,
 			// while the description stays dim.
@@ -551,6 +554,7 @@ func (s *SystemHomeScreen) View(
 					theme.Value.Render(
 						observationText(status.LNDSize, status.LNDSize.Value)))
 		}
+		resRows = append(resRows, securityUpdatesRow(status.Updates, time.Now()))
 		if status.Reboot.Value {
 			resRows = append(resRows,
 				" "+theme.Warning.Render(
@@ -807,4 +811,22 @@ func (s *SystemHomeScreen) svcName(i int) string {
 		return names[i]
 	}
 	return ""
+}
+
+// securityUpdatesRow is the Resources card's line about Debian's automatic
+// security updates. It warns once a run is overdue.
+func securityUpdatesRow(o app.Observation[system.SecurityUpdates], now time.Time) string {
+	label := " " + theme.Label.Render("Security updates: ")
+	if !o.Known() {
+		return label + theme.Value.Render(observationText(o, ""))
+	}
+	state, since := app.SecurityUpdatesStatus(o.Value, now)
+	when := since.Local().Format("2 Jan 15:04")
+	switch state {
+	case app.SecurityUpdatesOverdue:
+		return " " + theme.Warning.Render(observationText(o, "⚠ Security updates: none since "+when))
+	case app.SecurityUpdatesNotRunYet:
+		return label + theme.Value.Render(observationText(o, "not run yet"))
+	}
+	return label + theme.Value.Render(observationText(o, "last run "+when))
 }

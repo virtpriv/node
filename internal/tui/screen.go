@@ -46,7 +46,7 @@ type Screen interface {
 
 // ── ScreenContext ────────────────────────────────────────
 // Model publishes one application snapshot through this shared context. Screens
-// read the current observation when rendering; no screen owns a second copy.
+// read the current observation when rendering. No screen owns a second copy.
 
 type ScreenContext struct {
 	NodeUpdates         nodeUpdates
@@ -71,7 +71,7 @@ type ScreenContext struct {
 	walletRead          *walletStateRequest
 	walletReadPending   bool
 	walletClient        *walletClientRequest
-	walletGeneration    uint64 // Scopes retained observations; routine reads do not change it.
+	walletGeneration    uint64 // Scopes retained observations. Routine reads do not change it.
 	HelperWorkflows     *app.HelperWorkflows
 	SSHAccess           *app.SSHAccess
 	AccountAccess       accountAccess
@@ -80,7 +80,7 @@ type ScreenContext struct {
 	State               *RuntimeState
 	LndClient           *lndrpc.Client
 	Status              *statusSnapshot
-	HasTabs             bool   // varies by section; Model sets before calling View/HelpBindings
+	HasTabs             bool   // varies by section, Model sets it before calling View/HelpBindings
 	ContentFocused      bool   // true when content pane has focus (not tab bar, not sidebar)
 	Version             string // set once at construction
 	LatestVersion       string // updated by latestVersionMsg handler
@@ -127,6 +127,12 @@ type RuntimeState struct {
 	SyncthingDevicesErr     error
 	SyncthingDevicesKnown   bool
 	SyncthingDevicesChecked time.Time
+	SyncthingDelivery       map[string]syncthing.Delivery
+	SyncthingDeliveryErr    error
+	SyncthingDeliveryKnown  bool
+	SyncthingCopy           app.BackupCopy
+	SyncthingCopyErr        error
+	SyncthingCopyKnown      bool
 }
 
 func (c *ScreenContext) invalidateWalletObservations() {
@@ -193,7 +199,7 @@ type OnChainContext struct {
 // Screens emit these via tea.Cmd. They flow through the
 // Bubble Tea event loop and arrive in Model's Update like
 // any other message. Model handles them in its main
-// switch — no synchronous cmd inspection needed.
+// switch, no synchronous cmd inspection needed.
 
 // closeTabMsg tells Model to close the active tab.
 type closeTabMsg struct{}
@@ -222,7 +228,7 @@ type focusTabBarMsg struct{}
 // focusParentMsg tells Model to focus the active tab's
 // parent tab. Model reads the Parent field from the
 // active tab, finds the matching open tab in the same
-// section, and sets activeTab to it — no close, no
+// section, and sets activeTab to it: no close, no
 // cascade. If no parent tab is open (Parent == 0 or
 // parent was closed), falls back to focusing the
 // section home (activeTab = 0).
@@ -234,7 +240,7 @@ type refreshStatusMsg struct{}
 
 // ── Message emitters ────────────────────────────────────
 // Screens use these as tea.Cmd values. Each is a
-// func() tea.Msg that returns instantly — the message
+// func() tea.Msg that returns instantly. The message
 // flows through the Bubble Tea runtime on the next tick.
 
 func emitCloseTab() tea.Msg {

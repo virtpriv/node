@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
@@ -25,7 +27,7 @@ const (
 type SyncthingDeviceScreen struct {
 	ctx         *ScreenContext
 	step        syncDeviceStep
-	deviceID    string // reviewed identity; never select a replacement by row
+	deviceID    string // reviewed identity, never select a replacement by row
 	attempt     uint64
 	viewBtnIdx  int // 0=Cancel, 1=Remove
 	confirmIdx  int // 0=Go Back, 1=Remove
@@ -145,7 +147,7 @@ func (s *SyncthingDeviceScreen) HelpBindings() []key.Binding {
 
 // ── Detail step ─────────────────────────────────────────
 // Read-only info with Cancel / Remove buttons. Cancel
-// closes the tab; Remove advances to confirm step.
+// closes the tab. Remove advances to confirm step.
 
 func (s *SyncthingDeviceScreen) handleDetailKey(
 	keyStr string,
@@ -208,7 +210,14 @@ func (s *SyncthingDeviceScreen) viewDetail(
 		p.warnWrapWords("This device is no longer configured.")
 	} else {
 		p.labelLine("Backup sharing: " + backupSharingText(dev))
-		p.dim("Sharing configuration does not confirm backup delivery.")
+		if text := deliveryText(s.ctx.State, dev.DeviceID); text != "" {
+			p.labelLine("Backup on this device: " + text)
+		} else {
+			p.dim("Sharing configuration does not confirm backup delivery.")
+		}
+		if line := lastSeenText(s.ctx.State, dev.DeviceID, time.Now()); line != "" {
+			p.dim(line)
+		}
 	}
 	if s.ctx.syncthingActive != 0 {
 		p.dim("Refreshing current configuration...")

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestParseSourceIPStandardVPS(t *testing.T) {
@@ -119,5 +120,54 @@ func TestServiceReadDistinguishesInactiveAndFailedQuery(t *testing.T) {
 		if active != tc.active || (err != nil) != tc.failed {
 			t.Fatalf("output=%q exit=%s: active=%v err=%v", tc.output, tc.exit, active, err)
 		}
+	}
+}
+
+// Debian writes each stamp only when its step succeeds. A run counts only when
+// both the package list refresh and the upgrade succeeded, so the older stamp
+// is the last full run. Without a full run, the install time of the settings is
+// the starting point.
+func TestSecurityUpdatesUseTheOlderStampOrTheSettingsTime(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, "20auto-upgrades")
+	configured := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	older := time.Date(2026, 10, 7, 6, 30, 0, 0, time.UTC)
+	newer := time.Date(2026, 10, 8, 8, 40, 0, 0, time.UTC)
+	touch := func(path string, at time.Time) {
+		t.Helper()
+		if err := os.WriteFile(path, nil, 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	touch(config, configured)
+	touch(filepath.Join(dir, "update-stamp"), newer)
+
+	got, err := readSecurityUpdates(dir, config)
+	if err != nil || !got.LastRun.IsZero() || !got.Configured.Equal(configured) {
+		t.Fatalf("one stamp missing: %+v, %v", got, err)
+	}
+	touch(filepath.Join(dir, "upgrade-stamp"), older)
+	got, err = readSecurityUpdates(dir, config)
+	if err != nil || !got.LastRun.Equal(older) {
+		t.Fatalf("both stamps: %+v, %v", got, err)
+	}
+}
+
+// A stamp that cannot be read is unknown, never a missing run and never a time.
+func TestSecurityUpdatesUnreadableStampIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	notAFolder := filepath.Join(dir, "periodic")
+	if err := os.WriteFile(notAFolder, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(dir, "20auto-upgrades")
+	if err := os.WriteFile(config, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := readSecurityUpdates(notAFolder, config); err == nil {
+		t.Fatalf("unreadable stamp gave %+v", got)
 	}
 }

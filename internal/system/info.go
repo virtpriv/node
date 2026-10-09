@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -110,7 +111,7 @@ func ReadRebootRequired() (bool, error) {
 // data directories it is used on belong to service users. The
 // unprivileged status screen gets the LND size through the
 // helper's dir-size operation (which calls this as root) and
-// the Bitcoin size from bitcoind's own RPC — it never calls
+// the Bitcoin size from bitcoind's own RPC. It never calls
 // this directly.
 func DirSize(path string) string {
 	if os.Geteuid() != 0 {
@@ -200,4 +201,81 @@ func fmtKB(kb int) string {
 		return fmt.Sprintf("%.1f GB", float64(kb)/1048576.0)
 	}
 	return fmt.Sprintf("%.0f MB", float64(kb)/1024.0)
+}
+
+// SecurityUpdates is what Debian's daily apt job has recorded. LastRun is
+// zero until both the package list refresh and the upgrade have succeeded.
+// Configured is when the install wrote vpn's update settings.
+type SecurityUpdates struct {
+	LastRun    time.Time
+	Configured time.Time
+}
+
+const aptPeriodicDir = "/var/lib/apt/periodic"
+
+// ReadSecurityUpdates reads apt's success stamps and the time of the update
+// settings file the install wrote. Every account can read both.
+func ReadSecurityUpdates(config string) (SecurityUpdates, error) {
+	return readSecurityUpdates(aptPeriodicDir, config)
+}
+
+// apt.systemd.daily touches update-stamp after a successful package list
+// refresh and upgrade-stamp after a successful unattended-upgrade run. A
+// failed step leaves its stamp alone, so the older stamp is the last run in
+// which both succeeded.
+func readSecurityUpdates(dir, config string) (SecurityUpdates, error) {
+	var result SecurityUpdates
+	info, err := os.Stat(config)
+	if err != nil {
+		return result, err
+	}
+	result.Configured = info.ModTime()
+	for _, name := range []string{"update-stamp", "upgrade-stamp"} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if errors.Is(err, os.ErrNotExist) {
+			result.LastRun = time.Time{}
+			return result, nil
+		}
+		if err != nil {
+			return SecurityUpdates{}, err
+		}
+		if result.LastRun.IsZero() || info.ModTime().Before(result.LastRun) {
+			result.LastRun = info.ModTime()
+		}
+	}
+	return result, nil
+}
+
+// ReadUnitProperties reads systemd's record of the given units, which every
+// account can read. The result is keyed by unit name.
+func ReadUnitProperties(ctx context.Context, units []string, properties ...string) (map[string]map[string]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	args := []string{"show", "--timestamp=unix", "--property=Id," + strings.Join(properties, ",")}
+	cmd := exec.CommandContext(ctx, "systemctl", append(args, units...)...)
+	cmd.WaitDelay = 2 * time.Second
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	return ParseUnitProperties(string(out)), nil
+}
+
+// ParseUnitProperties reads the output of systemctl show for several units:
+// one block of Key=value lines per unit, blocks separated by an empty line.
+// A block without an Id is left out.
+func ParseUnitProperties(out string) map[string]map[string]string {
+	units := make(map[string]map[string]string)
+	for block := range strings.SplitSeq(out, "\n\n") {
+		values := make(map[string]string)
+		for line := range strings.SplitSeq(block, "\n") {
+			if key, value, ok := strings.Cut(line, "="); ok {
+				values[key] = value
+			}
+		}
+		if id := values["Id"]; id != "" {
+			units[id] = values
+		}
+	}
+	return units
 }

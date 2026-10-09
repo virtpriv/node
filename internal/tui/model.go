@@ -79,10 +79,10 @@ type openTab struct {
 	// detail tab (e.g. tabSyncthingDevice's Parent is
 	// tabSyncthing). Used by closeTab for cascade-
 	// close and by focusParentMsg for backspace
-	// navigation. No grandchild tabs exist — depth
+	// navigation. No grandchild tabs exist, depth
 	// is at most two levels.
 	Parent tabKind
-	Screen Screen // L16: owns all state for this tab's content (nil = legacy path)
+	Screen Screen // owns all state for this tab's content (nil = legacy path)
 }
 
 type systemRefreshMsg struct{}
@@ -91,7 +91,7 @@ type latestVersionMsg string
 
 // tabActivatedMsg is delivered to a screen's HandleMsg
 // when the user navigates to (or lands on) the screen's
-// tab. Screens opt in by handling it — those that don't
+// tab. Screens opt in by handling it. Those that don't
 // care silently ignore it via the default fall-through.
 // Used to refresh stale data without replacing the screen
 // or its in-progress state.
@@ -108,10 +108,14 @@ type syncthingRemovedMsg struct {
 	result  app.SyncthingResult
 }
 type syncthingDevicesMsg struct {
-	owner    *ScreenContext
-	revision uint64
-	devices  []syncthing.Device
-	err      error
+	owner       *ScreenContext
+	revision    uint64
+	devices     []syncthing.Device
+	err         error
+	delivery    map[string]syncthing.Delivery
+	deliveryErr error
+	copy        app.BackupCopy
+	copyErr     error
 }
 type syncthingCloseMsg struct {
 	owner   Screen
@@ -197,10 +201,10 @@ type Model struct {
 	width          int
 	height         int
 
-	// L16: shared context for screen components
+	// shared context for screen components
 	screenCtx *ScreenContext
 
-	// L16: section home screens (nil = legacy path)
+	// section home screens (nil = legacy path)
 	sectionScreens [numSections]Screen
 
 	latestVersion       string
