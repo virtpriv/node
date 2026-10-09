@@ -3,10 +3,16 @@ package helper
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // An in-memory peer exercises the production scanner and cancellation path
@@ -77,4 +83,42 @@ func TestSessionRequiresCompleteProtocol(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Only a request that never reached the helper may suggest a restart or a
+// reboot. After the request is sent the helper may still be working, an apt
+// run for example, and a reboot then could break it.
+func TestHelperAdviceDependsOnWhetherTheRequestWasSent(t *testing.T) {
+	// A short folder: a socket path has a length limit.
+	dir, err := os.MkdirTemp("", "vpnh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir); helperSocket = paths.HelperSocket })
+
+	t.Run("not sent", func(t *testing.T) {
+		helperSocket = filepath.Join(dir, "absent.sock")
+		_, err := Start(VerbSyncthingInstall, nil)
+		if err == nil || !strings.Contains(err.Error(), "sudo systemctl restart vpn-helperd.socket") {
+			t.Fatalf("closed helper without its repair: %v", err)
+		}
+	})
+	t.Run("reply lost", func(t *testing.T) {
+		helperSocket = filepath.Join(dir, "h.sock")
+		ln, err := net.Listen("unix", helperSocket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ln.Close()
+		go func() {
+			if conn, err := ln.Accept(); err == nil {
+				io.ReadAll(conn)
+				conn.Close()
+			}
+		}()
+		err = Call(VerbSyncthingInstall, nil, nil)
+		if err == nil || strings.Contains(err.Error(), "restart") || strings.Contains(err.Error(), "reboot") {
+			t.Fatalf("lost reply suggested a restart or reboot: %v", err)
+		}
+	})
 }

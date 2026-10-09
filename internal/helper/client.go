@@ -20,28 +20,43 @@ import (
 // One privileged operation = one connection: dial the helper's
 // socket, write one request line, half-close, then read
 // progress events until the ok/error terminator. The socket's
-// ownership (root:vpn 0660) is what authorizes the connection;
-// there is no password and no token — being the admin user IS
+// ownership (root:vpn 0660) is what authorizes the connection.
+// There is no password and no token: being the admin user IS
 // the credential, and the helper re-checks the peer's uid on
 // every connection.
 //
 // The helper serializes execution: while it runs one operation,
 // a second connection waits its turn in the kernel's queue.
 // Root-side deadlines bound socket I/O, not synchronous handler completion.
-// Caller cancellation stops local I/O; accepted mutations can continue.
+// Caller cancellation stops local I/O. Accepted mutations can continue.
 
 const dialTimeout = 5 * time.Second
 
-// maxEventBytes bounds one response line. Events are small; the
+// helperSocket is the helper's address. Tests point it elsewhere.
+var helperSocket = paths.HelperSocket
+
+// maxEventBytes bounds one response line. Events are small, the
 // bound exists so a defect can't balloon client memory.
 const maxEventBytes = 1 << 20
 
-// helperDown wraps a transport-level failure in operator-facing
-// language: what to check, in order.
+// helperClosed is for a request that never reached the helper. Nothing was
+// started, so the repair is safe to suggest. A failed helper start with a
+// request waiting leaves the socket unit failed and its node removed, and only
+// a start of the socket brings it back.
+func helperClosed(op string, err error) error {
+	return fmt.Errorf(
+		"%s: cannot reach the node's helper. To repair, quit with ctrl+c "+
+			"and run: sudo systemctl restart vpn-helperd.socket, or sudo reboot. "+
+			"Cause: %v", op, err)
+}
+
+// helperDown is for every other failure. The request may have been sent and
+// the helper may still be working on it, so this points at state and logs,
+// never at a restart or a reboot.
 func helperDown(op string, err error) error {
 	return fmt.Errorf(
-		"%s: cannot reach the node's helper service (%v) — "+
-			"check: systemctl status vpn-helperd.socket, then "+
+		"%s: cannot reach the node's helper service (%v). "+
+			"Check: systemctl status vpn-helperd.socket, then "+
 			"journalctl -u vpn-helperd", op, err)
 }
 
@@ -62,7 +77,7 @@ type Session struct {
 }
 
 // Start dials the helper and sends the request. It returns
-// immediately after the request is written; the operation runs
+// immediately after the request is written. The operation runs
 // (and possibly queues) on the root side.
 func Start(verb string, params any) (*Session, error) {
 	return StartContext(context.Background(), verb, params)
@@ -72,12 +87,16 @@ func Start(verb string, params any) (*Session, error) {
 // I/O, including a blocked progress read. It cannot undo an accepted mutation.
 func StartContext(ctx context.Context, verb string, params any) (*Session, error) {
 	d := net.Dialer{Timeout: dialTimeout}
-	c, err := d.DialContext(ctx, "unix", paths.HelperSocket)
+	c, err := d.DialContext(ctx, "unix", helperSocket)
 	if err != nil {
-		return nil, helperDown(verb, err)
+		if ctx.Err() != nil {
+			// The caller gave up, which says nothing about the helper.
+			return nil, helperDown(verb, err)
+		}
+		return nil, helperClosed(verb, err)
 	}
 	conn, ok := c.(*net.UnixConn)
-	if !ok { // cannot happen for a unix dial; belt and braces
+	if !ok { // cannot happen for a unix dial, a safety check only
 		c.Close()
 		return nil, helperDown(verb,
 			errors.New("not a unix socket connection"))
@@ -202,7 +221,7 @@ func (s *Session) endErr(untilStep int) error {
 	if s.end.OK {
 		if untilStep >= 0 && !s.stepOK[untilStep] {
 			// Terminated OK without reporting the step the caller
-			// is waiting on — a protocol drift bug.
+			// is waiting on, a protocol drift bug.
 			s.err = fmt.Errorf(
 				"%s: helper finished without reporting step %d",
 				s.verb, untilStep+1)
@@ -237,7 +256,7 @@ func (s *Session) Wait(result any) error {
 }
 
 // Close stops observation and releases the connection. The helper deliberately
-// continues an accepted mutation after disconnection; Close is not rollback.
+// continues an accepted mutation after disconnection. Close is not rollback.
 // It may run concurrently with WaitStep or Wait. Reads must have one owner.
 func (s *Session) Close() {
 	s.closeOnce.Do(func() {

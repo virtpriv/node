@@ -47,8 +47,9 @@ func statusCollectorFixture(t *testing.T) *StatusCollector {
 		bitcoin: func(context.Context, int) (bitcoin.BlockchainInfo, error) {
 			return bitcoin.BlockchainInfo{Synced: true}, nil
 		},
-		size:   func(context.Context) (string, error) { return "1G", nil },
-		reboot: func() (bool, error) { return false, nil }, publicIP: func(context.Context) (string, error) { return "", errors.New("unavailable") },
+		size:    func(context.Context) (string, error) { return "1G", nil },
+		reboot:  func() (bool, error) { return false, nil },
+		updates: func() (system.SecurityUpdates, error) { return system.SecurityUpdates{}, nil }, publicIP: func(context.Context) (string, error) { return "", errors.New("unavailable") },
 	}
 	return c
 }
@@ -107,7 +108,7 @@ func TestStatusDisabledSourcesAndSizeCache(t *testing.T) {
 	if calls != 1 || withoutWallet.LNDSize.Known() || withoutWallet.LNDSize.Err == nil {
 		t.Fatal("size cache lost failure identity or repeated I/O")
 	}
-	// A new successful probe replaces a cached failure; a cancelled/failed probe
+	// A new successful probe replaces a cached failure. A cancelled or failed probe
 	// must never become a successful N/A value.
 	c.sizeAttempt = time.Now().Add(-6 * time.Minute)
 	c.sources.size = func(context.Context) (string, error) { return "2G", nil }
@@ -187,5 +188,33 @@ func TestStatusCollectWaitsForSlowSourceWithoutLosingFastResult(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("collector did not finish")
+	}
+}
+
+// Debian checks once a day at a random time, so two good runs can be about 42
+// hours apart. Only a gap past 48 hours, or no run 48 hours after install,
+// is a warning.
+func TestSecurityUpdatesWarnOnlyAfterTwoDays(t *testing.T) {
+	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	installed := now.Add(-30 * 24 * time.Hour)
+	for _, tc := range []struct {
+		name  string
+		in    system.SecurityUpdates
+		state SecurityUpdatesState
+		since time.Time
+	}{
+		{"healthy gap", system.SecurityUpdates{LastRun: now.Add(-42 * time.Hour), Configured: installed}, SecurityUpdatesCurrent, now.Add(-42 * time.Hour)},
+		{"run overdue", system.SecurityUpdates{LastRun: now.Add(-49 * time.Hour), Configured: installed}, SecurityUpdatesOverdue, now.Add(-49 * time.Hour)},
+		{"fresh install", system.SecurityUpdates{Configured: now.Add(-20 * time.Hour)}, SecurityUpdatesNotRunYet, now.Add(-20 * time.Hour)},
+		{"never ran", system.SecurityUpdates{Configured: now.Add(-49 * time.Hour)}, SecurityUpdatesOverdue, now.Add(-49 * time.Hour)},
+		{"stamps older than the install", system.SecurityUpdates{LastRun: now.Add(-90 * 24 * time.Hour), Configured: now.Add(-20 * time.Hour)}, SecurityUpdatesNotRunYet, now.Add(-20 * time.Hour)},
+		{"no run since an old install", system.SecurityUpdates{LastRun: now.Add(-90 * 24 * time.Hour), Configured: now.Add(-49 * time.Hour)}, SecurityUpdatesOverdue, now.Add(-49 * time.Hour)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state, since := SecurityUpdatesStatus(tc.in, now)
+			if state != tc.state || !since.Equal(tc.since) {
+				t.Fatalf("got %v since %v, want %v since %v", state, since, tc.state, tc.since)
+			}
+		})
 	}
 }

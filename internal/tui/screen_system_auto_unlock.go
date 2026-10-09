@@ -92,7 +92,7 @@ func NewAutoUnlockScreen(
 		s.focusZone = auZoneInput1
 		s.pw1.Focus()
 	} else {
-		// Disable mode has no inputs; focus goes
+		// Disable mode has no inputs, focus goes
 		// straight to the buttons.
 		s.focusZone = auZoneButtons
 	}
@@ -198,7 +198,7 @@ func (s *AutoUnlockScreen) HandleKey(
 }
 
 // ── Disable mode key handling ───────────────────────────
-// Disable mode has no inputs; focus stays on the buttons.
+// Disable mode has no inputs. Focus stays on the buttons.
 
 func (s *AutoUnlockScreen) handleDisableKey(
 	keyStr string, msg tea.KeyPressMsg,
@@ -552,33 +552,13 @@ func (s *AutoUnlockScreen) viewEnable(
 	p.title(theme.Header,
 		"Configure Auto-Unlock")
 
-	p.line(" " + theme.Value.Render(
-		"LND requires your wallet password to"))
-	p.line(" " + theme.Value.Render(
-		"unlock the wallet on every startup."))
+	p.valueWrap("LND requires your wallet password to unlock the wallet on every startup.")
 	p.blank()
-	p.line(" " + theme.Value.Render(
-		"Auto-unlock stores your password in a"))
-	p.line(" " + theme.Value.Render(
-		"permission-locked file owned by the"))
-	p.line(" " + theme.Value.Render(
-		"LND service user, so LND can unlock"))
-	p.line(" " + theme.Value.Render(
-		"itself automatically after a reboot."))
+	p.valueWrap("Auto-unlock stores your password in a permission-locked file owned by the LND service user, so LND can unlock itself automatically after a reboot.")
 	p.blank()
-	p.line(" " + theme.Warning.Render(
-		"If you are not an advanced user,"))
-	p.line(" " + theme.Warning.Render(
-		"configure auto-unlock now by typing"))
-	p.line(" " + theme.Warning.Render(
-		"in your password."))
+	p.warnWrapWords("This server restarts by itself when a security update needs it. Without auto-unlock, LND then stays offline. Configure auto-unlock now by typing in your password.")
 	p.blank()
-	p.line(" " + theme.Value.Render(
-		"Enter the SAME password you used when"))
-	p.line(" " + theme.Value.Render(
-		"creating your wallet (NOT YOUR 24 WORD"))
-	p.line(" " + theme.Value.Render(
-		"SEED, not the optional seed passphrase)."))
+	p.valueWrap("Enter the SAME password you used when creating your wallet (NOT YOUR 24 WORD SEED, not the optional seed passphrase).")
 	p.blank()
 
 	p.input("Wallet password:",
@@ -626,12 +606,7 @@ func (s *AutoUnlockScreen) viewDisable(
 	p.line(" " + theme.Value.Render(
 		"    reboot (run: lncli unlock)"))
 	p.blank()
-	p.line(" " + theme.Warning.Render(
-		"Until you unlock LND manually after a"))
-	p.line(" " + theme.Warning.Render(
-		"reboot, no Lightning operations will"))
-	p.line(" " + theme.Warning.Render(
-		"work."))
+	p.warnWrapWords("This server restarts by itself when a security update needs it. Until you unlock LND manually after a reboot, no Lightning operations will work.")
 
 	return p.renderWithBottomButtons(
 		[]string{"Cancel", "Disable"},

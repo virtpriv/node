@@ -10,6 +10,7 @@ import (
 	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/helper"
 	"github.com/virtpriv/node/internal/lndrpc"
+	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/servicecontrol"
 	"github.com/virtpriv/node/internal/system"
 )
@@ -57,6 +58,7 @@ type StatusSnapshot struct {
 	Bitcoin     Observation[bitcoin.BlockchainInfo]
 	LNDSize     Observation[string]
 	Reboot      Observation[bool]
+	Updates     Observation[system.SecurityUpdates]
 	PublicIP    Observation[string]
 	WalletState Observation[lndrpc.WalletState]
 	Node        Observation[lndrpc.NodeInfo]
@@ -82,6 +84,7 @@ func (s StatusSnapshot) Retain(previous StatusSnapshot) StatusSnapshot {
 	s.Bitcoin = retain(s.Bitcoin, previous.Bitcoin)
 	s.LNDSize = retain(s.LNDSize, previous.LNDSize)
 	s.Reboot = retain(s.Reboot, previous.Reboot)
+	s.Updates = retain(s.Updates, previous.Updates)
 	s.PublicIP = retain(s.PublicIP, previous.PublicIP)
 	s.WalletState = retain(s.WalletState, previous.WalletState)
 	s.Node = retain(s.Node, previous.Node)
@@ -105,12 +108,13 @@ type statusSources struct {
 	bitcoin  func(context.Context, int) (bitcoin.BlockchainInfo, error)
 	size     func(context.Context) (string, error)
 	reboot   func() (bool, error)
+	updates  func() (system.SecurityUpdates, error)
 	publicIP func(context.Context) (string, error)
 }
 
 // StatusCollector owns observation I/O and its cache for one terminal session.
 // Scheduling and publication stay with the caller. RPCs and helper reads share
-// a deadline; separate daemon RPCs are not an atomic snapshot.
+// a deadline. Separate daemon RPCs are not an atomic snapshot.
 type StatusCollector struct {
 	sources     statusSources
 	ctx         context.Context
@@ -137,6 +141,9 @@ func NewStatusCollector() *StatusCollector {
 		service: readNodeService, disk: system.ReadDisk,
 		memory: system.ReadMemory, bitcoin: bitcoin.GetBlockchainInfo,
 		reboot: system.ReadRebootRequired, publicIP: system.ReadPublicIPv4,
+		updates: func() (system.SecurityUpdates, error) {
+			return system.ReadSecurityUpdates(paths.AutoUpgrades)
+		},
 		size: func(ctx context.Context) (string, error) {
 			s, err := helper.StartContext(ctx, helper.VerbDirSize, helper.DirSizeParams{Which: "lnd"})
 			if err != nil {
@@ -155,7 +162,7 @@ func NewStatusCollector() *StatusCollector {
 }
 
 // Close cancels and joins local readers. Existing shared LND client mutex waits
-// can delay the join; automatic reconnection is not owned by this collector.
+// can delay the join. Automatic reconnection is not owned by this collector.
 func (c *StatusCollector) Close() {
 	c.mu.Lock()
 	c.closed = true
@@ -211,6 +218,7 @@ func (c *StatusCollector) Collect(cfg config.AppConfig, walletExists bool, clien
 	wg.Go(func() { s.Disk = observe(c.sources.disk(ctx, "/")) })
 	wg.Go(func() { s.Memory = observe(c.sources.memory()) })
 	wg.Go(func() { s.Reboot = observe(c.sources.reboot()) })
+	wg.Go(func() { s.Updates = observe(c.sources.updates()) })
 	wg.Go(func() {
 		profile, err := cfg.NetworkConfig()
 		if err != nil {
@@ -271,4 +279,38 @@ func (c *StatusCollector) Collect(cfg config.AppConfig, walletExists bool, clien
 	}
 	wg.Wait()
 	return s
+}
+
+// SecurityUpdatesState is how the System screen reports Debian's automatic
+// security updates.
+type SecurityUpdatesState int
+
+const (
+	SecurityUpdatesCurrent SecurityUpdatesState = iota
+	SecurityUpdatesNotRunYet
+	SecurityUpdatesOverdue
+)
+
+// securityUpdatesWarnAfter allows for Debian's timing: apt-daily.timer fires
+// at 6:00 and 18:00 with up to 12 hours of random delay, and a run counts once
+// per calendar day, so two successful runs can be about 42 hours apart on a
+// healthy node.
+const securityUpdatesWarnAfter = 48 * time.Hour
+
+// SecurityUpdatesStatus judges the recorded runs at now. The time returned is
+// the last successful run, or the install of the settings when none has run
+// since.
+func SecurityUpdatesStatus(u system.SecurityUpdates, now time.Time) (SecurityUpdatesState, time.Time) {
+	// A provider image can hold stamps from before vpn's install. Only a run
+	// after vpn wrote its settings counts.
+	if u.LastRun.IsZero() || u.LastRun.Before(u.Configured) {
+		if now.Sub(u.Configured) > securityUpdatesWarnAfter {
+			return SecurityUpdatesOverdue, u.Configured
+		}
+		return SecurityUpdatesNotRunYet, u.Configured
+	}
+	if now.Sub(u.LastRun) > securityUpdatesWarnAfter {
+		return SecurityUpdatesOverdue, u.LastRun
+	}
+	return SecurityUpdatesCurrent, u.LastRun
 }

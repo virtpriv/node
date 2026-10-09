@@ -3,9 +3,11 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/virtpriv/node/internal/theme"
 )
@@ -138,7 +140,7 @@ func (s *SyncthingDetailScreen) handleEnter() (
 		return s, nil
 	}
 
-	// Device list — open device detail
+	// Device list: open device detail
 	devices := s.ctx.State.SyncthingDevices
 	if s.ctx.State.SyncthingDevicesKnown && s.cursor >= 0 && s.cursor < len(devices) {
 		dev := devices[s.cursor]
@@ -202,7 +204,7 @@ func (s *SyncthingDetailScreen) View(
 	headerLines = append(headerLines,
 		centerPad(
 			theme.Header.Render(
-				"Syncthing — Details"), w))
+				"Syncthing details"), w))
 	headerLines = append(headerLines, "")
 	headerLines = append(headerLines,
 		renderButtons(
@@ -215,6 +217,17 @@ func (s *SyncthingDetailScreen) View(
 
 	// ── Scrollable body ─────────────────────────
 	var midLines []string
+
+	if text, warn := backupCopyLine(s.ctx.State, time.Now()); text != "" {
+		style := theme.Value
+		if warn {
+			style = theme.Warning
+		}
+		for _, line := range strings.Split(ansi.Wrap(text, max(w-2, 16), ""), "\n") {
+			midLines = append(midLines, " "+style.Render(line))
+		}
+		midLines = append(midLines, "")
+	}
 
 	pairedCount := len(devices)
 	label := "Configured Devices (unavailable)"
@@ -238,7 +251,7 @@ func (s *SyncthingDetailScreen) View(
 				"Cannot read the current device list"))
 		midLines = append(midLines,
 			" "+theme.Dim.Render(
-				"Retrying automatically; inspect Syncthing if it persists."))
+				"Retrying automatically. Inspect Syncthing if it persists."))
 	} else if pairedCount == 0 {
 		midLines = append(midLines,
 			" "+theme.Dim.Render(
@@ -258,7 +271,7 @@ func (s *SyncthingDetailScreen) View(
 		hdr := " " +
 			hdrStyle.Render(pad("Name", nameW)) +
 			hdrStyle.Render(pad(idLabel, idW)) + " " +
-			hdrStyle.Render(pad("Backup sharing", shareW))
+			hdrStyle.Render(pad("Backup", shareW))
 		midLines = append(midLines, hdr)
 		midLines = append(midLines,
 			" "+sepStyle.Render(
@@ -285,7 +298,7 @@ func (s *SyncthingDetailScreen) View(
 				devID = devID[:idW-4] + "..."
 			}
 			idStr := pad(devID, idW)
-			shareStr := " " + pad(backupSharingText(d), shareW)
+			shareStr := " " + pad(deliveryText(s.ctx.State, d.DeviceID), shareW)
 
 			isSelected := onList && s.cursor == i
 

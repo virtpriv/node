@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/virtpriv/node/internal/syncthing"
 )
@@ -49,6 +51,9 @@ func (f *syncFake) ListDevices(ctx context.Context) ([]syncthing.Device, error) 
 		return []syncthing.Device{{DeviceID: "REMOTE", BackupKnown: true, BackupShared: f.shared}}, f.err("list")
 	}
 	return nil, f.err("list")
+}
+func (f *syncFake) BackupDelivery(context.Context, []syncthing.Device) (map[string]syncthing.Delivery, error) {
+	return nil, f.err("delivery")
 }
 func (f *syncFake) ConfirmPrivacy(context.Context) error { return f.err("privacy") }
 func (f *syncFake) BackupFolder(context.Context, string) (syncthing.BackupFolder, error) {
@@ -177,4 +182,100 @@ func TestSyncthingShutdownJoinsAndRefusesNewCalls(t *testing.T) {
 			t.Fatal("shutdown allowed mutation")
 		}
 	})
+}
+
+// The copy line comes from systemd, not from Syncthing. Syncthing being down
+// must not hide whether the node keeps its own copy current.
+func TestSyncthingObservationKeepsTheCopyLineWhenSyncthingIsDown(t *testing.T) {
+	s := NewSyncthing()
+	t.Cleanup(s.Close)
+	s.client = func() (SyncthingClient, error) { return nil, errors.New("daemon down") }
+	at := time.Date(2026, 10, 8, 14, 3, 12, 0, time.UTC)
+	s.backupCopy = func(context.Context) (BackupCopy, error) {
+		return BackupCopy{State: BackupCopyCurrent, At: at}, nil
+	}
+	o := s.Observe()
+	if o.CopyErr != nil || o.Copy.State != BackupCopyCurrent || !o.Copy.At.Equal(at) {
+		t.Fatalf("copy line lost with Syncthing down: %+v %v", o.Copy, o.CopyErr)
+	}
+	if o.DevicesErr == nil || o.DeliveryErr == nil {
+		t.Fatal("Syncthing down was not reported for the devices")
+	}
+}
+
+// Each state comes from systemd's own record of the timer and the copy job,
+// judged at the moment the screen draws. The records below have the shape
+// systemctl show prints on Debian 13.
+func TestBackupCopyStateFromSystemdRecord(t *testing.T) {
+	now := time.Date(2026, 10, 8, 14, 4, 0, 0, time.UTC)
+	stamp := func(ago time.Duration) string { return "@" + strconv.FormatInt(now.Add(-ago).Unix(), 10) }
+	record := func(set ...string) string {
+		timer := map[string]string{"Id": "lnd-backup-check.timer", "LoadState": "loaded", "ActiveState": "active", "ActiveEnterTimestamp": ""}
+		export := map[string]string{"Id": "lnd-backup-export.service", "LoadState": "loaded", "ActiveState": "inactive",
+			"Result": "success", "ExecMainStartTimestamp": "", "ExecMainExitTimestamp": "", "InactiveEnterTimestamp": ""}
+		for i := 0; i+1 < len(set); i += 2 {
+			unit, key, _ := strings.Cut(set[i], ".")
+			if unit == "timer" {
+				timer[key] = set[i+1]
+			} else {
+				export[key] = set[i+1]
+			}
+		}
+		block := func(m map[string]string) string {
+			var b strings.Builder
+			for k, v := range m {
+				b.WriteString(k + "=" + v + "\n")
+			}
+			return b.String()
+		}
+		return block(timer) + "\n" + block(export)
+	}
+	const none = -1
+	for _, tc := range []struct {
+		name  string
+		out   string
+		state BackupCopyState
+		at    time.Duration
+	}{
+		{"checked and equal", record("export.ExecMainExitTimestamp", stamp(40*time.Second)), BackupCopyCurrent, 40 * time.Second},
+		{"timer stopped", record("timer.ActiveState", "inactive", "export.ExecMainExitTimestamp", stamp(40*time.Second)), BackupCopyOff, none},
+		{"timer failed", record("timer.ActiveState", "failed"), BackupCopyOff, none},
+		{"no timer, old units", "Result=success\nId=lnd-backup-check.timer\nLoadState=not-found\nActiveState=inactive\n\nResult=success\nExecMainExitTimestamp=@1791334331\nId=lnd-backup-export.service\nLoadState=loaded\nActiveState=inactive\n", BackupCopyNoTimer, none},
+		{"last check failed", record("export.ActiveState", "failed", "export.Result", "exit-code",
+			"export.ExecMainExitTimestamp", stamp(31*time.Second), "export.InactiveEnterTimestamp", stamp(30*time.Second)), BackupCopyFailed, 30 * time.Second},
+		{"failed before running", record("export.ActiveState", "failed", "export.Result", "resources",
+			"export.ExecMainExitTimestamp", stamp(10*time.Minute), "export.InactiveEnterTimestamp", stamp(20*time.Second)), BackupCopyFailed, 20 * time.Second},
+		{"failed with no time", record("export.ActiveState", "failed", "export.Result", "resources"), BackupCopyFailed, none},
+		{"checks late", record("export.ExecMainExitTimestamp", stamp(4*time.Minute)), BackupCopyLate, 4 * time.Minute},
+		{"checking now", record("export.ActiveState", "activating", "export.ExecMainStartTimestamp", stamp(10*time.Second)), BackupCopyChecking, none},
+		{"copy stuck", record("export.ActiveState", "activating", "export.ExecMainStartTimestamp", stamp(5*time.Minute)), BackupCopyStuck, 5 * time.Minute},
+		{"none since boot", record("timer.ActiveEnterTimestamp", stamp(30*time.Second)), BackupCopyNotYet, none},
+		{"timer on, copy never ran", record("timer.ActiveEnterTimestamp", stamp(5*time.Minute)), BackupCopyLate, none},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed, err := parseBackupCopy(tc.out)
+			got := parsed.Judged(now)
+			if err != nil || got.State != tc.state {
+				t.Fatalf("got %+v, %v, want state %v", got, err, tc.state)
+			}
+			if tc.at != none && !got.At.Equal(now.Add(-tc.at)) {
+				t.Fatalf("time %v, want %v", got.At, now.Add(-tc.at))
+			}
+			if tc.at == none && (tc.state == BackupCopyFailed || tc.state == BackupCopyLate) && !got.At.IsZero() {
+				t.Fatalf("a time no run finished at is shown: %v", got.At)
+			}
+		})
+	}
+	for name, out := range map[string]string{
+		"empty":         "",
+		"no copy job":   "Id=lnd-backup-check.timer\nLoadState=loaded\nActiveState=active\n",
+		"bad time":      record("export.ExecMainExitTimestamp", "@soon"),
+		"copy job gone": record("export.LoadState", "not-found", "export.ExecMainExitTimestamp", stamp(time.Second)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got, err := parseBackupCopy(out); err == nil {
+				t.Fatalf("garbled record gave %+v", got)
+			}
+		})
+	}
 }
