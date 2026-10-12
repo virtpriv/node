@@ -34,16 +34,27 @@ Build a managed release from the repository root:
 (local PC)
 
 ```sh
-GOTOOLCHAIN=local go run ./cmd/release VERSION path/to/tested-update-plan.json
+GOTOOLCHAIN=local go run ./cmd/release -sign VERSION path/to/tested-update-plan.json
 ```
 
-The command validates the plan against the checkout's component pins and
-implemented host operations, builds and packages VPN, and signs locally with
-the existing VPN release key. It produces the archive, `SHA256SUMS` and
-`SHA256SUMS.asc` in `release/VERSION/`, refusing an existing version directory.
-The exact reviewed plan bytes go into the archive. A one-argument build produces
-a bootstrap archive without a managed plan. v0.7.0 requires a fresh installation. This
-protocol does not provide an upgrade from v0.6.x or an unmarked installation.
+The command refuses a Git checkout with changes or with files Git does not
+ignore. It validates the plan against the checkout's pinned component versions,
+archive hashes and implemented host operations, then builds and packages VPN.
+It ignores Go settings saved with `go env -w`, so set any you need, such as
+`GOPROXY`, in the shell. The exact reviewed plan bytes go into the archive. A
+build without a plan, as for v0.7.0, produces a bootstrap archive without a
+managed plan.
+
+With `-sign` the command signs `SHA256SUMS` with the release key in your local
+GPG keyring, which can prompt through your normal GPG setup, then checks the
+signature with an isolated keyring and the updater's pinned signer policy. It
+writes the archive, `SHA256SUMS` and, with `-sign`, `SHA256SUMS.asc` to
+`release/VERSION/`, refusing an existing version directory. An ordinary failure
+removes only the new incomplete directory. After a forced termination, inspect
+any leftover directory before removing it and retrying.
+
+v0.7.0 requires a fresh installation. This protocol does not provide an
+upgrade from v0.6.x or an unmarked installation.
 The first test baseline must itself contain the managed updater. Once running
 this implementation, the legacy binary-only helper request is refused so it
 cannot bypass component and host changes.
@@ -59,7 +70,7 @@ The plan has these fields:
 | `minimum_free_mib` | Free space, at least 1024 MiB, that must remain on the staging and affected data filesystems after the update installs its files. Checked before downloading and again before any service stops |
 | `sources` | Exact tested objects containing `vpn`, `bitcoin`, `lnd`, `syncthing`. An empty Syncthing version means absent |
 | `networks` | Explicitly supported installed profiles: `mainnet`, `testnet4`, `public-signet` |
-| `bitcoin`, `lnd`, `syncthing` | Each has `version` and the upstream archive's lowercase `sha256` |
+| `bitcoin`, `lnd`, `syncthing` | Each has `version` and the upstream archive's lowercase `sha256`, both equal to the values pinned in `internal/component/versions.go` at the release commit |
 | `host_steps` | Ordered operation IDs implemented in the target worker |
 | `host_services` | Optional affected component names for host steps. Stopping Core also includes LND |
 | `recovery_from` | Optional exact VPN archive digests this release can repair |
