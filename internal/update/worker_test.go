@@ -17,10 +17,11 @@ import (
 func TestWorkerRejectsPlanForDifferentBuild(t *testing.T) {
 	m := workflowFixture().Review.Manifest
 	m.Bitcoin.Version, m.LND.Version, m.Syncthing.Version = component.BitcoinCoreVersion, component.LNDVersion, component.SyncthingVersion
+	m.Bitcoin.SHA256, m.LND.SHA256, m.Syncthing.SHA256 = component.BitcoinCoreArchiveSHA256, component.LNDArchiveSHA256, component.SyncthingArchiveSHA256
 	if err := ValidateBuild(m, "0.7.1"); err != nil {
 		t.Fatal(err)
 	}
-	for _, mismatch := range []string{"vpn", "bitcoin", "lnd", "syncthing", "host step"} {
+	for _, mismatch := range []string{"vpn", "bitcoin", "lnd", "syncthing", "archive hash", "host step"} {
 		t.Run(mismatch, func(t *testing.T) {
 			changed := m
 			switch mismatch {
@@ -32,6 +33,8 @@ func TestWorkerRejectsPlanForDifferentBuild(t *testing.T) {
 				changed.LND.Version = "999.0.0-beta"
 			case "syncthing":
 				changed.Syncthing.Version = "999.0.0"
+			case "archive hash":
+				changed.LND.SHA256 = strings.Repeat("b", 64)
 			case "host step":
 				changed.HostSteps = []string{"unsupported-host-change"}
 			}

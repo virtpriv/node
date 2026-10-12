@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -25,12 +26,13 @@ func TestReleaseAssetsMatchUpdater(t *testing.T) {
 	for _, version := range []string{"0.7.0-rc.1", "0.7.1-rc.1", "0.7.1"} {
 		t.Run(version, func(t *testing.T) {
 			dir := releaseFixture(t, version)
-			args := []string{version}
+			args := []string{"-sign", version}
 			members := map[string]string{"vpn": "vpn"}
 			var plan []byte
 			if version != "0.7.0-rc.1" {
-				plan = writePlan(t, planFixture(version))
-				args = append(args, "plan.json")
+				var path string
+				path, plan = writePlan(t, planFixture(version))
+				args = append(args, path)
 				members["update.json"] = "update.json"
 			}
 			if err := run(args); err != nil {
@@ -86,8 +88,8 @@ func TestReleaseAssetsMatchUpdater(t *testing.T) {
 				for _, entry := range entries {
 					before[entry.Name()] = readFile(t, filepath.Join(out, entry.Name()))
 				}
-				if err := run(args); err == nil {
-					t.Fatal("overwrote an existing release")
+				if err := run(args); err == nil || !strings.Contains(err.Error(), "already exists") {
+					t.Fatal("did not refuse an existing release:", err)
 				}
 				for name, data := range before {
 					if !bytes.Equal(data, readFile(t, filepath.Join(out, name))) {
@@ -116,15 +118,15 @@ func TestReleaseRefusesInvalidPlanOrCompilerBeforeBuilding(t *testing.T) {
 			if test.change != nil {
 				test.change(&m)
 			}
-			writePlan(t, m)
+			path, _ := writePlan(t, m)
 			if test.compiler != "" {
 				t.Setenv("RELEASE_TEST_GO_VERSION", test.compiler)
 			}
-			if err := run([]string{"0.7.1", "plan.json"}); err == nil || !strings.Contains(err.Error(), test.want) {
+			if err := run([]string{"-sign", "0.7.1", path}); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("wrong refusal: %v", err)
 			}
-			if _, err := os.Stat(filepath.Join(dir, "built")); !os.IsNotExist(err) {
-				t.Fatal("built before release admission completed")
+			if trace, err := os.ReadFile(filepath.Join(dir, "trace")); !os.IsNotExist(err) {
+				t.Fatalf("built before release admission completed: %q, %v", trace, err)
 			}
 			assertNoRelease(t, dir, "0.7.1")
 		})
@@ -149,7 +151,7 @@ func TestReleaseFailureDoesNotLeavePublishableOutput(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("RELEASE_TEST_FAILURE", failure)
-			if err := run([]string{"0.7.1"}); err == nil {
+			if err := run([]string{"-sign", "0.7.1"}); err == nil {
 				t.Fatal("accepted a failed build or unverifiable release")
 			}
 			trace := strings.Fields(string(readFile(t, filepath.Join(dir, "trace"))))
@@ -189,29 +191,31 @@ func TestArchiveBytesDoNotDependOnLocalFileMetadata(t *testing.T) {
 }
 
 func planFixture(version string) protocol.Manifest {
-	h := strings.Repeat("a", 64)
 	return protocol.Manifest{
 		Protocol: protocol.Protocol, Platform: "debian-13-amd64", Version: version,
 		Summary: "Test fixture only", MinimumFreeMiB: 2048,
 		Sources:   []protocol.Versions{{VPN: "0.7.0", Bitcoin: component.BitcoinCoreVersion, LND: component.LNDVersion}},
 		Networks:  []string{"public-signet"},
-		Bitcoin:   protocol.Artifact{Version: component.BitcoinCoreVersion, SHA256: h},
-		LND:       protocol.Artifact{Version: component.LNDVersion, SHA256: h},
-		Syncthing: protocol.Artifact{Version: component.SyncthingVersion, SHA256: h},
+		Bitcoin:   protocol.Artifact{Version: component.BitcoinCoreVersion, SHA256: component.BitcoinCoreArchiveSHA256},
+		LND:       protocol.Artifact{Version: component.LNDVersion, SHA256: component.LNDArchiveSHA256},
+		Syncthing: protocol.Artifact{Version: component.SyncthingVersion, SHA256: component.SyncthingArchiveSHA256},
 		HostSteps: []string{"lnd-service-v1"},
 	}
 }
 
-func writePlan(t *testing.T, m protocol.Manifest) []byte {
+// writePlan keeps the plan outside the checkout, as the release tool refuses
+// files Git does not know.
+func writePlan(t *testing.T, m protocol.Manifest) (string, []byte) {
 	t.Helper()
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile("plan.json", b, 0600); err != nil {
+	path := filepath.Join(t.TempDir(), "plan.json")
+	if err := os.WriteFile(path, b, 0600); err != nil {
 		t.Fatal(err)
 	}
-	return b
+	return path, b
 }
 
 func readFile(t *testing.T, path string) []byte {
@@ -248,7 +252,7 @@ func releaseFixture(t *testing.T, version string) string {
 	stubs := map[string]string{
 		"go": `#!/bin/sh
 set -eu
-[ "$GOTOOLCHAIN:$GOWORK:$GOFLAGS:$CGO_ENABLED:$GOOS:$GOARCH:$GOAMD64" = local:off::0:linux:amd64:v1 ]
+[ "$GOTOOLCHAIN:$GOENV:$GOWORK:$GOFLAGS:$GOEXPERIMENT:$GOFIPS140:$GO_EXTLINK_ENABLED:$CGO_ENABLED:$GOOS:$GOARCH:$GOAMD64" = local:off:off:::off::0:linux:amd64:v1 ]
 command="$1"; shift
 case "$command" in
     env) test "$*" = GOVERSION; echo "$RELEASE_TEST_GO_VERSION" ;;
@@ -273,7 +277,6 @@ case "$command" in
             case " $flags " in *" $required "*) ;; *) exit 1 ;; esac
         done
         echo build >> "$RELEASE_TEST_TRACE"
-        touch built
         test "${RELEASE_TEST_FAILURE:-}" != build
         printf 'release binary fixture\n' > "$output"
         ;;
@@ -341,6 +344,27 @@ esac
 	for name, body := range stubs {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0700); err != nil {
 			t.Fatal(err)
+		}
+	}
+	// The release tool builds only from a clean Git checkout. Files the
+	// fixtures write while running are ignored, as the repository ignores
+	// release/. The developer's own Git settings are left out, so commit
+	// signing and hooks are never used and git status behaves the same
+	// everywhere. Variables Git sets while running a hook would point every
+	// git command here at the developer's repository, so they are cleared.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	for _, name := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR"} {
+		t.Setenv(name, "")
+		os.Unsetenv(name)
+	}
+	if err := os.WriteFile(".gitignore", []byte("/release/\n/bin/\n/trace\n/extracted/\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"commit", "-q", "-m", "fixture"}} {
+		git := exec.Command("git", append([]string{"-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid"}, args...)...)
+		if out, err := git.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))

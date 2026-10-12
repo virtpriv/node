@@ -1,4 +1,7 @@
-// Command release prepares signed VPN release files for separate publication.
+// Command release builds the VPN release archive and its checksum file from a
+// clean Git checkout. With -sign it also signs the checksum file, which only
+// the maintainer can do. Anyone can run it without -sign to rebuild a
+// published release and compare the archive.
 package main
 
 import (
@@ -6,8 +9,10 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,10 +33,22 @@ func main() {
 }
 
 func run(args []string) error {
-	if len(args) < 1 || len(args) > 2 || !release.ValidVersion(args[0]) {
-		return errors.New("usage: GOTOOLCHAIN=local go run ./cmd/release VERSION [tested-update-plan.json]")
+	usage := errors.New("usage: GOTOOLCHAIN=local go run ./cmd/release [-sign] VERSION [tested-update-plan.json]")
+	flags := flag.NewFlagSet("release", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	signFlag := flags.Bool("sign", false, "sign SHA256SUMS with the release key")
+	if err := flags.Parse(args); err != nil {
+		return usage
+	}
+	sign, args := *signFlag, flags.Args()
+	if len(args) < 1 || len(args) > 2 || !release.ValidVersion(args[0]) || (len(args) == 2 && strings.HasPrefix(args[1], "-")) {
+		return usage
 	}
 	version := args[0]
+	commit, err := cleanCommit()
+	if err != nil {
+		return err
+	}
 	archive, err := release.ArchiveName(version)
 	if err != nil {
 		return err
@@ -60,16 +77,20 @@ func run(args []string) error {
 	if err := checkToolchain(); err != nil {
 		return err
 	}
-	if _, err := exec.LookPath("gpg"); err != nil {
-		return err
+	if sign {
+		if _, err := exec.LookPath("gpg"); err != nil {
+			return err
+		}
 	}
 	if err := os.MkdirAll("release", 0755); err != nil {
 		return err
 	}
 	out := filepath.Join("release", version)
-	// Reserve this version exclusively. Existing signed files are never replaced.
-	if err := os.Mkdir(out, 0755); err != nil {
-		return fmt.Errorf("create output directory (must not already exist): %w", err)
+	// Reserve this version exclusively. Existing files are never replaced.
+	if err := os.Mkdir(out, 0755); errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("%s already exists and is never replaced, check it and remove it before building again", out)
+	} else if err != nil {
+		return err
 	}
 	complete := false
 	defer func() {
@@ -98,18 +119,28 @@ func run(args []string) error {
 		return fmt.Errorf("package VPN: %w", err)
 	}
 	sums := filepath.Join(out, "SHA256SUMS")
-	if err := os.WriteFile(sums, fmt.Appendf(nil, "%x  %s\n", sum, archive), 0644); err != nil {
+	line := fmt.Sprintf("%x  %s\n", sum, archive)
+	if err := os.WriteFile(sums, []byte(line), 0644); err != nil {
 		return err
 	}
-	if err := signChecksums(sums, work); err != nil {
-		return err
+	if sign {
+		if err := signChecksums(sums, work); err != nil {
+			return err
+		}
 	}
 	if err := os.RemoveAll(work); err != nil {
 		return err
 	}
 	complete = true
+	if !sign {
+		fmt.Printf("Release files ready in %s, not signed:\n  %s\n  SHA256SUMS\n", out, archive)
+		fmt.Printf("Built from commit %s.\n%s", commit, line)
+		fmt.Printf("To compare with a published release, check its SHA256SUMS inside %s, for example with sha256sum --check.\n", out)
+		return nil
+	}
 	fmt.Printf("Release files ready in %s:\n  %s\n  SHA256SUMS\n  SHA256SUMS.asc\n", out, archive)
-	fmt.Printf("Verify the binary against signed source tag v%s, then upload these three files to a draft GitHub release.\n", version)
+	fmt.Printf("Built from commit %s.\n%s", commit, line)
+	fmt.Printf("Make the signed tag v%s on commit %s, then upload these three files to a draft GitHub release.\n", version, commit)
 	if release.IsCandidate(version) {
 		fmt.Println("Mark it as a prerelease before publishing for testing.")
 	} else {
@@ -119,10 +150,54 @@ func run(args []string) error {
 	return nil
 }
 
+// goCommand fixes the Go settings known to change the built program, so the
+// builder's own shell and saved Go settings (go env -w) have no effect.
 func goCommand(args ...string) *exec.Cmd {
 	cmd := exec.Command("go", args...)
-	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOWORK=off", "GOFLAGS=", "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64", "GOAMD64=v1")
+	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOENV=off", "GOWORK=off", "GOFLAGS=", "GOEXPERIMENT=", "GOFIPS140=off", "GO_EXTLINK_ENABLED=", "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64", "GOAMD64=v1")
 	return cmd
+}
+
+// cleanCommit returns the commit being built. It refuses a folder that is not
+// the top of a Git checkout, and a checkout with changes or with files Git
+// does not ignore, so a forgotten edit cannot reach a release.
+func cleanCommit() (string, error) {
+	top, err := gitOutput("rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", fmt.Errorf("read the Git checkout: %w", err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	if !sameDir(top, wd) {
+		return "", fmt.Errorf("run from the top folder of the Git checkout, %s", top)
+	}
+	status, err := gitOutput("status", "--porcelain", "--untracked-files=normal")
+	if err != nil {
+		return "", fmt.Errorf("read the Git checkout: %w", err)
+	}
+	if status != "" {
+		return "", fmt.Errorf("the Git checkout has changes, commit or remove them first:\n%s", status)
+	}
+	return gitOutput("rev-parse", "--verify", "HEAD^{commit}")
+}
+
+func sameDir(a, b string) bool {
+	infoA, errA := os.Stat(a)
+	infoB, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
+}
+
+func gitOutput(args ...string) (string, error) {
+	b, err := exec.Command("git", args...).Output()
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && len(exitErr.Stderr) > 0 {
+		return "", errors.New(strings.TrimSpace(string(exitErr.Stderr)))
+	}
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(string(b), "\n"), nil
 }
 
 func checkToolchain() error {

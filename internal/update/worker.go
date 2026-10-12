@@ -474,6 +474,9 @@ func ValidateBuild(m protocol.Manifest, version string) error {
 	if m.Version != version || m.Bitcoin.Version != component.BitcoinCoreVersion || m.LND.Version != component.LNDVersion || m.Syncthing.Version != component.SyncthingVersion {
 		return errors.New("release plan differs from this VPN build's pinned versions")
 	}
+	if m.Bitcoin.SHA256 != component.BitcoinCoreArchiveSHA256 || m.LND.SHA256 != component.LNDArchiveSHA256 || m.Syncthing.SHA256 != component.SyncthingArchiveSHA256 {
+		return errors.New("release plan archive hashes differ from this VPN build's pinned hashes")
+	}
 	for _, step := range m.HostSteps {
 		if step != "lnd-service-v1" {
 			return fmt.Errorf("this worker does not implement host step %q", step)
