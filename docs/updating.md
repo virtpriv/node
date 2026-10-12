@@ -24,7 +24,7 @@ The node reads the VPN release key from two places on every review: the file
 together, so a revocation or a new signing subkey published in either one is
 seen, and only material signed by the pinned key has any effect. If the
 keyserver cannot be reached, the review continues with the repository file and
-says so on the review screen; if neither can be fetched, the review is refused.
+says so on the review screen. If neither can be fetched, the review is refused.
 Both addresses are fixed in installed nodes. Keep the repository file current
 whenever the key changes, and keep at least one of the two addresses working
 until nodes have installed a release that knows a replacement.
@@ -42,7 +42,7 @@ implemented host operations, builds and packages VPN, and signs locally with
 the existing VPN release key. It produces the archive, `SHA256SUMS` and
 `SHA256SUMS.asc` in `release/VERSION/`, refusing an existing version directory.
 The exact reviewed plan bytes go into the archive. A one-argument build produces
-a bootstrap archive without a managed plan. v0.7.0 requires a fresh installation; this
+a bootstrap archive without a managed plan. v0.7.0 requires a fresh installation. This
 protocol does not provide an upgrade from v0.6.x or an unmarked installation.
 The first test baseline must itself contain the managed updater. Once running
 this implementation, the legacy binary-only helper request is refused so it
@@ -56,12 +56,12 @@ The plan has these fields:
 | `version` | Canonical VPN version without `v`: `MAJOR.MINOR.PATCH` or `MAJOR.MINOR.PATCH-rc.N`, where N is a positive integer without leading zeros |
 | `platform` | `debian-13-amd64` |
 | `summary` | Short plain-text release explanation |
-| `minimum_free_mib` | Free space, at least 1024 MiB, that must remain on the staging and affected data filesystems after the update installs its files; checked before downloading and again before any service stops |
-| `sources` | Exact tested objects containing `vpn`, `bitcoin`, `lnd`, `syncthing`; an empty Syncthing version means absent |
+| `minimum_free_mib` | Free space, at least 1024 MiB, that must remain on the staging and affected data filesystems after the update installs its files. Checked before downloading and again before any service stops |
+| `sources` | Exact tested objects containing `vpn`, `bitcoin`, `lnd`, `syncthing`. An empty Syncthing version means absent |
 | `networks` | Explicitly supported installed profiles: `mainnet`, `testnet4`, `public-signet` |
 | `bitcoin`, `lnd`, `syncthing` | Each has `version` and the upstream archive's lowercase `sha256` |
 | `host_steps` | Ordered operation IDs implemented in the target worker |
-| `host_services` | Optional affected component names for host steps; stopping Core also includes LND |
+| `host_services` | Optional affected component names for host steps. Stopping Core also includes LND |
 | `recovery_from` | Optional exact VPN archive digests this release can repair |
 | `bridge` | Optional earlier VPN version. A node this plan does not admit is told to install that release first. A stable release must name a stable bridge |
 
@@ -72,12 +72,12 @@ version ranges. Component downgrades and older/equal VPN releases are refused.
 
 Each stable release admits the stable release directly before it, with and
 without Syncthing, and names that release as its `bridge`. A node that skipped
-releases is guided through them one at a time; every hop is a full reviewed
+releases is guided through them one at a time. Every hop is a full reviewed
 update with its own downloads and service restarts. When the releases in between
 changed only VPN, with the same Core, LND and Syncthing versions and no host
 step, a release should also admit those older sources, so that a node behind by
 VPN-only releases updates in one step. Each admitted source still needs its own
-transition test; that test is light when no component or host change is skipped.
+transition test, which is light when no component or host change is skipped.
 
 The initial host operation is `lnd-service-v1`. It installs the reviewed LND
 systemd template, preserves the configured auto-unlock choice, validates the unit,
@@ -96,8 +96,8 @@ Publish numbered candidates such as `v0.7.0-rc.1` as GitHub prereleases in the
 existing VPN repository. Use the normal release signing key, archive layout,
 component verification and signed plan. Upload all three release assets to a
 draft before publishing. The RC suffix and GitHub's prerelease flag are both
-required by the publishing process. Keep published tags and assets unchanged;
-any revised candidate receives a new RC number.
+required by the publishing process. Keep published tags and assets unchanged.
+Any revised candidate receives a new RC number.
 
 Normal discovery uses GitHub's latest stable release and rejects RC tags,
 drafts and prereleases. It caches stable discovery for up to 24 hours. To test
@@ -123,7 +123,7 @@ Select release to validate that exact stable tag on the test node. Keep it out
 of normal discovery until its required checks pass, then clear the prerelease
 flag and mark it latest without replacing its assets. A failed final artifact
 must be superseded by a new version, not overwritten. Test the actual supported
-source-to-stable transitions; updating an already migrated RC node only checks
+source-to-stable transitions. Updating an already migrated RC node only checks
 that RC-to-stable transition. Returning from an RC to an older stable release
 is a downgrade and remains refused.
 
@@ -137,38 +137,38 @@ cannot silently change what the first terminal approves.
 On acceptance, VPN saves the job under `/var/lib/vpn/private/updates`, retains
 the working launcher, and starts `vpn-update.service`. The verified target binary
 implements the worker. The TUI can close and reconnect to the same saved job.
-All helper mutations share a lock with the worker; read-only status remains
+All helper mutations share a lock with the worker, and read-only status remains
 available. An unfinished record continues to block conflicting helper mutations
 even if its worker has exited. Root's independent maintenance authority remains.
 
 The worker stages and verifies all affected artifacts before downtime. It stops
 LND before Core, atomically replaces each selected executable, then starts and
 checks Core before LND. Syncthing is included only where installed. Core's daemon
-and CLI are always covered; companion tools installed by earlier VPN versions
+and CLI are always covered. Companion tools installed by earlier VPN versions
 are updated too, without installing additional tools. No component data directory
 is copied back, deleted, or restored.
 
 Free space is checked before downloading and again after staging, before any
-service stops; the status then reads "Check free space". Each filesystem is
+service stops. The status then reads "Check free space". Each filesystem is
 counted once: its required free space plus the executables still to be
 installed there must fit. A refusal leaves every service as it was and can be
 retried after freeing space. Before host changes have begun it also removes the
 downloaded component files and can be cancelled. A successful update also removes its downloaded
-component files; the release plan and job record remain.
+component files, and the release plan and job record remain.
 
 Temporary systemd drop-ins disable automatic restarts and require a permit under
 `/run` before each start. The worker durably records that a component may run
 before creating that permit. It removes the permit after the start attempt.
 A reboot clears permits. This prevents a half-installed component from starting
 independently of recovery. Known failures stay stopped until reviewed and retried.
-An uncertain start is checked against the surviving process; if the process is
+An uncertain start is checked against the surviving process. If the process is
 absent, an explicit Retry is required. Retry uses the same approved release and
 preserves the history that database changes may have occurred.
 
 The worker records that host changes have begun before it guards the first
 service. Until then a failed or refused update can be cancelled, releasing the
 maintenance restriction without changing the running node. Afterwards
-cancellation is refused; completion or repair is required instead. A corrective
+cancellation is refused, and completion or repair is required instead. A corrective
 job starts with the failed update's record of this, so it stays uncancellable
 even if its own download fails.
 
@@ -179,13 +179,13 @@ they start. They read only these fields of the job record: `schema`,
 `review.digest`, `review.manifest.version`, `review.network`, `worker_hash`,
 `config_hash`, `phase`, `step`, `error` and `host_changes_begun`. They act on
 four phase words, `failed`, `complete`, `cancelled` and `waiting-unlock`, and
-treat any other as work in progress. Retry only sets `phase` to `retry`; the
+treat any other as work in progress. Retry only sets `phase` to `retry`, and the
 worker decides where to resume. Retry and Cancel keep every other field as the
 worker wrote it. A worker may add fields, phases and components, but must keep
 these meanings for as long as its plan admits a source with this helper.
 
 Once a job exists, the launcher, Retry and Cancel no longer check the Debian
-version or read the node configuration; they hand the job to the worker, which
+version or read the node configuration. They hand the job to the worker, which
 makes its own checks. A later worker can therefore change either part way
 through an update and still be resumed.
 
@@ -204,10 +204,17 @@ run, and the wallet and device identity.
 Health checks include the running executable, Core's version and full network
 identity, LND's version/network and wallet readiness, and Syncthing's version,
 device identity and privacy settings. A locked LND wallet keeps the job at
-“Unlock wallet to finish”; native `lncli unlock` handles the password without
+“Unlock the LND wallet to finish”. Native `lncli unlock` handles the password without
 storing it in update records. Chain synchronization is separate runtime progress.
-VPN's installed binary is replaced last. Normal updates restart services; they
+VPN's installed binary is replaced last. Normal updates restart services but
 do not request a host reboot.
+
+If an update stops at “Stop lnd” with “lnd did not stop cleanly, no binaries
+were replaced” while the LND wallet is locked or not yet created, select Retry
+once. The affected services stay stopped until then. On Retry, LND counts as
+stopped and the update continues. If it fails again, read the error before you
+retry. Creating and unlocking the wallet before you start an update avoids this
+stop.
 
 When an update starts, and at a Retry before any change, the worker requires
 each affected service to be running its installed program, and records the
@@ -225,14 +232,14 @@ corrective release is not a generic force-update or rollback option.
 
 Local tests exercise release admission, approval identity, selected tar members,
 durable replacement, shared locking, service order, and interruption before and
-after worker side effects. They simulate process loss and reboot; they do not
+after worker side effects. They simulate process loss and reboot, but do not
 prove native systemd behavior, upstream migrations, or a released artifact's
 signature.
 
 Review a disposable Debian 13 Signet test slate before preparing a VPS:
 
 1. A signed release that changes VPN, Core, LND and installed Syncthing, plus the
-   LND unit step; repeat with Syncthing absent and with a VPN-only release.
+   LND unit step. Repeat with Syncthing absent and with a VPN-only release.
 2. Two TUIs, disconnect/reconnect, duplicate approval, and configuration drift
    between review and acceptance.
 3. Process termination and reboot around service gating, each binary replacement,
