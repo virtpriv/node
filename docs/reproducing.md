@@ -11,9 +11,8 @@ GitHub releases.
 ## How releases are built
 
 Releases are built with the release command in this repository, `cmd/release`,
-using the Go version pinned in `go.mod`. Anyone can run it to rebuild a
-published archive, as shown in
-[Rebuilding the whole archive](#rebuilding-the-whole-archive).
+using the Go version pinned in `go.mod` and the same settings as the build
+command below.
 
 Because the project is a single statically-linked Go binary with no
 bundled runtime, reproducibility is straightforward compared to
@@ -172,48 +171,6 @@ go version -m vpn
 ```
 
 Apart from the file name on the first line, both outputs should be identical.
-
-## Rebuilding the whole archive
-
-The steps above compare the program. The release command without `-sign`
-rebuilds the whole archive, with no key, and compares it in one step. It
-refuses a folder holding files Git does not know, so work in a fresh clone,
-with the downloads one folder up.
-
-```bash
-GIT_TAG="v0.7.0"
-VERSION="${GIT_TAG#v}"
-cd "$HOME"
-mkdir rebuild && cd rebuild
-wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-amd64.tar.gz"
-wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/SHA256SUMS"
-git clone --branch "${GIT_TAG}" --depth 1 https://github.com/virtpriv/node.git
-cd node
-```
-
-For a release without an update plan, such as v0.7.0:
-
-```bash
-GOTOOLCHAIN=local go run ./cmd/release "${VERSION}"
-```
-
-For a release with an update plan, use the plan from the published archive:
-
-```bash
-tar -xzf "../vpn-${VERSION}-amd64.tar.gz" -C .. update.json
-GOTOOLCHAIN=local go run ./cmd/release "${VERSION}" ../update.json
-```
-
-Compare the rebuilt archive with the published checksums:
-
-```bash
-cd "release/${VERSION}"
-sha256sum --check ../../../SHA256SUMS
-```
-
-It prints `vpn-VERSION-amd64.tar.gz: OK` when the archives are identical.
-This shows the published archive was built from the tagged source. The
-signature steps above show who published it.
 
 ## What this proves
 
