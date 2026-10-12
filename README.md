@@ -11,7 +11,9 @@ Virtual Private Node moved to github.com/virtpriv/node, and
 the move brought every earlier release with it. Those releases predate
 the rename: they install a binary called rlvpn, and they are the
 previous generation of this project. v0.7.0 is the first release under
-the new name and it is what this page describes.
+the new name and it is what this page describes. The program, its command
+and the account you log in with are all called `vpn`, for Virtual Private
+Node.
 
 If you are setting up a node now, it is worth waiting for v0.7.0.
 v0.7.0 is fresh-install-only: it does not perform an in-place migration from an
@@ -39,23 +41,26 @@ funds.
 
 ### Base (automatic)
 
-- **Bitcoin Core** — pruned node, all P2P through Tor, GPG-verified with 5 independent signatures
-- **LND** — Lightning Network daemon with Tor hidden services, installed Tor-only by default
-- **Tor** — all traffic routed through Tor by default
-- **UFW firewall** — deny all incoming except SSH
-- **fail2ban** — brute force protection
-- **Unattended upgrades** — automatic Debian security updates
-- **NTP clock sync** — accurate time for block timestamps, HTLC timeouts, and macaroon expiry
+- **Bitcoin Core:** pruned node, all P2P through Tor, GPG-verified with 5 independent signatures
+- **LND:** Lightning Network daemon with Tor hidden services, installed Tor-only by default
+- **Tor:** Bitcoin Core, LND, updates and every download once the installer has set up Tor go through Tor. The exceptions are listed under [Privacy & Network Traffic](#privacy--network-traffic)
+- **UFW firewall:** deny all incoming except SSH
+- **fail2ban:** brute force protection
+- **Unattended upgrades:** automatic Debian security updates, with a restart at 04:00 server time when an update needs one
+- **NTP clock sync:** accurate time for block timestamps, HTLC timeouts, and macaroon expiry
 
 ### Optional (from the TUI)
 
-- **Syncthing** — automatic LND channel backup to your local device
+- **Syncthing:** automatic LND channel backup to your local device
 
 ### Requirements
 
 - Fresh Debian 13 amd64 machine
 - 2 (v)CPU, 4+ GB RAM, 90+ GB total SSD. LND safety-stops at 10% free,
   leaving about 81 GB of operational usage on a 90 GB filesystem.
+
+Running at home or on a VPS? See [Hosting Your Node](docs/hosting.md) for what
+differs.
 
 ### Privacy
 
@@ -75,7 +80,7 @@ is not one it can trust. It then walks you through access setup and hardware
 fit, installs Bitcoin Core and LND with every download after Tor
 routed through Tor and verified before install, and drops you
 straight into the TUI. During interactive installation, Ctrl+C requests a stop
-after the active step and its progress record finish; keep the terminal open
+after the active step and its progress record finish. Keep the terminal open
 while it stops. The installer retains its lock until that work settles. This
 does not kill an active subprocess or undo changes. If the last step finishes,
 the installer still publishes completion. Forced process death can leave
@@ -84,19 +89,19 @@ unrecorded work that a later run must repeat.
 If a step fails or installation stops, inspect the reported result before
 running it again. When the installer can prove that it is resuming the same recognizable
 fresh-install lifecycle, it continues from the incomplete work. A completed
-base installation reports already installed and stops; optional add-ons and
+base installation reports already installed and stops. Optional add-ons and
 later settings remain available through the TUI. Mainnet and testnet4 remain
 supported. This unreleased candidate adds default public signet as the third
-immutable profile described below; it is not release-certified until the exact
+immutable profile described below. It is not release-certified until the exact
 candidate passes the required disposable Debian 13 amd64 validation.
 
 ### Bitcoin network profiles
 
 Mainnet remains the default. Testnet4 remains the public proof-of-work test
 network. The default public-signet candidate is testing-only and uses Bitcoin
-Core and LND's pinned built-in public-signet parameters; VPN does not override
+Core and LND's pinned built-in public-signet parameters. VPN does not override
 its challenge or seed nodes. Generated configuration and unit tests alone do
-not certify this profile; disposable Debian 13 amd64 operational evidence is
+not certify this profile. Disposable Debian 13 amd64 operational evidence is
 required before release support is claimed.
 
 | VPN profile | Installer selector | Core/LND state directory | Address HRP | BOLT11 prefix |
@@ -105,24 +110,28 @@ required before release support is claimed.
 | `testnet4` | `--testnet4` | `testnet4` | `tb` | `lntb` |
 | `public-signet` | `--signet` | `signet` | `tb` | `lntbs` |
 
+Run the installer as root, in the folder where you extracted `vpn` after
+[Release Verification](docs/verifying.md). It copies itself to
+`/usr/local/bin/vpn`.
+
 (VPS)
 
 ```bash
 # Default mainnet
-sudo vpn install
+./vpn install
 
 # Public proof-of-work testnet4
-sudo vpn install --testnet4
+./vpn install --testnet4
 
 # Default public signet (testing only)
-sudo vpn install --signet
+./vpn install --signet
 ```
 
 The chosen profile is recorded before installation work begins and cannot be
 changed. A node will not reuse another profile's Core data, LND wallet,
 macaroons, channel state, lifecycle authorization, or channel-backup source.
-Reusing the machine for another profile requires a new disposable machine;
-there is no in-place profile migration or switch.
+Reusing the machine for another profile requires a new disposable machine.
+There is no in-place profile migration or switch.
 
 `controlled-signet-v1`, raw `signet`, custom challenges, and custom seed-node
 inputs are rejected and unsupported. VPN also does not install a faucet,
@@ -137,12 +146,12 @@ when the provider disabled password login globally. Use that password for your
 first SSH login as `vpn`. Installation does not discover, accept or copy SSH
 keys. After login, you can import an existing account's key from **System →
 Accounts** or add a key directly from **System → Accounts → vpn**. Unattended
-installation generates a password and displays it at completion; save it for
+installation generates a password and displays it at completion. Save it for
 your first login.
 
 The same account password authorizes unrestricted sudo for server maintenance.
 VPN leaves sudo credential caching at the host default. SSH opens the
-unprivileged TUI automatically; exiting returns to the `vpn` shell, where node
+unprivileged TUI automatically. Exiting returns to the `vpn` shell, where node
 CLI commands and sudo are available. Existing deployment accounts are retained.
 The shell and sudo remain available when the TUI or root helper is unavailable.
 If automatic TUI startup gets stuck, an explicit SSH command can bypass it:
@@ -160,7 +169,7 @@ review a key before importing it into `vpn`. The source account is retained,
 and keys already configured for `vpn` need no import. The list shows `vpn`
 and supported login accounts, plus root as a protected system account whose
 keys can also be imported. This screen does not remove accounts or change
-their access. The account table summarizes observed sudo policy; unfamiliar
+their access. The account table summarizes observed sudo policy. Unfamiliar
 or mixed policies need review, and failed observations show as unavailable.
 **Account information** expands local groups, account IDs and paths in place.
 Only conventional `.ssh/authorized_keys` files are inspected for root, `vpn` and accounts using common interactive shells.
@@ -171,11 +180,11 @@ when inspecting accounts after installation.
 
 After testing a new SSH connection with your key, you can disable password SSH
 for `vpn` from **System → Accounts → vpn**. The existing login banner confirms a vpn
-SSH login, which may use a password; it does not verify a specific replacement
+SSH login, which may use a password. It does not verify a specific replacement
 key or sudo access. Root SSH is disabled, but the root account is retained.
-The installation handoff opens the TUI through a separate pseudo-terminal;
-it does not change the identity of the original SSH connection or prove a new
-vpn SSH login. Ctrl+Z is ignored during this handoff; Ctrl+C exits to the
+The installation handoff opens the TUI through a separate pseudo-terminal.
+It does not change the identity of the original SSH connection or prove a new
+vpn SSH login. Ctrl+Z is ignored during this handoff, and Ctrl+C exits to the
 original shell. When launched from the `vpn` shell, the TUI supports Ctrl+Z
 to pause and `fg` to resume. Keep the provider console or rescue route available.
 
@@ -194,7 +203,7 @@ creation flow:
 4. Write down your 24-word seed on paper
 5. Type `I SAVED MY SEED` to confirm
 
-The confirmation phrase is required — there is no skip. Once confirmed,
+The confirmation phrase is required. There is no skip. Once confirmed,
 the flow transitions into auto-unlock configuration so you don't have
 to manually unlock on every reboot. VPN gracefully stops and starts LND
 once to verify the password, and reports success only after LND reaches
@@ -205,21 +214,27 @@ synchronization. If
 verification fails, LND is left stably locked instead of entering a
 restart loop, and the same form lets you retry.
 
+Auto-unlock is strongly encouraged. The node installs Debian security
+updates by itself and restarts at 04:00 server time when an update needs
+it. Without auto-unlock, LND stays locked after such a restart. Lightning
+then stops, and the node cannot protect your channels until you log in and
+unlock the wallet. Nothing tells you that this happened.
+
 A note on cancellation: pressing `ctrl+c` during the password prompt is
 a legitimate escape hatch (no seed has been generated yet, nothing is
 written to disk). Once you've seen your seed, `ctrl+c` is blocked by
-design — the only way forward is typing the confirmation phrase.
+design. The only way forward is typing the confirmation phrase.
 
 ### Dashboard
 
 Every SSH login as `vpn` opens a terminal UI with a sidebar of
 five sections plus a dark/light theme toggle:
 
-- **Channels** — open channels with coin control; close and manage channels; view your Node Info (pubkey, URIs, QR codes for sharing); channel history
-- **Wallet** — send and receive Lightning payments; payment history
-- **On-Chain** — send and receive on-chain; UTXO coin control; transaction history with anchor sweep detection
-- **Add-On** — install and manage Syncthing (channel backup)
-- **System** — service status and logs; local account inspection and public-key import; SSH key management and password auth toggle; auto-unlock configuration; P2P mode upgrade; [managed node updates](docs/updating.md)
+- **Channels:** open channels with coin control, close and manage channels, view your Node Info (pubkey, URIs, QR codes for sharing), channel history
+- **Wallet:** send and receive Lightning payments, payment history
+- **On-Chain:** send and receive on-chain, UTXO coin control, transaction history with anchor sweep detection
+- **Add-On:** install and manage Syncthing (channel backup)
+- **System:** service status and logs, local account inspection and public-key import, SSH key management and password auth toggle, auto-unlock configuration, P2P mode upgrade, [managed node updates](docs/updating.md)
 
 System service actions keep their confirmed target while you navigate. Completion
 means systemd reported `active` after Start or Restart, or `inactive` after Stop.
@@ -227,15 +242,19 @@ LND Start and Restart also refresh the staged TLS certificate. These checks do
 not establish wallet unlock, blockchain synchronization or network reachability.
 Tor control, status and logs refer to the `tor@default.service` worker.
 
+LND can stop by itself, for example when Bitcoin Core or Tor stops answering
+for several minutes. systemd does not restart LND after such a clean stop. If
+the System section shows LND stopped, press **Start**.
+
 An unconfirmed outcome can mean the helper connection was lost while the host
-continued working. Check status and logs before retrying; leaving the TUI does
+continued working. Check status and logs before retrying. Leaving the TUI does
 not undo an accepted action. An older helper that supplies no verified result
 also produces an unconfirmed outcome. Run the TUI and helper from the same build.
 
 Update Packages refreshes Debian package lists, upgrades packages while preserving
 existing configuration on conflict, and checks package consistency with `dpkg --audit`.
 The result stays on System when you navigate away and return. Completion confirms
-these commands succeeded; it does not establish service health or that no reboot
+these commands succeeded. It does not establish service health or that no reboot
 is needed. A failed refresh stops the upgrade. If the outcome is unconfirmed,
 ask your administrator to check package state and logs before retrying. Closing
 the TUI stops local observation while accepted package work continues on the host.
@@ -246,7 +265,7 @@ across navigation, and pending or accepted requests cannot be submitted again in
 that terminal session. If the reply is lost, including when SSH closes during
 shutdown, the outcome is unconfirmed. Reconnect after the host restarts, or ask
 your administrator to check host state before retrying. Closing the TUI stops
-local observation; it cannot undo a reboot already accepted by systemd.
+local observation. It cannot undo a reboot already accepted by systemd.
 
 Detail views open in tabs within each section. Press `ctrl+c` to quit
 and drop to a shell:
@@ -267,7 +286,7 @@ systemctl status syncthing
 
 ### Connecting Zeus Wallet
 
-Open the **Wallet** section in the TUI for Zeus pairing — scan a QR
+Open the **Wallet** section in the TUI for Zeus pairing. Scan a QR
 code or copy the connection string. Both Tor and clearnet pairings
 are supported if your node is in hybrid P2P mode.
 
@@ -287,8 +306,8 @@ information does not verify that Zeus can reach or authenticate to LND.
 2. Open the Wallet section → Pair Wallet
 3. Both clearnet (IP:8080) and Tor connection strings are available
 4. First clearnet connection: accept the self-signed certificate
-   warning — the connection is encrypted with LND's auto-refreshed
-   TLS certificate
+   warning. The connection is encrypted with LND's auto-refreshed
+   TLS certificate.
 
 Note: Clearnet is faster. Tor is more private. Both use the same macaroon.
 
@@ -309,11 +328,11 @@ everything a peer needs to open a channel with you:
 LND is installed Tor-only by default. You can upgrade to hybrid mode
 later from **System → Services → LND → P2P Upgrade**:
 
-- **Tor only** — maximum privacy, all connections through Tor
-- **Hybrid (Tor + clearnet)** — better routing, your server IP is
+- **Tor only:** maximum privacy, all LND connections through Tor
+- **Hybrid (Tor + clearnet):** better routing, your server IP is
   published to the Lightning Network
 
-The upgrade is one-way — once your IP is published to the network
+The upgrade is one-way. Once your IP is published to the network
 gossip, it cannot be retracted.
 
 ### LND Database and Recovery
@@ -346,7 +365,7 @@ emergency channel-closure procedure.
 
 The sync connection is direct between your Node and your device
 over an encrypted channel. Syncthing uses mutual TLS authentication
-with device keys — only devices you explicitly approve can connect.
+with device keys. Only devices you explicitly approve can connect.
 Discovery servers, relays, and NAT traversal are disabled.
 
 **Setup summary:**
@@ -361,7 +380,7 @@ Your `channel.backup` syncs automatically whenever both devices are
 online. The Syncthing web UI on the Node is accessible over Tor for
 advanced configuration. Its **Web UI** tab refreshes the Tor address and staged
 installation password when opened or revisited. The URL is visible independently
-of **Show Password**; returning to the tab hides the password again. **Retry**
+of **Show Password**, and returning to the tab hides the password again. **Retry**
 repeats an unsuccessful read. The displayed password does not track password
 changes made in Syncthing's external web UI.
 
@@ -370,20 +389,20 @@ For the full setup guide, see
 
 ### Security
 
-- The TUI runs unprivileged as the `vpn` owner. Its privileged node operations use a socket-activated root helper with fixed, validated operations and kernel peer-identity checks. General host maintenance requires sudo authentication. The helper cannot reset the owner password. Software running as `vpn` still has sensitive node credentials and can modify owner files; this model does not isolate the owner from a compromised TUI.
-- All connections through Tor (SOCKS5 port 9050)
+- The TUI runs unprivileged as the `vpn` owner. Its privileged node operations use a socket-activated root helper with fixed, validated operations and kernel peer-identity checks. General host maintenance requires sudo authentication. The helper cannot reset the owner password. Software running as `vpn` still has sensitive node credentials and can modify owner files. This model does not isolate the owner from a compromised TUI.
+- Bitcoin Core, LND, updates and downloads go through Tor (SOCKS5 port 9050). The exceptions are listed under Privacy & Network Traffic below
 - IPv6 disabled to prevent Tor bypass
 - Stream isolation (separate circuit per connection)
 - UFW firewall: SSH only, on the port(s) sshd actually listens on (+ 9735, 8080 for hybrid P2P, 22000 for Syncthing)
 - Fail2ban: SSH brute-force protection
 - Root SSH disabled by the installer
-- SSH password controls apply to `vpn`; other accounts retain their host password-authentication policy. Keyboard-interactive authentication and X11 forwarding are disabled for `vpn`. Native password changes require the current account password.
-- Bitcoin Core, LND, and Syncthing run as separate, non-login system users; unprivileged `vpn` has no direct access to their private data directories, while authenticated root maintenance can access them
-- Tor control-cookie access is granted only inside `bitcoind.service` and `lnd.service`; Syncthing and the backup exporter receive none
+- SSH password controls apply to `vpn`. Other accounts retain their host password-authentication policy. Keyboard-interactive authentication and X11 forwarding are disabled for `vpn`. Native password changes require the current account password.
+- Bitcoin Core, LND, and Syncthing run as separate, non-login system users. Unprivileged `vpn` has no direct access to their private data directories, while authenticated root maintenance can access them
+- Tor control-cookie access is granted only inside `bitcoind.service` and `lnd.service`. Syncthing and the backup exporter receive none
 - VPN and LND authenticate to Bitcoin Core with separate `rpcauth` identities. Bitcoin Core RPC-cookie generation is disabled for fresh v0.7 installations, and neither client reads a Core cookie or data directory. Unsupported legacy layouts are refused rather than modified, so VPN does not delete their historical cookie files
-- Channel backups cross through a dedicated `lnd` publisher into the project-owned `/var/lib/vpn/exports` boundary; Syncthing can read only the completed `channel.backup`, cannot write the export, and cannot read `/var/lib/lnd` or private staging
+- Channel backups cross through a dedicated `lnd` publisher into the project-owned `/var/lib/vpn/exports` boundary. Syncthing can read only the completed `channel.backup`, cannot write the export, and cannot read `/var/lib/lnd` or private staging
 - GPG signature verification for all software, any bad signature is a hard stop
-- Unattended security upgrades with auto-reboot
+- Unattended security upgrades with an automatic restart at 04:00 server time when an update needs one
 - Base packages upgraded during install, through Tor and behind the firewall, to close CVE windows on stale server images
 - Syncthing backup sync: mutual TLS device approval, web UI only via Tor
 - Bitcoin Core wallet disabled
@@ -396,9 +415,9 @@ For the full setup guide, see
 
 ### Privacy & Network Traffic
 
-Downloading the `vpn` binary and signing key is
-ordinary clearnet traffic, because Tor does not exist on the box yet.
-After that, the installer makes two types of network calls:
+The [Release Verification](docs/verifying.md) steps install Tor from
+Debian's mirrors first, then download the `vpn` program and its signing key
+through Tor. After that, the installer makes two types of network calls:
 
 **Phase 1 (clearnet, unavoidable):**
 - `apt-get update`: Debian package index refresh
@@ -420,9 +439,9 @@ cannot confirm it. It does so on every run, including resumes,
 and again after the package upgrade.
 
 After install, the only ongoing clearnet traffic is NTP clock
-sync (to the Debian NTP pool), Syncthing sync (port 22000) if
-you install it, and LND P2P if you choose hybrid mode.
-Everything else routes through Tor.
+sync (to the Debian NTP pool), your own SSH logins, Syncthing sync
+(port 22000) if you install it, and LND P2P and wallet connections if
+you choose hybrid mode. Everything else routes through Tor.
 
 Verify Tor routing after install:
 ```bash
@@ -433,25 +452,23 @@ grep "Tor" /var/log/vpn.log
 
 All software is verified with GPG signatures and SHA256 checksums:
 
-- **Bitcoin Core** — 5 trusted builder keys from
+- **Bitcoin Core:** 5 trusted builder keys from
   [bitcoin-core/guix.sigs](https://github.com/bitcoin-core/guix.sigs).
   Requires 2 of 5 valid signatures. A bad signature (BADSIG) from any
   key is a hard stop.
-- **LND** — Roasbeef's signing key verified against known fingerprint.
-- **Syncthing** — pinned release binary, verified against the Syncthing
+- **LND:** Roasbeef's signing key verified against known fingerprint.
+- **Syncthing:** pinned release binary, verified against the Syncthing
   release signing key's known fingerprint. The release checksums are
   clearsigned by the same key. VPN also writes Syncthing's
   entire configuration itself and refuses to start the daemon if any
   privacy setting does not verify.
-- **vpn binary** — signed with a key hosted on an independent
-  keyserver (not GitHub). You download and verify it yourself
-  before running it (see [Release Verification](docs/verifying.md)),
+- **vpn binary:** signed with the project's release key, published on
+  keys.openpgp.org and in this repository. You download and verify it
+  yourself before running it (see [Release Verification](docs/verifying.md)),
   and the built-in updater performs the same key and checksum
-  verification for every later release. Hosting the key off GitHub
-  means compromising one source does not compromise both the
-  binary and the key. The updater also reads a copy of the public key
-  kept in this repository, so an outage of the keyserver does not stop
-  updates; it trusts only the pinned fingerprint, never the copy itself.
+  verification for every later release. The updater reads the key from
+  both places, so an outage of either one does not stop updates. It
+  trusts only the pinned fingerprint, never a copy itself.
 
 A signature from a key that its owner has revoked is refused for every
 download above.
@@ -478,8 +495,8 @@ For manual binary verification before installation, see
 | /etc/bitcoin/bitcoin.conf | Bitcoin Core configuration |
 | /etc/lnd/lnd.conf | LND configuration |
 | /etc/syncthing/ | Syncthing configuration |
-| /etc/vpn/config.json | Root-owned, non-secret desired node configuration; root:vpn mode 0640 |
-| /home/vpn/.config/vpn/preferences.json | User-owned TUI preferences (theme); vpn:vpn mode 0600 |
+| /etc/vpn/config.json | Root-owned, non-secret desired node configuration, root:vpn mode 0640 |
+| /home/vpn/.config/vpn/preferences.json | User-owned TUI preferences (theme), vpn:vpn mode 0600 |
 | /var/lib/vpn-install-bootstrap-service-layout-1-{mainnet,testnet4,public-signet}-tor | Short-lived root-only indication while initial lifecycle authority is published |
 | /var/lib/vpn/private/layout-version | Root-only supported-layout generation record |
 | /var/lib/vpn/private/install-state.json | Root-only bounded base-install progress and completion ledger |
@@ -488,10 +505,10 @@ For manual binary verification before installation, see
 | /run/vpn/install.lock | Stable root-only runtime lock for one active base installer |
 | /var/lib/vpn/state/ | Root-written facts and credentials deliberately staged read-only for the TUI, including the Syncthing web password |
 | /var/lib/vpn/exports/lnd-backup/ | Read-only Syncthing export of the completed `channel.backup` |
-| /var/lib/bitcoin/ | Mainnet Core data at the root; testnet4 under `testnet4/`; public signet under `signet/` |
-| /var/lib/lnd/data/chain/bitcoin/{mainnet,testnet4,signet}/ | Profile-specific wallet and macaroon state in `chain.sqlite`, plus credentials and `channel.backup`; `signet/` is default public signet only |
+| /var/lib/bitcoin/ | Mainnet Core data at the root, testnet4 under `testnet4/`, public signet under `signet/` |
+| /var/lib/lnd/data/chain/bitcoin/{mainnet,testnet4,signet}/ | Profile-specific wallet and macaroon state in `chain.sqlite`, plus credentials and `channel.backup`. `signet/` is default public signet only |
 | /var/lib/lnd/data/graph/{mainnet,testnet4,signet}/ | Profile-specific channel/graph KV state in `channel.sqlite` and native invoice, payment, and graph state in `lnd.sqlite` |
-| /var/lib/lnd/data/watchtower/bitcoin/{mainnet,testnet4,signet}/ | Profile-specific `watchtower.sqlite`; LND creates it even when the watchtower server is disabled |
+| /var/lib/lnd/data/watchtower/bitcoin/{mainnet,testnet4,signet}/ | Profile-specific `watchtower.sqlite`. LND creates it even when the watchtower server is disabled |
 | /var/lib/syncthing/ | Syncthing's private data |
 | /var/log/vpn.log | Application log (install, verification, status) |
 

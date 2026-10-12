@@ -1,16 +1,8 @@
 # Reproducible builds
 
-**These steps do not currently reproduce the published v0.6.3 binary.**
-Three differences are known, all confirmed by reading the build metadata
-out of the release itself. It was built with Go 1.26.3 rather than the
-version go.mod declares. It was built with no ldflags at all, rather
-than the ldflags shown below. And it was built from a commit that did
-not yet carry the v0.6.3 tag, so a clone standing on the tag stamps a
-different module version into the binary. The page is kept because the
-rest of the recipe does match the release, including trimpath, CGO
-disabled, the target platform and a clean working tree. It will be
-corrected and verified against v0.7.0, the first release under the
-project's new name.
+The steps below reproduce the `vpn` program inside a published release archive
+byte for byte, for v0.7.0 and later. Releases before v0.7.0 shipped a program
+called rlvpn, built with other settings, and are not reproduced by these steps.
 
 Reproducibility is a goal of the Virtual Private Node project. The
 intent is that anyone can recreate the exact binary published in the
@@ -62,9 +54,9 @@ archive. See [managed updates](updating.md) for the release contract and
 required integration validation. The tool prepares files locally. Publication
 on GitHub is a separate step.
 
-This packaging contract matches the VPN updater. Reproduction against the
-published v0.7.0 artifact still needs release verification. The v0.6.3 recipe
-and its known limitations below remain historical reference.
+This packaging contract matches the VPN updater. The release tool cannot run
+without the signing key, so the manual build below is the way to reproduce a
+release.
 
 Because the project is a single statically-linked Go binary with no
 bundled runtime, reproducibility is straightforward compared to
@@ -116,7 +108,7 @@ First, assign a temporary variable in your shell for the specific
 release you want to build:
 
 ```bash
-GIT_TAG="v0.6.3"
+GIT_TAG="v0.7.0"
 ```
 
 The project can then be cloned as follows:
@@ -135,18 +127,20 @@ git fetch --all --tags
 git checkout "${GIT_TAG}"
 ```
 
-Change into the project folder and build:
+Change into the project folder and build with the same settings as the
+release tool:
 
 ```bash
 cd node
 VERSION="${GIT_TAG#v}"
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -trimpath -buildvcs=false \
+GOTOOLCHAIN=local GOWORK=off GOFLAGS= CGO_ENABLED=0 \
+    GOOS=linux GOARCH=amd64 GOAMD64=v1 \
+    go build -mod=readonly -trimpath -buildvcs=false \
     -ldflags="-s -w -X main.version=${VERSION}" \
-    -o rlvpn ./cmd/
+    -o vpn ./cmd/
 ```
 
-The binary will be placed in the current directory as `rlvpn`.
+The program will be placed in the current directory as `vpn`.
 
 ### Verifying the binary is identical
 
@@ -154,9 +148,7 @@ Download the released binary from
 [GitHub Releases](https://github.com/virtpriv/node/releases):
 
 ```bash
-VERSION="0.6.3"
-
-wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/rlvpn-${VERSION}-amd64.tar.gz"
+wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-amd64.tar.gz"
 wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/SHA256SUMS"
 wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/SHA256SUMS.asc"
 ```
@@ -164,7 +156,8 @@ wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/SHA256SU
 Import the release signing key from the OpenPGP keyserver:
 
 ```bash
-gpg --keyserver hkps://keys.openpgp.org --recv-keys AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE
+wget -qO release-key.asc "https://keys.openpgp.org/vks/v1/by-fingerprint/AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
+gpg --import release-key.asc
 ```
 
 Verify the signature:
@@ -182,13 +175,13 @@ Verify the checksum:
 sha256sum --check --ignore-missing SHA256SUMS
 ```
 
-Extract the released binary and compare:
+Extract the released program and compare:
 
 ```bash
-tar -xzf "rlvpn-${VERSION}-amd64.tar.gz"
-mv rlvpn rlvpn-release
+mkdir published
+tar -xzf "vpn-${VERSION}-amd64.tar.gz" -C published vpn
 
-sha256sum rlvpn-release rlvpn
+sha256sum published/vpn vpn
 ```
 
 Both hashes should be identical.
@@ -208,18 +201,18 @@ If the checksums do not match, check the following:
 | Missing `-buildvcs=false` | Git tags and commit data get embedded in the binary |
 | CGO enabled | Set `CGO_ENABLED=0` explicitly |
 | Different `ldflags` | Must include `-s -w -X main.version=VERSION` |
-| OS/arch mismatch | Must build with `GOOS=linux GOARCH=amd64` |
+| OS/arch mismatch | Must build with `GOOS=linux GOARCH=amd64 GOAMD64=v1` |
 | Go installed via apt/snap | Use the official tarball from go.dev/dl |
 | Missing `-X main.version` | Version string will differ in the binary |
 
 You can inspect the build metadata embedded in each binary:
 
 ```bash
-go version -m rlvpn-release
-go version -m rlvpn
+go version -m published/vpn
+go version -m vpn
 ```
 
-Both outputs should be identical.
+Apart from the file name on the first line, both outputs should be identical.
 
 ## What this proves
 
