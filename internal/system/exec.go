@@ -200,19 +200,13 @@ func writeFile(path string, content []byte, perm os.FileMode) error {
 	return nil
 }
 
-// Download fetches a URL to a local path using torsocks if available.
-// It does not require Tor.
-func Download(url, dest string) error {
-	return doDownload(url, dest, false)
-}
-
 // DownloadRequireTor fetches a URL and fails if torsocks is unavailable.
 // It makes up to three attempts, with two-second gaps. Tool-specific limits
 // apply within each attempt. The wget path has no overall deadline.
 func DownloadRequireTor(url, dest string) error {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
-		lastErr = doDownload(url, dest, true)
+		lastErr = doDownload(url, dest)
 		if lastErr == nil {
 			return nil
 		}
@@ -224,31 +218,22 @@ func DownloadRequireTor(url, dest string) error {
 }
 
 // doDownload runs one fetch using wget when available, otherwise curl.
+// It always runs through torsocks and refuses to start without it.
 // Wget has 60-second DNS, connect and read-idle timeouts and three tries.
 // These do not bound the whole transfer. Curl has a 60-second connect timeout
 // and an 1800-second transfer limit. Helper socket deadlines do not bound
 // this synchronous subprocess work.
-func doDownload(url, dest string, requireTor bool) error {
+func doDownload(url, dest string) error {
 	wrapper := torWrapper()
-	if requireTor && wrapper == "" {
+	if wrapper == "" {
 		return fmt.Errorf("torsocks not available, cannot download over Tor")
 	}
 	if _, err := exec.LookPath("wget"); err == nil {
-		wgetArgs := []string{"--timeout=60", "--tries=3",
-			"-q", "-O", dest, url}
-		if wrapper != "" {
-			return Run(wrapper, append([]string{"wget"},
-				wgetArgs...)...)
-		}
-		return Run("wget", wgetArgs...)
+		return Run(wrapper, "wget", "--timeout=60", "--tries=3",
+			"-q", "-O", dest, url)
 	}
-	curlArgs := []string{"-sL", "--connect-timeout", "60",
-		"--max-time", "1800", "-o", dest, url}
-	if wrapper != "" {
-		return Run(wrapper, append([]string{"curl"},
-			curlArgs...)...)
-	}
-	return Run("curl", curlArgs...)
+	return Run(wrapper, "curl", "-sL", "--connect-timeout", "60",
+		"--max-time", "1800", "-o", dest, url)
 }
 
 // torWrapper returns "torsocks" if available, empty string otherwise.

@@ -37,7 +37,6 @@ var (
 	kTabNext          = bind("tab", "next", "tab")
 	kTabButtons       = bind("tab", "buttons", "tab")
 	kTabNextField     = bind("tab", "next field", "tab")
-	kUpDownNavigate   = bind("↑↓", "navigate", "up", "down")
 	kUpDownSelect     = bind("↑↓", "select", "up", "down")
 	kUpDownFields     = bind("↑↓", "fields", "up", "down")
 	kUpDownChannels   = bind("↑↓", "channels", "up", "down")
@@ -49,8 +48,6 @@ var (
 	kEnterNext            = bind("enter", "next", "enter")
 	kEnterConfirm         = bind("enter", "confirm", "enter")
 	kEnterCreate          = bind("enter", "create", "enter")
-	kEnterRemove          = bind("enter", "remove", "enter")
-	kEnterToggle          = bind("enter", "toggle", "enter")
 	kEnterCreateWallet    = bind("enter", "create wallet", "enter")
 	kEnterRetryWalletRead = bind("enter", "retry wallet state", "enter")
 )
@@ -68,7 +65,7 @@ func buttonNav(btnIdx int) []key.Binding {
 	return []key.Binding{kLeftRightButtons}
 }
 
-// ── Archetype: section home — button zone ───────────────
+// ── Archetype: section home, button zone ───────────────
 // Buttons above a list/table on a section home screen.
 // downLabel names the content below (e.g. "channels").
 
@@ -97,7 +94,7 @@ func homeButtonBindings(
 	return binds
 }
 
-// ── Archetype: section home — list zone ─────────────────
+// ── Archetype: section home, list zone ─────────────────
 // Scrollable list/table below buttons on a home screen.
 // itemsLabel names the items (e.g. "channels").
 // enterLabel names the enter action (e.g. "details").
@@ -161,7 +158,7 @@ func actionButtonBindings(
 // ── Archetype: detail tab with action ───────────────────
 // Tab showing an item with Cancel + action button
 // (e.g. "Cancel" / "Close Channel"). Cancel is always
-// index 0; action is index 1. Arrow-down from tab bar
+// index 0, action is index 1. Arrow-down from tab bar
 // lands on Cancel (safe default).
 
 func detailActionBindings(
@@ -178,7 +175,7 @@ func detailActionBindings(
 }
 
 // ── Archetype: waiting / in-flight ──────────────────────
-// Screen is busy — only quit is available.
+// Screen is busy, only quit is available.
 
 func waitingBindings() []key.Binding {
 	return []key.Binding{kQuit}
@@ -193,7 +190,7 @@ func inFlightBindings() []key.Binding {
 }
 
 // ── Archetype: result screen ────────────────────────────
-// Completed action — enter closes tab, backspace goes to
+// Completed action. Enter closes tab, backspace goes to
 // parent, standard navigation (left→sidebar, up→tab bar).
 
 func resultBindings(hasTabs bool) []key.Binding {
@@ -215,7 +212,7 @@ func confirmDialogBindings() []key.Binding {
 	return []key.Binding{kYesConfirm, kNoCancel}
 }
 
-// ── Archetype: manage screen — button zone ──────────────
+// ── Archetype: manage screen, button zone ──────────────
 // Buttons above a list on a tab content screen
 // (Syncthing devices, SSH keys).
 // Uses shift+tab to reach tab bar (tab content context).
