@@ -26,9 +26,9 @@ const Service = protocol.WorkerUnit
 // components. So they read only these fields, treat every phase other than
 // failed, complete, cancelled and waiting-unlock as work in progress, and keep
 // the rest of the file when they write. Removing or redefining one of these
-// fields breaks nodes that are already installed. Steps and StepNumber are
-// only for the screen, so they are kept undecoded here and a value of another
-// shape is ignored instead of making the record unreadable.
+// fields breaks nodes that are already installed. Steps, StepNumber and
+// Failure are only for the screen, so they are kept undecoded here and a
+// value of another shape is ignored instead of making the record unreadable.
 type record struct {
 	Schema int `json:"schema"`
 	Review struct {
@@ -45,6 +45,7 @@ type record struct {
 	Steps       json.RawMessage `json:"steps"`
 	StepNumber  json.RawMessage `json:"step_number"`
 	Error       string          `json:"error"`
+	Failure     json.RawMessage `json:"failure"`
 	HostChanges bool            `json:"host_changes_begun"`
 }
 
@@ -113,9 +114,11 @@ type job struct {
 	Step       string          `json:"step"`
 	// Steps is the list Node Updates draws, written by the worker at the start
 	// of each run. StepNumber counts from 1 and names the step in progress.
+	// Failure is the code of a known failure, saved and cleared with Error.
 	Steps         []string                    `json:"steps,omitempty"`
 	StepNumber    int                         `json:"step_number,omitempty"`
 	Error         string                      `json:"error,omitempty"`
+	Failure       *protocol.Failure           `json:"failure,omitempty"`
 	Updated       time.Time                   `json:"updated"`
 	WalletPresent bool                        `json:"wallet_present"`
 	SyncthingID   string                      `json:"syncthing_id,omitempty"`

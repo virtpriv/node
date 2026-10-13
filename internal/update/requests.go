@@ -394,7 +394,7 @@ func retryUpdate(root, id string) error {
 	if j == nil || !j.active() || j.Review.Digest != id {
 		return errors.New("update identity changed, refresh its status")
 	}
-	return amendRecord(root, map[string]any{"phase": "retry", "error": nil})
+	return amendRecord(root, map[string]any{"phase": "retry", "error": nil, "failure": nil})
 }
 
 // maxListedSteps is the most steps Node Updates draws. It is the list of an
@@ -410,15 +410,7 @@ func Status() (protocol.Status, error) {
 	if err != nil || j == nil {
 		return protocol.Status{}, err
 	}
-	s := protocol.Status{ID: j.Review.Digest, Version: j.Review.Manifest.Version, Phase: j.Phase, Step: j.Step, Error: j.Error, Active: j.active()}
-	// A list the screen cannot draw sensibly is left out, and the screen
-	// shows the step text instead.
-	var steps []string
-	var number int
-	if json.Unmarshal(j.Steps, &steps) == nil && json.Unmarshal(j.StepNumber, &number) == nil &&
-		len(steps) <= maxListedSteps && number >= 1 && number <= len(steps) {
-		s.Steps, s.StepNumber = steps, number
-	}
+	s := j.status()
 	s.Running = system.IsServiceActive(Service)
 	s.Cancellable = j.active() && !j.HostChanges && !s.Running
 	if j.Phase == "waiting-unlock" {
@@ -429,6 +421,26 @@ func Status() (protocol.Status, error) {
 		s.WalletNetwork = p.LNDNetwork
 	}
 	return s, nil
+}
+
+// status is what the saved record tells the screen.
+func (r *record) status() protocol.Status {
+	s := protocol.Status{ID: r.Review.Digest, Version: r.Review.Manifest.Version, Phase: r.Phase, Step: r.Step, Error: r.Error, Active: r.active()}
+	// A list the screen cannot draw sensibly is left out, and the screen
+	// shows the step text instead.
+	var steps []string
+	var number int
+	if json.Unmarshal(r.Steps, &steps) == nil && json.Unmarshal(r.StepNumber, &number) == nil &&
+		len(steps) <= maxListedSteps && number >= 1 && number <= len(steps) {
+		s.Steps, s.StepNumber = steps, number
+	}
+	// A code is passed only with the error it explains, and only in a shape
+	// this release can read. Anything else gets the screen's general advice.
+	var f protocol.Failure
+	if r.Error != "" && json.Unmarshal(r.Failure, &f) == nil && f.Readable() {
+		s.Failure = &f
+	}
+	return s
 }
 
 func verifyHash(path, want string) error {
@@ -470,5 +482,5 @@ func cancelUpdate(root, id string) error {
 	if !j.active() || j.HostChanges {
 		return errors.New("host changes may have begun, complete or repair this update")
 	}
-	return amendRecord(root, map[string]any{"phase": "cancelled", "step": "Update cancelled before host changes", "error": nil})
+	return amendRecord(root, map[string]any{"phase": "cancelled", "step": "Update cancelled before host changes", "error": nil, "failure": nil})
 }

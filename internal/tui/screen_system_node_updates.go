@@ -398,24 +398,42 @@ func indented(p *paneBuilder, style lipgloss.Style, text string, rows int) {
 	}
 }
 
-// knownFailure gives the exact next step for failures the screen recognises
-// by the worker's own error text. Only the first line counts: it is the cause,
-// and what follows is cleanup joined to it. Anything else gets the general
-// advice, which stays true if a later release words its errors differently.
-func knownFailure(cause string) string {
-	cause, _, _ = strings.Cut(strings.TrimSpace(cause), "\n")
-	switch {
-	case strings.Contains(cause, "lnd did not stop cleanly"):
-		return "This is expected when the LND wallet is locked or not created yet.\nSelect Retry once to continue."
-	case strings.Contains(cause, "startup was interrupted"):
-		return "The update was interrupted, for example by a restart.\nSelect Retry to continue."
+// knownFailure gives the exact next step for a failure the worker named with
+// a code. Anything else gets the general advice, which stays true for codes a
+// later release adds.
+func knownFailure(f *protocol.Failure) string {
+	if f == nil {
+		return ""
 	}
-	if rest, ok := strings.CutPrefix(cause, "cancel this update and restart "); ok {
-		if c, _, ok := strings.Cut(rest, " first"); ok && c != "" {
-			return fmt.Sprintf("%s is not running. Select Cancel update, start %s on the System tab, then review again.", c, c)
+	name, onSystemTab := systemTabName(f.Service)
+	switch f.Code {
+	case protocol.FailureStopFailed:
+		if f.Service == protocol.LND {
+			return "This is expected when the LND wallet is locked or not created yet.\nSelect Retry once to continue."
+		}
+	case protocol.FailureStartInterrupted:
+		return "The update was interrupted, for example by a restart.\nSelect Retry to continue."
+	case protocol.FailureServiceNotRunning:
+		if onSystemTab {
+			return fmt.Sprintf("%s is not running. Select Cancel update, start %s on the System tab, then review again.", name, name)
+		}
+	case protocol.FailureServiceChanged:
+		if onSystemTab {
+			return fmt.Sprintf("%s is not running the installed version. Select Cancel update, restart %s on the System tab, then review again.", name, name)
 		}
 	}
 	return ""
+}
+
+// systemTabName is the name the System tab gives an updated service.
+func systemTabName(c protocol.Component) (string, bool) {
+	switch c {
+	case protocol.Bitcoin:
+		return "bitcoind", true
+	case protocol.LND, protocol.Syncthing:
+		return string(c), true
+	}
+	return "", false
 }
 
 // failure is the saved failure as the install screens show it.
@@ -522,7 +540,7 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 			// refused. While the worker still finishes its cleanup neither
 			// Retry nor Cancel is offered, so no advice is given yet.
 			p.blank()
-			if known := knownFailure(s.status.Error); known != "" {
+			if known := knownFailure(s.status.Failure); known != "" {
 				p.fitText(plain, known, 0)
 			} else if s.status.Cancellable {
 				p.fitText(plain, "No services were changed. Select Retry, or Cancel update to leave the node as it was.", 0)

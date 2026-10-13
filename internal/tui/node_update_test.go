@@ -416,3 +416,47 @@ func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 		})
 	}
 }
+
+// A v0.7.0 node keeps this lookup for its first update. A failure the worker
+// names with a code gets its exact next step only where that step is true.
+// The locked wallet explains only an lnd stop, and a service is named as the
+// System tab shows it, where the operator starts or restarts it. Anything
+// else, a code from a later release included, gets the general advice.
+func TestKnownFailureGivesStepsOnlyWhereTheyApply(t *testing.T) {
+	for _, tc := range []struct {
+		code    protocol.FailureCode
+		service protocol.Component
+		step    bool
+		name    string // the service a start or restart step names
+	}{
+		{protocol.FailureStopFailed, protocol.LND, true, ""},
+		{protocol.FailureStopFailed, protocol.Bitcoin, false, ""},
+		{protocol.FailureStopFailed, protocol.Syncthing, false, ""},
+		{protocol.FailureStartInterrupted, protocol.LND, true, ""},
+		{protocol.FailureStartInterrupted, protocol.Bitcoin, true, ""},
+		{protocol.FailureServiceNotRunning, protocol.Bitcoin, true, "bitcoind"},
+		{protocol.FailureServiceNotRunning, protocol.Syncthing, true, "syncthing"},
+		{protocol.FailureServiceChanged, protocol.LND, true, "lnd"},
+		{protocol.FailureServiceChanged, protocol.Bitcoin, true, "bitcoind"},
+		{protocol.FailureServiceNotRunning, "tor", false, ""},
+		{protocol.FailureServiceNotRunning, "", false, ""},
+		{"snapshot_failed", protocol.LND, false, ""},
+	} {
+		t.Run(fmt.Sprintf("%s %s", tc.code, tc.service), func(t *testing.T) {
+			step := knownFailure(&protocol.Failure{Code: tc.code, Service: tc.service})
+			if (step != "") != tc.step {
+				t.Fatalf("step %q, want a step %v", step, tc.step)
+			}
+			words := strings.Fields(step)
+			if tc.name != "" && !slices.Contains(words, tc.name) {
+				t.Fatalf("step %q does not name %q", step, tc.name)
+			}
+			if tc.service == protocol.Bitcoin && slices.Contains(words, "bitcoin") {
+				t.Fatalf("step %q uses a name the System tab does not show", step)
+			}
+		})
+	}
+	if knownFailure(nil) != "" {
+		t.Fatal("a failure without a code got an exact step")
+	}
+}
