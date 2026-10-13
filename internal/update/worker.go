@@ -183,7 +183,14 @@ func inheritFailed(root string, j *job) error {
 func observeIdentity(j *job, running func(protocol.Component) error, wallet func() (bool, error), device func() string) error {
 	for _, c := range j.Affected {
 		if err := running(c); err != nil {
-			return fmt.Errorf("cancel this update and restart %s first: %w", c, err)
+			err = fmt.Errorf("cancel this update and restart %s first: %w", c, err)
+			switch {
+			case errors.Is(err, host.ErrUpdateServiceNotActive):
+				return known(protocol.FailureServiceNotRunning, c, err)
+			case errors.Is(err, host.ErrUpdateServiceChanged):
+				return known(protocol.FailureServiceChanged, c, err)
+			}
+			return err
 		}
 	}
 	if slices.Contains(j.Affected, protocol.LND) {
@@ -224,7 +231,7 @@ func commitJob(root, binary string, j *job, running func(protocol.Component) err
 
 func recordWorkerFailure(j *job, cause error) error {
 	j.Phase = "failed"
-	j.Error = cause.Error()
+	j.Error, j.Failure = cause.Error(), nil
 	// These checks run before this worker writes its list of steps, so the
 	// list from an earlier run would mark the wrong step. Without a list the
 	// screen shows the error under the saved step text.

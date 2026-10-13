@@ -29,6 +29,12 @@ type workflowHarness struct {
 	interrupt string
 	after     bool
 	failure   string
+	// failWith, when set, is the error the injected failure returns.
+	// absentReason, when set, is wrapped into a stopped service's error the
+	// way the host check words it. quarantineErr is what cleanup returns.
+	failWith      error
+	absentReason  error
+	quarantineErr error
 	// crash, when set, is asked after each durable save whether power is lost.
 	crash func(*job) bool
 	// wallet and device are what the live node would answer. identifies and
@@ -74,6 +80,9 @@ func (h *workflowHarness) reload() *job {
 }
 func (h *workflowHarness) checkRunning(c protocol.Component) error {
 	if !h.running[c] {
+		if h.absentReason != nil {
+			return fmt.Errorf("%s %w", c, h.absentReason)
+		}
 		return errors.New("process absent")
 	}
 	return nil
@@ -87,6 +96,9 @@ func (h *workflowHarness) effect(name string, fn func() error) error {
 		panic("power loss")
 	}
 	if h.failure == name {
+		if h.failWith != nil {
+			return h.failWith
+		}
 		return errors.New("injected failure")
 	}
 	if fn != nil {
@@ -131,7 +143,7 @@ func (h *workflowHarness) ops() workflowOps {
 				for _, c := range components {
 					h.running[c] = false
 				}
-				return nil
+				return h.quarantineErr
 			})
 		},
 	}

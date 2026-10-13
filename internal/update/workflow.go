@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/virtpriv/node/internal/host"
 	"github.com/virtpriv/node/internal/update/protocol"
 )
 
@@ -57,6 +58,30 @@ func stepList(affected []protocol.Component) []string {
 	return append(steps, stepFinish)
 }
 
+// codedError marks an error with the code the worker saves for it. The error
+// text stays as it was.
+type codedError struct {
+	failure protocol.Failure
+	err     error
+}
+
+func (e *codedError) Error() string { return e.err.Error() }
+func (e *codedError) Unwrap() error { return e.err }
+
+func known(code protocol.FailureCode, c protocol.Component, err error) error {
+	return &codedError{failure: protocol.Failure{Code: code, Service: c}, err: err}
+}
+
+// failureOf returns the code saved with err, or nil for a failure that the
+// screen explains with its general advice.
+func failureOf(err error) *protocol.Failure {
+	if e, ok := errors.AsType[*codedError](err); ok {
+		f := e.failure
+		return &f
+	}
+	return nil
+}
+
 func runJob(j *job, ops workflowOps) error {
 	if !j.active() || j.Phase == "failed" {
 		return nil
@@ -79,17 +104,21 @@ func runJob(j *job, ops workflowOps) error {
 	if err := ops.save(j); err != nil {
 		return err
 	}
-	// refuse records a failure without touching services.
-	refuse := func(cause error) error {
+	// saveFailure saves a failure with its code. The code comes from the
+	// cause alone, never from the cleanup joined to it.
+	saveFailure := func(cause error, f *protocol.Failure) error {
 		j.Phase = "failed"
-		j.Error = cause.Error()
+		j.Error, j.Failure = cause.Error(), f
 		return errors.Join(cause, ops.save(j))
 	}
+	// refuse records a failure without touching services.
+	refuse := func(cause error) error { return saveFailure(cause, failureOf(cause)) }
 	fail := func(cause error) error {
+		f := failureOf(cause)
 		if j.HostChanges && ops.quarantine != nil {
 			cause = errors.Join(cause, ops.quarantine(affected))
 		}
-		return refuse(cause)
+		return saveFailure(cause, f)
 	}
 	// Last space check before any service is touched. Services stay exactly
 	// as they were found. A refusal returns the downloaded files' space unless
@@ -175,6 +204,9 @@ func runJob(j *job, ops workflowOps) error {
 				return err
 			}
 			if err := ops.stop(c); err != nil {
+				if errors.Is(err, host.ErrUpdateServiceStop) {
+					err = known(protocol.FailureStopFailed, c, err)
+				}
 				return fail(err)
 			}
 		}
@@ -200,7 +232,8 @@ func runJob(j *job, ops workflowOps) error {
 				// An uncertain start is never repeated automatically. If the
 				// process survived, verify it. Otherwise require explicit Retry.
 				if err := ops.running(c); err != nil {
-					return fail(fmt.Errorf("%s startup was interrupted, review the failure and retry: %w", c, err))
+					return fail(known(protocol.FailureStartInterrupted, c,
+						fmt.Errorf("%s startup was interrupted, review the failure and retry: %w", c, err)))
 				}
 			} else {
 				j.Started[c] = true
@@ -233,7 +266,7 @@ func runJob(j *job, ops workflowOps) error {
 	if err := ops.backup(); err != nil {
 		fmt.Fprintln(os.Stderr, "LND backup copy failed after the update:", err)
 	}
-	j.Error = ""
+	j.Error, j.Failure = "", nil
 	if err := publish("complete", "Update complete", stepFinish); err != nil {
 		return err
 	}

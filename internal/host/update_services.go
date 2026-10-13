@@ -117,7 +117,7 @@ func updateDropIn(c protocol.Component) string {
 }
 
 // GuardUpdateServices requires a permit under /run, so a reboot closes the
-// gate. Conditions are evaluated only at start; removing the permit leaves a
+// gate. Conditions are evaluated only at start. Removing the permit leaves a
 // healthy process up.
 func GuardUpdateServices(components []protocol.Component) error {
 	if err := files.Directory(paths.RuntimeDir, 0755); err != nil {
@@ -184,6 +184,14 @@ func updateServiceProperties(c protocol.Component) (map[string]string, error) {
 	return m, nil
 }
 
+// The update worker recognises these with errors.Is to name a failure for
+// Node Updates. Each follows the service name in the error text.
+var (
+	ErrUpdateServiceNotActive = errors.New("is not active")
+	ErrUpdateServiceChanged   = errors.New("is running a different executable")
+	ErrUpdateServiceStop      = errors.New("did not stop cleanly, no binaries were replaced")
+)
+
 func StopUpdateService(c protocol.Component) error {
 	if err := files.Remove(permitPath(c)); err != nil {
 		return err
@@ -205,7 +213,7 @@ func StopUpdateService(c protocol.Component) error {
 		return err
 	}
 	if p["MainPID"] != "0" || p["ControlPID"] != "0" || p["ActiveState"] != "inactive" || p["Result"] != "success" {
-		return fmt.Errorf("%s did not stop cleanly, no binaries were replaced", c)
+		return fmt.Errorf("%s %w", c, ErrUpdateServiceStop)
 	}
 	return nil
 }
@@ -234,7 +242,7 @@ func CheckUpdateProcess(c protocol.Component) error {
 	}
 	pid, err := strconv.Atoi(p["MainPID"])
 	if err != nil || pid <= 0 || p["ActiveState"] != "active" {
-		return fmt.Errorf("%s is not active", c)
+		return fmt.Errorf("%s %w", c, ErrUpdateServiceNotActive)
 	}
 	live, err := os.Stat(fmt.Sprintf("/proc/%d/exe", pid))
 	if err != nil {
@@ -245,7 +253,7 @@ func CheckUpdateProcess(c protocol.Component) error {
 		return err
 	}
 	if !os.SameFile(live, installed) {
-		return fmt.Errorf("%s is running a different executable", c)
+		return fmt.Errorf("%s %w", c, ErrUpdateServiceChanged)
 	}
 	return nil
 }
