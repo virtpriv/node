@@ -12,6 +12,8 @@ import (
 
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/virtpriv/node/internal/logger"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const defaultTimeout = 30 * time.Second
@@ -522,7 +524,7 @@ func (c *Client) WaitForPeer(pubkey string, timeout time.Duration) error {
 }
 
 // OpenChannel submits one funding request. The explicit outpoints restrict LND's
-// funding pool; LND determines which coins to use and whether change is needed.
+// funding pool. LND determines which coins to use and whether change is needed.
 func (c *Client) OpenChannel(input ChannelOpenRequest) ChannelOpenResult {
 	rpc := c.rpc()
 	if rpc == nil {
@@ -624,9 +626,9 @@ func (c *Client) getPeerAliasContext(parent context.Context, pubkey string) stri
 // parseOutpoint parses a txid:index outpoint string strictly.
 // Every fund-moving call site that names an outpoint (channel
 // funding, on-chain send with coin control, channel close)
-// routes through here: a value that does not parse must abort
+// routes through here. A value that does not parse must abort
 // the operation rather than silently narrow or retarget what
-// the operator chose. Pure — unit-tested.
+// the operator chose. Pure, unit-tested.
 func parseOutpoint(op string) (*lnrpc.OutPoint, error) {
 	parts := strings.SplitN(op, ":", 2)
 	if len(parts) != 2 {
@@ -646,74 +648,23 @@ func parseOutpoint(op string) (*lnrpc.OutPoint, error) {
 	}, nil
 }
 
+// handleError rebuilds the link to LND when gRPC reports it lost. The new link
+// reaches the repair on connect, which copies LND's credentials again if they
+// were the problem.
 func (c *Client) handleError(err error) {
-	switch classifyRPCError(err.Error()) {
-	case rpcErrTransport:
-		logger.Status("LND connection lost, will reconnect: %v",
-			err)
+	if linkLost(err) {
+		logger.Status("LND connection lost, will reconnect: %v", err)
 		go c.Reconnect()
-	case rpcErrCredential:
-		// Reconnecting is only useful when the dial-time
-		// repair could actually re-stage the credentials —
-		// otherwise the dial would rebuild the same connection
-		// from the same board copies and fail the same way. A
-		// credential LND rejects PERMANENTLY (not stale — e.g.
-		// a wallet recreated behind this process's back) would
-		// otherwise produce a reconnect and a log line for
-		// every failing call on every poll tick, forever. The
-		// re-stage limiter is the damper: one repair attempt
-		// per interval, quiet in between.
-		if credRestageWorthwhile() {
-			logger.Status("LND rejected the held credentials, "+
-				"will reconnect and repair: %v", err)
-			go c.Reconnect()
-		}
 	}
 }
 
-// RPC error classes, by what would help:
-//
-//   - transport: the connection itself is gone (Unavailable,
-//     connection refused) — LND restarted or is down; rebuild
-//     the connection and the next dial finds out.
-//   - credential: LND answered but rejected the caller
-//     (PermissionDenied, Unauthenticated) — the fail-closed
-//     moment of a stale staged macaroon. Treating this as
-//     terminal left that staleness permanent; routing it
-//     through Reconnect (damped, above) lands it at the
-//     dial-time repair, which re-stages both LND credentials
-//     and retries once.
-//   - other: in-progress states (deadline, starting up, not
-//     yet ready) and application answers over a working
-//     connection — nothing a reconnect can help.
-type rpcErrClass int
-
-const (
-	rpcErrOther rpcErrClass = iota
-	rpcErrTransport
-	rpcErrCredential
-)
-
-// classifyRPCError uses text heuristics to choose the current reconnect policy.
-// This is a local policy choice; gRPC also exposes typed status codes.
-func classifyRPCError(errStr string) rpcErrClass {
-	if strings.Contains(errStr, "DeadlineExceeded") ||
-		strings.Contains(errStr, "context deadline") {
-		return rpcErrOther
-	}
-	if strings.Contains(errStr, "starting up") ||
-		strings.Contains(errStr, "not yet ready") {
-		return rpcErrOther
-	}
-	if strings.Contains(errStr, "Unavailable") ||
-		strings.Contains(errStr, "connection refused") {
-		return rpcErrTransport
-	}
-	if strings.Contains(errStr, "PermissionDenied") ||
-		strings.Contains(errStr, "Unauthenticated") {
-		return rpcErrCredential
-	}
-	return rpcErrOther
+// linkLost reports whether gRPC itself says the link to LND is gone. LND
+// sends its state and authentication answers with code Unknown, such as a
+// locked wallet, startup, a refused macaroon or Bitcoin Core being
+// unreachable. A new link cannot help those, so their words are never read
+// here.
+func linkLost(err error) bool {
+	return status.Code(err) == codes.Unavailable
 }
 
 func satStr(sats int64) string {

@@ -4,14 +4,14 @@
 //
 // Ordinary credential reads use root-staged files readable by the admin user.
 // Initialization and reconnect repair may ask the helper to refresh those files.
-// The client holds the macaroon in memory and injects it into authenticated RPCs;
-// reconnect can replace the loaded credentials.
+// The client holds the macaroon in memory and injects it into authenticated
+// RPCs. Reconnect can replace the loaded credentials.
 //
 // Connections use TLS to the loopback address. Close shuts down the current
-// transport; it does not provide secure credential erasure.
+// transport. It does not provide secure credential erasure.
 //
-// Read queries and fund-moving RPCs share this one client;
-// every fund-moving call sits behind an explicit confirmation
+// Read queries and fund-moving RPCs share this one client.
+// Every fund-moving call sits behind an explicit confirmation
 // flow in its caller.
 package lndrpc
 
@@ -45,8 +45,8 @@ type Client struct {
 }
 
 // NewContext initializes an existing wallet's client with the caller's lifetime.
-// An unavailable GetInfo response retains the transport for normal queries;
-// unreadable staged credentials and cancellation return no client. Startup uses
+// An unavailable GetInfo response retains the transport for normal queries.
+// Unreadable staged credentials and cancellation return no client. Startup uses
 // the existing probe and rate-limited repair policy, not the creation path.
 func NewContext(ctx context.Context) (*Client, error) {
 	c := &Client{}
@@ -60,23 +60,23 @@ func NewContext(ctx context.Context) (*Client, error) {
 	return c, nil
 }
 
-// dial establishes the connection; the caller holds c.mu.
+// dial establishes the connection. The caller holds c.mu.
 //
-// allowHeal enables the staged-credential self-heal: LND can
+// allowHeal enables the staged-credential self-heal. LND can
 // regenerate its TLS certificate OUTSIDE any helper operation
 // (an automatic restart after a crash, a reboot, or a typed
 // configuration change), and its macaroon can be
-// recreated the same way — and the staged board copies then no
+// recreated the same way. The staged board copies then no
 // longer match what LND accepts. That staleness reliably
 // surfaces exactly here, as a failed test call. The heal keys
 // on the ABSENCE OF SUCCESS, not on recognizing the failure's
-// text: enumerating the failure messages worth healing is a
+// text. Enumerating the failure messages worth healing is a
 // whitelist, and a whitelist misses (a dial error this client
 // once produced was worded in a way no pattern anticipated).
 // On any test-call failure, the client asks the helper to
-// re-stage the LND credentials — rate-limited process-wide, so
+// re-stage the LND credentials, rate-limited process-wide so
 // failures with nothing to heal (LND down, wallet locked) cost
-// at most one re-stage per interval — and dials again ONCE
+// at most one re-stage per interval, and dials again ONCE
 // with the refreshed board copies.
 func (c *Client) dial(parent context.Context, allowHeal bool) error {
 	if err := parent.Err(); err != nil {
@@ -90,7 +90,7 @@ func (c *Client) dial(parent context.Context, allowHeal bool) error {
 	// Test the connection with a longer timeout.
 	// During IBD, LND's GetInfo queries Bitcoin Core which can
 	// be slow. The probe context is built inline rather than
-	// through macaroonCtx: dial runs under the write lock and
+	// through macaroonCtx, because dial runs under the write lock and
 	// macaroonCtx takes the read lock.
 	md := metadata.New(map[string]string{"macaroon": c.macaroonHex})
 	probeCtx := metadata.NewOutgoingContext(parent, md)
@@ -108,7 +108,7 @@ func (c *Client) dial(parent context.Context, allowHeal bool) error {
 		return parent.Err()
 	}
 	if allowHeal && requestCredentialRestage(parent) {
-		logger.Status("LND gRPC test call failed (%v) — staged "+
+		logger.Status("LND gRPC test call failed (%v), staged "+
 			"credentials re-staged in case they were stale, "+
 			"reconnecting once", err)
 		c.conn.Close()
@@ -127,7 +127,7 @@ func (c *Client) dial(parent context.Context, allowHeal bool) error {
 }
 
 // Credential self-heal state: at most one re-stage request per
-// interval, PROCESS-WIDE — with the heal keyed on any failed
+// interval, PROCESS-WIDE. With the heal keyed on any failed
 // test call, this limiter is what keeps a long LND outage from
 // turning every reconnect poll into helper traffic and journal
 // noise.
@@ -139,22 +139,9 @@ var (
 const credRestageInterval = 5 * time.Minute
 
 // restageDue reports whether enough time has passed since the
-// last re-stage request for another one. Pure — unit-tested.
+// last re-stage request for another one. Pure, unit-tested.
 func restageDue(last, now time.Time) bool {
 	return last.IsZero() || now.Sub(last) >= credRestageInterval
-}
-
-// credRestageWorthwhile reports whether a re-stage request made
-// now would pass the limiter, WITHOUT consuming it. The
-// credential-rejection path in handleError checks this before
-// reconnecting: when no repair can happen, no reconnect can
-// help, and staying quiet caps a permanently rejected
-// credential at one reconnect-and-repair attempt (and one log
-// line) per limiter interval instead of one per failing call.
-func credRestageWorthwhile() bool {
-	credRestageMu.Lock()
-	defer credRestageMu.Unlock()
-	return restageDue(credRestageAt, time.Now())
 }
 
 // requestCredentialRestage asks the helper to refresh the staged
@@ -220,8 +207,8 @@ func (c *Client) Close() {
 }
 
 // macaroonCtx returns a context with the macaroon injected as
-// gRPC metadata. The field is read under the lock — Reconnect
-// rewrites it on another goroutine.
+// gRPC metadata. The field is read under the lock, because
+// Reconnect rewrites it on another goroutine.
 func (c *Client) macaroonCtx() context.Context {
 	return c.macaroonCtxFrom(context.Background())
 }
@@ -293,7 +280,7 @@ func (c *Client) loadStaged() error {
 	}
 
 	// Read the staged admin macaroon copy (staged at wallet
-	// creation; re-staged whenever an operation invalidates it).
+	// creation, re-staged whenever an operation invalidates it).
 	macBytes, err := helper.ReadBoard(paths.StateLNDMacaroon)
 	if err != nil {
 		return fmt.Errorf("read macaroon: %w", err)

@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/lightningnetwork/lnd/lnrpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 func TestWalletStateNames(t *testing.T) {
@@ -81,10 +83,10 @@ func TestNilClientSafety(t *testing.T) {
 // macaroonCtx attaches the credential metadata to every call
 // while Reconnect can rewrite the credential field on another
 // goroutine. This test runs both sides at once so the race
-// detector, not code review, arbitrates the lock discipline:
-// readers hammer macaroonCtx while a writer rewrites the field
+// detector, not code review, arbitrates the lock discipline.
+// Readers hammer macaroonCtx while a writer rewrites the field
 // under the same write lock the redial path holds. Run under
-// go test -race; without the detector it still verifies that
+// go test -race. Without the detector it still verifies that
 // every context carries exactly one non-empty macaroon value.
 func TestMacaroonCtxConcurrentRewrite(t *testing.T) {
 	c := &Client{macaroonHex: "00"}
@@ -117,7 +119,7 @@ func TestMacaroonCtxConcurrentRewrite(t *testing.T) {
 }
 
 // Both fund-moving coin-control call sites route through
-// parseOutpoint; anything that does not parse must be an error,
+// parseOutpoint. Anything that does not parse must be an error,
 // never a silently narrowed or retargeted selection.
 func TestParseOutpoint(t *testing.T) {
 	txid := strings.Repeat("ab", 32)
@@ -146,7 +148,7 @@ func TestParseOutpoint(t *testing.T) {
 	}
 }
 
-// The routing fee limit scales with the amount: half a percent
+// The routing fee limit scales with the amount, half a percent
 // with a 30 sat floor, and a fixed cap when the amount is
 // unknown (zero-amount invoice).
 func TestPaymentFeeLimit(t *testing.T) {
@@ -168,76 +170,55 @@ func TestPaymentFeeLimit(t *testing.T) {
 	}
 }
 
-// The RPC error classifier routes failures: transport loss
-// reconnects, credential rejection reconnects under the
-// re-stage limiter's damping (both land at the dial-time
-// repair, which re-stages the LND credentials when they were
-// the problem); in-progress states and application answers
-// over a working connection do neither. The dial-time repair
-// itself deliberately has NO classifier — it keys on the
-// absence of a successful test call, because enumerating
-// heal-worthy failure texts is a whitelist and a whitelist
-// misses.
-func TestClassifyRPCError(t *testing.T) {
-	transport := []string{
-		"rpc error: code = Unavailable desc = connection refused",
-		// A TLS verification failure against a stale staged
-		// certificate surfaces with code Unavailable — the
-		// reconnect routes it to the dial-time repair.
-		"rpc error: code = Unavailable desc = connection error: " +
-			"desc = \"transport: authentication handshake failed: " +
-			"tls: failed to verify certificate: x509: " +
-			"certificate signed by unknown authority\"",
-		// Observed in production when an old build dialed LND by
-		// the name localhost on a box with IPv6 disabled. The
-		// client now dials by literal address so this shape
-		// should not recur, but if an address-family failure
-		// ever does, reconnecting is the right response to it.
-		"rpc error: code = Unavailable desc = connection error: " +
-			"desc = \"transport: Error while dialing: dial tcp " +
-			"[::1]:10009: connect: cannot assign requested " +
-			"address\"",
+// The open TUI rebuilds its link to LND only when gRPC itself says the link
+// is gone. LND sends its state and authentication answers with code Unknown,
+// and a new link cannot help any of them. The lines marked as captured were
+// seen on a public Signet node with LND 0.21.4-beta on 2026-10-13. The locked
+// wallet and startup lines are LND's words, read in its source. The rest are
+// gRPC transport answers or invented examples of the other codes.
+func TestReconnectOnlyWhenTheLinkIsLost(t *testing.T) {
+	lost := []error{
+		status.Error(codes.Unavailable, "connection error: desc = \"transport: Error while dialing: dial tcp 127.0.0.1:10009: connect: connection refused\""),
+		// A stale staged certificate fails the TLS handshake. The new link
+		// then reaches the repair on connect, which copies it again.
+		status.Error(codes.Unavailable, "connection error: desc = \"transport: authentication handshake failed: tls: failed to verify certificate: x509: certificate signed by unknown authority\""),
+		fmt.Errorf("list channels: %w", status.Error(codes.Unavailable, "error reading from server: EOF")),
 	}
-	for _, msg := range transport {
-		if classifyRPCError(msg) != rpcErrTransport {
-			t.Errorf("not classified transport: %q", msg)
+	for _, err := range lost {
+		if !linkLost(err) {
+			t.Errorf("a lost link did not reconnect: %v", err)
 		}
 	}
-	credential := []string{
-		// A stale staged macaroon fails closed HERE. This class
-		// was treated as terminal before, which made macaroon
-		// staleness permanent for the process's lifetime.
-		"rpc error: code = Unauthenticated desc = verification " +
-			"failed: signature mismatch after caveat verification",
-		"rpc error: code = PermissionDenied desc = permission " +
-			"denied",
+	kept := []error{
+		// Captured: a refused macaroon, and none at all.
+		status.Error(codes.Unknown, "verification failed: signature mismatch after caveat verification"),
+		status.Error(codes.Unknown, "expected 1 macaroon, got 0"),
+		// Captured: Bitcoin Core stopped, then loading.
+		status.Error(codes.Unknown, `unable to get best block info: invalid http POST response (nil), method: getblockchaininfo, id: 681290, last error=Post "http://127.0.0.1:38332": dial tcp 127.0.0.1:38332: connect: connection refused`),
+		status.Error(codes.Unknown, "unable to get best block info: -28: Loading block index…"),
+		status.Error(codes.Unknown, "wallet locked, unlock it to enable full RPC access"),
+		status.Error(codes.Unknown, "the RPC server is in the process of starting up, but not yet ready to accept calls"),
+		status.Error(codes.DeadlineExceeded, "context deadline exceeded"),
+		status.Error(codes.Canceled, "context canceled"),
+		context.DeadlineExceeded,
+		status.Error(codes.InvalidArgument, "invalid payment request"),
+		status.Error(codes.Internal, "server closed the stream without sending trailers"),
+		// A refused credential does not rebuild an open link. The
+		// repair on connect handles it at the next connection.
+		status.Error(codes.Unauthenticated, "verification failed"),
+		status.Error(codes.PermissionDenied, "permission denied"),
+		// Words alone no longer count.
+		errors.New("rpc error: code = Unavailable desc = connection refused"),
 	}
-	for _, msg := range credential {
-		if classifyRPCError(msg) != rpcErrCredential {
-			t.Errorf("not classified credential: %q", msg)
-		}
-	}
-	other := []string{
-		// In-progress states: reconnecting cannot help and
-		// would churn the connection.
-		"context deadline exceeded",
-		"rpc error: code = DeadlineExceeded desc = deadline",
-		"the RPC server is still starting up",
-		"chain notifier RPC is still syncing, not yet ready",
-		// Application answers over a working connection.
-		"rpc error: code = InvalidArgument desc = invalid " +
-			"payment request",
-		"insufficient funds available to construct transaction",
-	}
-	for _, msg := range other {
-		if classifyRPCError(msg) != rpcErrOther {
-			t.Errorf("wrongly classified: %q", msg)
+	for _, err := range kept {
+		if linkLost(err) {
+			t.Errorf("a working link was rebuilt: %v", err)
 		}
 	}
 }
 
 // The re-stage limiter is process-wide and bounds the heal to
-// one request per interval — with the heal keyed on any failed
+// one request per interval. With the heal keyed on any failed
 // test call, this is what keeps a long outage cheap.
 func TestRestageDue(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
