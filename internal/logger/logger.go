@@ -2,7 +2,7 @@
 
 // Package logger provides structured logging for the vpn application.
 //
-// Log file: /var/log/vpn.log (created by the installer; owned by the admin user)
+// Log file: /var/log/vpn.log (created by the installer, owned by the admin user)
 //
 // Log format:
 //
@@ -10,12 +10,11 @@
 //
 // Sections:
 //
-//	[install]  — installation steps and progress
-//	[verify]   — GPG signature and checksum verification
-//	[config]   — configuration load/save operations
-//	[tui]      — TUI actions (installs, upgrades, service management)
-//	[status]   — dashboard status polling warnings
-//	[system]   — system-level operations (firewall, tor, services)
+//	[install]  installation steps and progress
+//	[verify]   GPG signature and checksum verification
+//	[tui]      TUI actions (installs, upgrades, service management)
+//	[status]   dashboard status polling warnings
+//	[system]   system-level operations (firewall, tor, services)
 package logger
 
 import (
@@ -64,10 +63,6 @@ func Install(format string, args ...interface{}) {
 
 func Verify(format string, args ...interface{}) {
 	Log("verify", format, args...)
-}
-
-func Config(format string, args ...interface{}) {
-	Log("config", format, args...)
 }
 
 func TUI(format string, args ...interface{}) {

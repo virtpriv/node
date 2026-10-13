@@ -132,15 +132,6 @@ func IsServiceActive(name string) bool {
 	return exec.Command("systemctl", "is-active", "--quiet", name).Run() == nil
 }
 
-func ServiceAction(name, action string) error {
-	return RunRoot("systemctl", action, name)
-}
-
-func RebootRequired() bool {
-	_, err := os.Stat("/var/run/reboot-required")
-	return err == nil
-}
-
 // ── Public IP detection ──────────────────────────────────
 
 var (
