@@ -103,7 +103,7 @@ func TestStartRechecksNodeAndWorkerBeforeAcceptingReview(t *testing.T) {
 }
 
 // A plan may name networks and services added after this helper was built.
-// The helper must still accept the job; the newer worker checks those names.
+// The helper must still accept the job. The newer worker checks those names.
 func TestHelperAcceptsReviewOfPlanWithLaterNames(t *testing.T) {
 	j := workflowFixture()
 	j.Review.Manifest.Networks = append(j.Review.Manifest.Networks, "testnet5")
@@ -162,7 +162,7 @@ func TestCorrectiveAdmissionPreservesFailedUpdateObligations(t *testing.T) {
 			switch refusal {
 			case "ordinary release":
 				p.Review.Manifest.RecoveryFrom = nil
-				wantError = "does not declare recovery"
+				wantError = "cannot repair the unfinished update"
 			case "different failed update":
 				p.Previous = strings.Repeat("c", 64)
 				wantError = "update state changed"

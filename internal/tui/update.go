@@ -55,7 +55,7 @@ func (m *Model) rememberTabPosition() {
 // Returns the screen's cmd (typically a fetch) or nil if
 // no screen is mounted or the active tab is the section
 // home. Only called when the user "commits" to viewing a
-// detail tab — not during tab bar browsing or sidebar
+// detail tab, not during tab bar browsing or sidebar
 // navigation.
 func (m *Model) activateTab() tea.Cmd {
 	tabs := m.effectiveTabs()
@@ -154,10 +154,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focusTabBar()
 		m.tabCursorX = 0
 		// Two cases:
-		//  1. Detail screen emitted this — m.activeTab
+		//  1. Detail screen emitted this. m.activeTab
 		//     is already > 0, preserve it (the user
 		//     should land on the tab they came from).
-		//  2. Home screen emitted this — m.activeTab
+		//  2. Home screen emitted this. m.activeTab
 		//     is 0, restore from sectionFocus or fall
 		//     back to tab 1. Without this, the tab
 		//     bar focuses on the home tab and shows
@@ -193,7 +193,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		// Parent is section home or not found —
+		// If the parent is section home or not found,
 		// fall back to section home.
 		m.activeTab = 0
 		m.focusContent()
@@ -417,6 +417,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case latestVersionMsg:
 		m.latestVersion = string(msg)
 		m.screenCtx.LatestVersion = string(msg)
+		m.screenCtx.LatestChecked = true
 		return m, nil
 	case connectionInfoResultMsg:
 		return m, m.completeConnectionInfo(msg)
@@ -760,7 +761,7 @@ func (m Model) handleKey(
 		return m.handleSidebarKey(key)
 	}
 
-	// 5. Content focused — dispatch by active tab
+	// 5. Content focused, dispatch by active tab
 	tabs := m.effectiveTabs()
 	if m.activeTab > 0 && m.activeTab < len(tabs) {
 		tab := tabs[m.activeTab]
@@ -775,7 +776,7 @@ func (m Model) handleKey(
 		return m, nil
 	}
 
-	// 6. Section home — all sections are screen-backed
+	// 6. Section home, all sections are screen-backed
 	sec := m.nav.ActiveSection()
 	if sec >= 0 && sec < numSections &&
 		m.sectionScreens[sec] != nil {
@@ -823,7 +824,7 @@ func (m Model) handleSidebarKey(
 		m.nav.MoveDown()
 		return m, nil
 	case "enter", "right":
-		// Theme toggle — only responds to Enter.
+		// The theme toggle only responds to Enter.
 		// Right arrow is ignored on the toggle.
 		if m.nav.IsOnThemeToggle() {
 			if key == "enter" {
@@ -985,7 +986,7 @@ func (m Model) closeTab(
 		return m, nil
 	}
 
-	// Screens own all subview state; just clear the
+	// Screens own all subview state, so just clear the
 	// Model-level subview flag on any tab close.
 	m.subview = svNone
 
@@ -1031,9 +1032,9 @@ func (m Model) closeTab(
 	// addon-parent special case. Closing a Syncthing
 	// device with no siblings now lands on Syncthing
 	// manage (which is at the same neighbor index by
-	// virtue of being adjacent in the tab list);
-	// closing it with siblings lands on the next
-	// sibling instead — which is what a Sparrow /
+	// virtue of being adjacent in the tab list).
+	// Closing it with siblings lands on the next
+	// sibling instead, which is what a Sparrow /
 	// browser user expects.
 	newTabCount := len(m.effectiveTabs())
 	if newTabCount > 1 {
@@ -1044,7 +1045,7 @@ func (m Model) closeTab(
 		m.activeTab = landing
 		m.focusTabBar()
 	} else {
-		// No detail tabs left — fall back to section
+		// No detail tabs left, fall back to section
 		// home. Focus content since there's no tab bar.
 		m.activeTab = 0
 		m.focusContent()
@@ -1066,7 +1067,7 @@ func (m Model) closeTab(
 	// agreement with where m.activeTab now points.
 	// The renderTabBar pass compensates for stale
 	// offsets on the fly, so skipping this would not
-	// be user-visible today — but the model field
+	// be user-visible today, but the model field
 	// would drift from rendered state, which will
 	// burn any future tab-system test that asserts
 	// on tabScrollOffset directly. Mirror the two
@@ -1166,14 +1167,13 @@ func (m Model) routeToScreen(kind tabKind, msg tea.Msg) (Model, tea.Cmd, bool) {
 // dispatchToTab routes msg to the screen on the tab of the
 // given kind and returns the updated model + cmd in the
 // shape every Update-switch arm needs. If no matching tab
-// is open, returns (m, nil) — the msg is dropped.
+// is open, returns (m, nil) and the msg is dropped.
 //
 // This is the boilerplate collapsed: any async message
 // whose only job is "deliver to the screen that started
 // the work" uses this. Pre-routing state mutations do NOT
-// go here — those stay inline in Update so ordering stays
-// visible. See go-style-review.md Q4 for the pattern that
-// covers cases with both routing and state mutation.
+// go here. Those stay inline in Update so ordering stays
+// visible.
 func (m Model) dispatchToTab(
 	kind tabKind, msg tea.Msg,
 ) (Model, tea.Cmd) {

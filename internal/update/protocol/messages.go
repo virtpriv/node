@@ -22,13 +22,17 @@ type Review struct {
 
 // Status deliberately excludes local paths, credentials and raw command output.
 type Status struct {
-	ID            string `json:"id"`
-	Version       string `json:"version"`
-	Phase         string `json:"phase"`
-	Step          string `json:"step"`
-	Error         string `json:"error,omitempty"`
-	Active        bool   `json:"active"`
-	Running       bool   `json:"running"`
-	Cancellable   bool   `json:"cancellable"`
-	WalletNetwork string `json:"wallet_network,omitempty"`
+	ID      string `json:"id"`
+	Version string `json:"version"`
+	Phase   string `json:"phase"`
+	Step    string `json:"step"`
+	// Steps and StepNumber are the worker's list and the step in progress,
+	// counted from 1. Both are empty when the record holds no usable list.
+	Steps         []string `json:"steps,omitempty"`
+	StepNumber    int      `json:"step_number,omitempty"`
+	Error         string   `json:"error,omitempty"`
+	Active        bool     `json:"active"`
+	Running       bool     `json:"running"`
+	Cancellable   bool     `json:"cancellable"`
+	WalletNetwork string   `json:"wallet_network,omitempty"`
 }

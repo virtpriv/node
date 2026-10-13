@@ -84,6 +84,7 @@ type ScreenContext struct {
 	ContentFocused      bool   // true when content pane has focus (not tab bar, not sidebar)
 	Version             string // set once at construction
 	LatestVersion       string // updated by latestVersionMsg handler
+	LatestChecked       bool   // the release check has answered, found or not
 }
 
 type serviceControls interface {

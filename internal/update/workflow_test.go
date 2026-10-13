@@ -39,10 +39,15 @@ type workflowHarness struct {
 	identifies           int
 	walletReads          int
 	eventsBeforeIdentity int
+	// seen, when set, is told each event before it happens.
+	seen func(event string)
 }
 
 // identify runs the worker's own rule against the fixture's services.
 func (h *workflowHarness) identify(j *job) error {
+	if h.seen != nil {
+		h.seen("identify")
+	}
 	h.identifies++
 	h.eventsBeforeIdentity = len(h.events)
 	return observeIdentity(j, h.checkRunning,
@@ -74,6 +79,9 @@ func (h *workflowHarness) checkRunning(c protocol.Component) error {
 	return nil
 }
 func (h *workflowHarness) effect(name string, fn func() error) error {
+	if h.seen != nil {
+		h.seen(name)
+	}
 	h.events = append(h.events, name)
 	if h.interrupt == name && !h.after {
 		panic("power loss")

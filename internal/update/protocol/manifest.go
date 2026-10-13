@@ -216,7 +216,7 @@ func (m Manifest) validate(strict bool) error {
 }
 
 // Admission is how an installed helper reads a signed plan. The helper stays
-// in service for later releases, so it ignores fields it does not know; the
+// in service for later releases, so it ignores fields it does not know. The
 // target worker reads the same plan in full with Decode. Admission returns
 // either a plan that admits this node, or the release to install first.
 func Admission(data []byte, selected, current string, source Versions, network, failed string) (Manifest, string, error) {
@@ -297,7 +297,7 @@ func (m Manifest) admit(source Versions, network, failedRelease string) error {
 		return errors.New("this installed combination and network have no tested transition in this release")
 	}
 	if failedRelease != "" && !slices.Contains(m.RecoveryFrom, failedRelease) {
-		return errors.New("release does not declare recovery from the unfinished update")
+		return errors.New("this release cannot repair the unfinished update, select Retry first")
 	}
 	return nil
 }
