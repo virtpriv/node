@@ -50,7 +50,7 @@ func TestApprovalBindsSourceConfigurationAndRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Each token has its own record; changing the data under an old token must
+	// Each token has its own record. Changing the data under an old token must
 	// be rejected, even when two terminals reviewed the same release archive.
 	if err := os.Mkdir(filepath.Join(root, "reviews"), 0700); err != nil {
 		t.Fatal(err)
@@ -145,6 +145,8 @@ func TestInstalledSideHandlesLaterWorkerRecord(t *testing.T) {
 			rewriteRecord(t, root, func(m map[string]any) {
 				m["phase"] = tc.phase
 				m["snapshot"] = map[string]any{"taken": true}
+				// A later worker may shape the screen's list differently.
+				m["steps"] = map[string]any{"changed": true}
 				m["affected"] = append(m["affected"].([]any), "tor")
 				m["review"].(map[string]any)["manifest"].(map[string]any)["tor"] = "0.5.0"
 			})

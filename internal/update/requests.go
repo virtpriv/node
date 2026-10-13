@@ -397,6 +397,11 @@ func retryUpdate(root, id string) error {
 	return amendRecord(root, map[string]any{"phase": "retry", "error": nil})
 }
 
+// maxListedSteps is the most steps Node Updates draws. It is the list of an
+// update of all three services, the most that fits the fixed screen with a
+// failure. A longer list is left out and the screen shows the step text.
+const maxListedSteps = 12
+
 func Status() (protocol.Status, error) {
 	if err := requireRoot(); err != nil {
 		return protocol.Status{}, err
@@ -406,6 +411,14 @@ func Status() (protocol.Status, error) {
 		return protocol.Status{}, err
 	}
 	s := protocol.Status{ID: j.Review.Digest, Version: j.Review.Manifest.Version, Phase: j.Phase, Step: j.Step, Error: j.Error, Active: j.active()}
+	// A list the screen cannot draw sensibly is left out, and the screen
+	// shows the step text instead.
+	var steps []string
+	var number int
+	if json.Unmarshal(j.Steps, &steps) == nil && json.Unmarshal(j.StepNumber, &number) == nil &&
+		len(steps) <= maxListedSteps && number >= 1 && number <= len(steps) {
+		s.Steps, s.StepNumber = steps, number
+	}
 	s.Running = system.IsServiceActive(Service)
 	s.Cancellable = j.active() && !j.HostChanges && !s.Running
 	if j.Phase == "waiting-unlock" {

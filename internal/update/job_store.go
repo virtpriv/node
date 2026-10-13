@@ -26,7 +26,9 @@ const Service = protocol.WorkerUnit
 // components. So they read only these fields, treat every phase other than
 // failed, complete, cancelled and waiting-unlock as work in progress, and keep
 // the rest of the file when they write. Removing or redefining one of these
-// fields breaks nodes that are already installed.
+// fields breaks nodes that are already installed. Steps and StepNumber are
+// only for the screen, so they are kept undecoded here and a value of another
+// shape is ignored instead of making the record unreadable.
 type record struct {
 	Schema int `json:"schema"`
 	Review struct {
@@ -36,12 +38,14 @@ type record struct {
 		} `json:"manifest"`
 		Network string `json:"network"`
 	} `json:"review"`
-	WorkerHash  string `json:"worker_hash"`
-	ConfigHash  string `json:"config_hash"`
-	Phase       string `json:"phase"`
-	Step        string `json:"step"`
-	Error       string `json:"error"`
-	HostChanges bool   `json:"host_changes_begun"`
+	WorkerHash  string          `json:"worker_hash"`
+	ConfigHash  string          `json:"config_hash"`
+	Phase       string          `json:"phase"`
+	Step        string          `json:"step"`
+	Steps       json.RawMessage `json:"steps"`
+	StepNumber  json.RawMessage `json:"step_number"`
+	Error       string          `json:"error"`
+	HostChanges bool            `json:"host_changes_begun"`
 }
 
 func (r *record) active() bool           { return r.Phase != "complete" && r.Phase != "cancelled" }
@@ -100,13 +104,17 @@ func amendRecord(root string, set map[string]any) error {
 // each side effect. Completed is advisory: live files and service invocations
 // are verified again after an interruption.
 type job struct {
-	Previous      string                      `json:"previous,omitempty"`
-	Schema        int                         `json:"schema"`
-	Review        protocol.Review             `json:"review"`
-	WorkerHash    string                      `json:"worker_hash"`
-	PlanHash      string                      `json:"plan_hash"`
-	Phase         string                      `json:"phase"`
-	Step          string                      `json:"step"`
+	Previous   string          `json:"previous,omitempty"`
+	Schema     int             `json:"schema"`
+	Review     protocol.Review `json:"review"`
+	WorkerHash string          `json:"worker_hash"`
+	PlanHash   string          `json:"plan_hash"`
+	Phase      string          `json:"phase"`
+	Step       string          `json:"step"`
+	// Steps is the list Node Updates draws, written by the worker at the start
+	// of each run. StepNumber counts from 1 and names the step in progress.
+	Steps         []string                    `json:"steps,omitempty"`
+	StepNumber    int                         `json:"step_number,omitempty"`
 	Error         string                      `json:"error,omitempty"`
 	Updated       time.Time                   `json:"updated"`
 	WalletPresent bool                        `json:"wallet_present"`

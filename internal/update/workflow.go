@@ -31,12 +31,54 @@ type workflowOps struct {
 	quarantine func([]protocol.Component) error
 }
 
+// The steps Node Updates draws. Each run writes the list again from its own
+// affected services, so a Retry or a repair release shows its own steps.
+const (
+	stepCheckNode = "Check the node"
+	stepDownload  = "Download and verify release files"
+	stepSpace     = "Check free space"
+	stepPrepare   = "Prepare services"
+	stepInstall   = "Install new files"
+	stepFinish    = "Finish VPN update"
+)
+
+func stopStep(c protocol.Component) string  { return "Stop " + string(c) }
+func startStep(c protocol.Component) string { return "Start and check " + string(c) }
+
+func stepList(affected []protocol.Component) []string {
+	steps := []string{stepCheckNode, stepDownload, stepSpace, stepPrepare}
+	for _, c := range slices.Backward(affected) {
+		steps = append(steps, stopStep(c))
+	}
+	steps = append(steps, stepInstall)
+	for _, c := range affected {
+		steps = append(steps, startStep(c))
+	}
+	return append(steps, stepFinish)
+}
+
 func runJob(j *job, ops workflowOps) error {
 	if !j.active() || j.Phase == "failed" {
 		return nil
 	}
 	affected := j.Affected
-	publish := func(phase, step string) error { j.Phase, j.Step = phase, step; return ops.save(j) }
+	mark := func(step string) { j.StepNumber = slices.Index(j.Steps, step) + 1 }
+	// publish records the phase, the step text older screens show, and the
+	// step of the list that is now in progress.
+	publish := func(phase, step, listed string) error {
+		j.Phase, j.Step = phase, step
+		mark(listed)
+		return ops.save(j)
+	}
+	if steps := stepList(affected); !slices.Equal(steps, j.Steps) {
+		j.Steps, j.StepNumber = steps, 1
+	}
+	if j.Phase == "committing" {
+		mark(stepFinish)
+	}
+	if err := ops.save(j); err != nil {
+		return err
+	}
 	// refuse records a failure without touching services.
 	refuse := func(cause error) error {
 		j.Phase = "failed"
@@ -55,7 +97,7 @@ func runJob(j *job, ops workflowOps) error {
 	// host changes have begun. The record is saved first, so a crash cannot
 	// leave it promising files that are gone.
 	checkSpace := func() error {
-		if err := publish(j.Phase, "Check free space"); err != nil {
+		if err := publish(j.Phase, "Check free space", stepSpace); err != nil {
 			return err
 		}
 		err := ops.capacity(j)
@@ -84,12 +126,16 @@ func runJob(j *job, ops workflowOps) error {
 		// and a download resumed at boot does not ask services that are still
 		// starting. Once host changes have begun the saved identity stands,
 		// also when an earlier helper or a failed update recorded it.
+		mark(stepCheckNode)
+		if err := ops.save(j); err != nil {
+			return err
+		}
 		if err := ops.identify(j); err != nil {
 			return refuse(err)
 		}
 	}
 	if !j.Completed["staged"] {
-		if err := publish("staging", "Download and verify release files"); err != nil {
+		if err := publish("staging", "Download and verify release files", stepDownload); err != nil {
 			return err
 		}
 		// Staging touches no service, so its failure never quarantines, even
@@ -101,7 +147,7 @@ func runJob(j *job, ops workflowOps) error {
 			return err
 		}
 		j.Completed["staged"] = true
-		if err := publish("installing", "Prepare service changes"); err != nil {
+		if err := publish("installing", "Prepare service changes", stepPrepare); err != nil {
 			return err
 		}
 	} else if j.Phase == "installing" {
@@ -112,13 +158,11 @@ func runJob(j *job, ops workflowOps) error {
 		}
 	}
 	if j.Phase == "installing" {
-		if !j.HostChanges {
-			// Saved before the first guard. From here Cancel is refused and a
-			// failure quarantines the affected services.
-			j.HostChanges = true
-			if err := publish("installing", "Guard services"); err != nil {
-				return err
-			}
+		// Saved before the first guard. From here Cancel is refused and a
+		// failure quarantines the affected services.
+		j.HostChanges = true
+		if err := publish("installing", "Guard services", stepPrepare); err != nil {
+			return err
 		}
 		if err := ops.guard(affected); err != nil {
 			return fail(err)
@@ -127,22 +171,31 @@ func runJob(j *job, ops workflowOps) error {
 		stopOrder := slices.Clone(affected)
 		slices.Reverse(stopOrder)
 		for _, c := range stopOrder {
-			if err := publish("installing", "Stop "+string(c)); err != nil {
+			if err := publish("installing", "Stop "+string(c), stopStep(c)); err != nil {
 				return err
 			}
 			if err := ops.stop(c); err != nil {
 				return fail(err)
 			}
 		}
+		if err := publish("installing", "Install new files", stepInstall); err != nil {
+			return err
+		}
 		if err := ops.install(j); err != nil {
 			return fail(err)
 		}
-		if err := publish("starting", "Start updated services"); err != nil {
+		if err := publish("starting", "Start updated services", stepInstall); err != nil {
 			return err
 		}
 	}
 	if j.Phase != "committing" {
 		for _, c := range affected {
+			// Marked before the check below, so an interrupted start fails on
+			// its own step.
+			mark(startStep(c))
+			if err := ops.save(j); err != nil {
+				return err
+			}
 			if j.Started[c] {
 				// An uncertain start is never repeated automatically. If the
 				// process survived, verify it. Otherwise require explicit Retry.
@@ -152,21 +205,21 @@ func runJob(j *job, ops workflowOps) error {
 			} else {
 				j.Started[c] = true
 				j.MayHaveRun[c] = true
-				if err := publish("starting", "Start "+string(c)); err != nil {
+				if err := publish("starting", "Start "+string(c), startStep(c)); err != nil {
 					return err
 				}
 				if err := ops.start(c); err != nil {
 					return fail(fmt.Errorf("start %s: %w", c, err))
 				}
 			}
-			if err := publish("checking", "Check "+string(c)); err != nil {
+			if err := publish("checking", "Check "+string(c), startStep(c)); err != nil {
 				return err
 			}
 			if err := ops.health(j, c); err != nil {
 				return fail(err)
 			}
 		}
-		if err := publish("committing", "Finish VPN update"); err != nil {
+		if err := publish("committing", "Finish VPN update", stepFinish); err != nil {
 			return err
 		}
 	}
@@ -181,7 +234,7 @@ func runJob(j *job, ops workflowOps) error {
 		fmt.Fprintln(os.Stderr, "LND backup copy failed after the update:", err)
 	}
 	j.Error = ""
-	if err := publish("complete", "Update complete, reopen the TUI"); err != nil {
+	if err := publish("complete", "Update complete", stepFinish); err != nil {
 		return err
 	}
 	// Leftover downloads only cost space. They cannot fail a finished update.

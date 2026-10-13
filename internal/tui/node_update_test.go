@@ -222,7 +222,7 @@ func TestNodeUpdateMessagesReachOnlyTheirLiveOwner(t *testing.T) {
 	if owner.status.ID != client.status.ID || owner.busy != "" || other.status.ID != "" || poll == nil {
 		t.Fatal("hidden owner lost its update status or polling")
 	}
-	// Deliver the tick directly; the timer's duration is not this contract.
+	// Deliver the tick directly. The timer's duration is not this contract.
 	updated, request := m.Update(nodeUpdateTick{owner: owner})
 	m = updated.(Model)
 	if request == nil || owner.busy != "status" || other.busy != "" {
@@ -308,7 +308,8 @@ func readable(content []string, text string) bool {
 }
 
 // The screen has a fixed size. Whatever a failure says, the operator must be
-// able to read it and must see every action the screen accepts.
+// able to read its start, the next step and how to open the update log, and
+// must see every action the screen accepts.
 func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 	id := strings.Repeat("a", 64)
 	failed := func(text string, cancellable bool) protocol.Status {
@@ -325,6 +326,9 @@ func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 		fmt.Fprintf(&endless, "step %d: the unit reported a failure that fills most of one row of this screen\n", i)
 	}
 	summary := strings.TrimSpace(strings.Repeat("Updates LND for a channel-closing fix and restarts it. ", 9))
+	firstStop := strings.SplitN(stop, "\n", 2)[0]
+	changed := []string{firstStop, "Services may have been changed.", "Press l to see the update log."}
+	unchanged := []string{"not enough free space", "No services were changed.", "Press l to see the update log."}
 
 	cases := []struct {
 		name    string
@@ -337,26 +341,26 @@ func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 	}{
 		{name: "failure with line breaks after host changes", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) { s.status = failed(stop, false) },
-			buttons: []string{"Close", "Retry", "Select release"}, shown: strings.Split(stop, "\n")},
+			buttons: []string{"Close", "Retry", "Select release"}, shown: changed},
 		{name: "cancellable failure", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) { s.status = failed("not enough free space", true) },
-			buttons: []string{"Close", "Retry", "Cancel update", "Select release"}, shown: []string{"not enough free space"}},
+			buttons: []string{"Close", "Retry", "Cancel update", "Select release"}, shown: unchanged},
 		{name: "cancellable failure with a newer release", latest: "0.7.2",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) { s.status = failed("not enough free space", true) },
-			buttons: []string{"Close", "Retry", "Cancel update", "Review", "Select release"}, shown: []string{"not enough free space"}},
+			buttons: []string{"Close", "Retry", "Cancel update", "Review", "Select release"}, shown: unchanged},
 		{name: "long failure on one line", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) { s.status = failed(refusal, false) },
 			buttons: []string{"Close", "Retry", "Select release"}, shown: []string{refusal}},
 		{name: "failure longer than the screen", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) { s.status = failed(endless.String(), false) },
 			buttons: []string{"Close", "Retry", "Select release"},
-			shown:   []string{"step 0: the unit reported a failure", "journalctl -u " + protocol.WorkerUnit}},
+			shown:   []string{"step 0: the unit reported a failure", "Press l to see the update log."}},
 		{name: "saved failure, action error and status error together", latest: "0.7.2",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) {
 				s.status, s.err, s.statusErr = failed(stop, true), errors.New(refusal), errors.New(outage)
 			},
 			buttons: []string{"Close", "Retry", "Cancel update", "Review", "Select release"},
-			shown:   append(strings.Split(stop, "\n"), refusal, "update-status: helper unreachable")},
+			shown:   []string{firstStop, "Press l to see the update log.", refusal, "update-status: helper unreachable"}},
 		{name: "refused review without a job", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) { s.err = errors.New(refusal) },
 			buttons: []string{"Close", "Review", "Select release"}, shown: []string{refusal}},
