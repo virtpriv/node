@@ -12,21 +12,21 @@ import (
 
 // ── The freshness matrix ─────────────────────────────────
 //
-// The staging board's one failure mode is staleness: an
+// The staging board's one failure mode is staleness. An
 // operation changes reality and the board file carrying the old
 // fact survives. The defense is this table. It maps each verb
-// to the board facts that verb invalidates, and restage(verb)
-// — called by every handler as part of its postcondition — is
+// to the board facts that verb invalidates, and restage(verb),
+// called by every handler as part of its postcondition, is
 // driven BY the table, so the mapping is the mechanism, not
 // documentation that can drift from it.
 //
-// Reading the matrix: a verb not listed here invalidates no
-// staged fact (a package upgrade changes no staged credential).
-// One entry is conditional: service-action invalidates the
-// staged LND TLS certificate only when the unit acted on is
-// lnd — the handler applies the entry under that condition,
-// because the verb-keyed table cannot see verb parameters. The
-// unit tests in matrix_test.go walk every cell: every listed
+// A verb not listed here invalidates no staged fact (a package
+// upgrade changes no staged credential). One entry is
+// conditional. Service-action invalidates the staged LND TLS
+// certificate only when the unit acted on is lnd. The handler
+// applies the entry under that condition, because the
+// verb-keyed table cannot see verb parameters. The unit tests
+// in matrix_test.go walk every cell, so every listed
 // fact has a stager, every stager is reachable from a verb or
 // the installer's staging step, and the sets match this table
 // exactly.
@@ -65,11 +65,11 @@ var freshnessMatrix = map[string][]string{
 		paths.StateSyncthingAPIKey,
 	},
 	// An lnd start or restart can replace an expired TLS
-	// certificate; tlsautorefresh also detects configured SAN
+	// certificate, and tlsautorefresh also detects configured SAN
 	// changes at startup, so the staged copy must
 	// follow. CONDITIONAL: the handler applies this entry only
-	// when the unit acted on is lnd and the action is not stop
-	// — no other unit changes a staged fact.
+	// when the unit acted on is lnd and the action is not stop.
+	// No other unit changes a staged fact.
 	helper.VerbServiceAction: {
 		paths.StateLNDTLSCert,
 	},
@@ -79,8 +79,9 @@ var freshnessMatrix = map[string][]string{
 //
 // Every fact the TUI consumes has exactly one declared
 // freshness story, and matrix_test.go fails on any board file
-// without one — a contributor adding a new fact is stopped by
-// a red test asking "how does this stay fresh?". The stories:
+// without one. A contributor adding a new fact is stopped by
+// a red test asking "how does this stay fresh?". There are
+// four stories.
 //
 //   - watched: the fact's source can change autonomously (no
 //     operation of ours involved), and a systemd path unit on
@@ -88,17 +89,17 @@ var freshnessMatrix = map[string][]string{
 //     any human shows up to read a stale copy.
 //   - healed: the fact is a credential that fails CLOSED at
 //     the moment of use when stale (the cryptography rejects
-//     it, in front of the calling code), and the consumer
-//     repairs the failure by asking for a re-stage and
-//     retrying once, rate-limited process-wide.
+//     it, in front of the calling code). The consumer asks for
+//     a re-stage and retries once, rate-limited process-wide,
+//     whenever the first call of a new connection fails.
 //   - live-read: no copy exists at all. The fact is a display
 //     or safety observation whose staleness would produce no
 //     failure to repair from, so screens read it through a
 //     read-only verb at human cadence (liveReadFacts below).
 //   - static-by-decision: the fact changes only through
-//     covered operations (install, a menu verb); foreign
+//     covered operations (install, a menu verb). Foreign
 //     change is possible for root but is not promisable, and
-//     divergence surfaces as an honest, named error — never a
+//     divergence surfaces as an honest, named error, never a
 //     silent false success.
 const (
 	freshWatched  = "watched"
@@ -108,36 +109,40 @@ const (
 )
 
 // freshness declares the story for every BOARD file. These are
-// the machine-cadence facts (consumed per RPC call / per dial)
-// — the only ones that justify a cached copy at all.
+// the machine-cadence facts (consumed per RPC call or per dial),
+// the only ones that justify a cached copy at all.
 var freshness = map[string]string{
 	// Watched (the path unit), and additionally healed as the
-	// backstop: the connection self-heal in the TUI's LND
-	// client re-stages on persistent connection failure.
+	// backstop. LND replaces its certificate only when it
+	// starts, which ends the TUI's link. The new connection's
+	// first call then fails the TLS handshake and, rate limit
+	// permitting, re-stages both LND credentials.
 	paths.StateLNDTLSCert: freshWatched,
-	// LND rejects a stale macaroon on every call
-	// (Unauthenticated); the client reconnects and the dial-
-	// time repair re-stages both LND credentials.
+	// Re-staged by the repair on connect, at TUI startup,
+	// after a helper operation and after a lost link. LND
+	// refuses a stale macaroon with gRPC code Unknown, which an
+	// open connection does not treat as a lost link, so it is
+	// repaired at the next connection.
 	paths.StateLNDMacaroon: freshHealed,
 	// Regenerated only by a Syncthing (re)install, which the
 	// syncthing-install verb covers. The one foreign surface
-	// that can change it — the Syncthing web UI — produces an
+	// that can change it, the Syncthing web UI, produces an
 	// HTTP 403 that every REST wrapper now fails loudly on,
 	// so divergence is an immediate honest error.
 	paths.StateSyncthingAPIKey: freshStatic,
 	// Generated and staged by the one Syncthing install operation. Syncthing
 	// stores only a hash, so there is no later plaintext source to re-stage.
 	paths.StateSyncthingWebPassword: freshStatic,
-	// Written by the installer, fresh pair per install; if
+	// Written by the installer, fresh pair per install. If
 	// root replaces the server-side half by hand, bitcoind
 	// answers 401 and the TUI's error names the
 	// divergence. That residue is accepted, not healed.
 	paths.StateBitcoindRPCPass: freshStatic,
 }
 
-// liveReadFacts pins the fourth story: facts with NO board
+// liveReadFacts pins the fourth story, facts with NO board
 // copy, served live by a read-only verb. The map value is the
-// verb that serves the fact; matrix_test.go asserts each is on
+// verb that serves the fact. matrix_test.go asserts each is on
 // the menu, so retiring a verb without a replacement story is
 // a red test too.
 var liveReadFacts = map[string]string{
@@ -151,9 +156,9 @@ var liveReadFacts = map[string]string{
 }
 
 // restage refreshes every fact the given verb invalidates.
-// Failures here fail the VERB: an operation that succeeded but
+// Failures here fail the VERB. An operation that succeeded but
 // left a stale board would be exactly the silent divergence the
-// board's contract forbids — better to surface it now, with the
+// board's contract forbids. Better to surface it now, with the
 // journal naming the file.
 func restage(verb string) error {
 	for _, file := range freshnessMatrix[verb] {
