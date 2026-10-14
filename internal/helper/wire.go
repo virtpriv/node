@@ -132,8 +132,8 @@ type DirSizeParams struct {
 	Which string `json:"which"`
 }
 
-// DirSizeResult carries the measured size back, already
-// human-formatted ("12G").
+// DirSizeResult carries the measured size back, already formatted for
+// the screen ("12.3 GB").
 type DirSizeResult struct {
 	Size string `json:"size"`
 }

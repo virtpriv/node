@@ -12,23 +12,27 @@ package installer
 // still chosen during the build, because Bitcoin Core is installed then.
 
 import (
+	"math"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/virtpriv/node/internal/bytesize"
 )
 
-// Hardware is the measured machine. A zero field was not measured.
+// Hardware is the measured machine, in bytes. A zero field was not measured.
 type Hardware struct {
-	RAMMB       int // MemTotal
-	DiskTotalGB int // filesystem holding the data dir
+	MemoryBytes uint64 // MemTotal
+	DiskBytes   uint64 // filesystem holding the data dir
 }
 
 // The smallest machine the installer accepts. The README asks for 4 GB of
-// memory and 90 GB of disk. A "4 GB" plan reports about 3.8 GB and a
-// "90 GB" plan about 89 GB, so the limits leave room for how providers count.
+// memory and 90 GB of disk. The limits are lower so that a machine sold at
+// those sizes passes whether the provider counts in GB or GiB.
 const (
-	minMemoryMB = 3400
-	minDiskGB   = 80
+	minMemoryBytes = 3_400 * bytesize.MB
+	minDiskBytes   = 80 * bytesize.GB
 )
 
 // DetectHardware measures the machine. A measurement that fails leaves its
@@ -37,7 +41,7 @@ func DetectHardware() Hardware {
 	var hw Hardware
 
 	if data, err := os.ReadFile("/proc/meminfo"); err == nil {
-		hw.RAMMB = parseMemTotalMB(string(data))
+		hw.MemoryBytes = parseMemTotal(string(data))
 	}
 
 	// The bitcoin data dir may not exist yet on a fresh machine, so measure
@@ -45,17 +49,17 @@ func DetectHardware() Hardware {
 	for _, p := range []string{"/var/lib/bitcoin", "/var/lib", "/"} {
 		var st syscall.Statfs_t
 		if err := syscall.Statfs(p, &st); err == nil {
-			hw.DiskTotalGB = int(uint64(st.Blocks) *
-				uint64(st.Bsize) / 1_000_000_000)
+			hw.DiskBytes = uint64(st.Blocks) * uint64(st.Bsize)
 			break
 		}
 	}
 	return hw
 }
 
-// parseMemTotalMB extracts MemTotal from /proc/meminfo content, in MB. It
-// returns 0 when the line is absent or garbled.
-func parseMemTotalMB(meminfo string) int {
+// parseMemTotal extracts MemTotal from /proc/meminfo content, in bytes.
+// /proc/meminfo counts in units of 1024 bytes. It returns 0 when the line is
+// absent or garbled.
+func parseMemTotal(meminfo string) uint64 {
 	for _, line := range strings.Split(meminfo, "\n") {
 		if !strings.HasPrefix(line, "MemTotal:") {
 			continue
@@ -64,25 +68,23 @@ func parseMemTotalMB(meminfo string) int {
 		if len(fields) < 2 {
 			return 0
 		}
-		kb := 0
-		for _, c := range fields[1] {
-			if c < '0' || c > '9' {
-				return 0
-			}
-			kb = kb*10 + int(c-'0')
+		kb, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil || kb > math.MaxUint64/1024 {
+			return 0
 		}
-		return kb / 1024
+		return kb * 1024
 	}
 	return 0
 }
 
-// RecommendDbCache maps measured memory to a bitcoind dbcache in MB. The
-// table is conservative and stops at 2048, because sync gains flatten beyond
-// that on a node that also runs LND and Tor, which need their own memory.
+// RecommendDbCache maps measured memory to a bitcoind dbcache in MB. ramMB
+// counts units of 1,048,576 bytes, as Bitcoin Core's dbcache does. The table
+// is conservative and stops at 2048, because sync gains flatten beyond that
+// on a node that also runs LND and Tor, which need their own memory.
 //
-//	unknown or below 3 GB → 512
-//	3 GB or more          → 1024
-//	6 GB or more          → 2048
+//	unknown or below 3072 → 512
+//	3072 or more          → 1024
+//	6144 or more          → 2048
 func RecommendDbCache(ramMB int) int {
 	switch {
 	case ramMB >= 6144:
@@ -95,4 +97,4 @@ func RecommendDbCache(ramMB int) int {
 }
 
 // recommendedDbCache is the cache the installer records for this machine.
-func recommendedDbCache() int { return RecommendDbCache(detectHardware().RAMMB) }
+func recommendedDbCache() int { return RecommendDbCache(int(detectHardware().MemoryBytes >> 20)) }

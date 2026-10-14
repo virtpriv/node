@@ -176,7 +176,7 @@ func TestInteractiveFailureAndPublicationStopExecution(t *testing.T) {
 func TestInteractiveStartRecordsRecommendedCache(t *testing.T) {
 	original := detectHardware
 	t.Cleanup(func() { detectHardware = original })
-	detectHardware = func() Hardware { return Hardware{RAMMB: 6144} }
+	detectHardware = func() Hardware { return Hardware{MemoryBytes: 6144 << 20} }
 
 	ledger, err := newLedger(installContext{Network: "mainnet", InitialP2PMode: "tor"})
 	if err != nil {

@@ -29,6 +29,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/virtpriv/node/internal/bytesize"
 	"github.com/virtpriv/node/internal/host"
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/paths"
@@ -64,38 +65,32 @@ func machineResults(checkMachine bool) []PreflightResult {
 	}
 	hw := detectHardware()
 	logger.Install("Preflight measured memory %s, disk %s",
-		measured(hw.RAMMB, "MB"), measured(hw.DiskTotalGB, "GB"))
+		measured(hw.MemoryBytes), measured(hw.DiskBytes))
 	return machineChecks(hw)
 }
 
 // machineChecks compares the measured machine with the smallest one the
-// installer accepts. A value that was not measured passes.
+// installer accepts. The comparison is in bytes. A value that was not
+// measured passes.
 func machineChecks(hw Hardware) []PreflightResult {
 	var memory, disk error
-	if hw.RAMMB > 0 && hw.RAMMB < minMemoryMB {
-		memory = fmt.Errorf("found %s GB, choose a machine with 4 GB or more",
-			gigabytes(hw.RAMMB))
+	if hw.MemoryBytes > 0 && hw.MemoryBytes < minMemoryBytes {
+		memory = fmt.Errorf("found %s, choose a machine with 4 GB or more",
+			bytesize.Format(hw.MemoryBytes))
 	}
-	if hw.DiskTotalGB > 0 && hw.DiskTotalGB < minDiskGB {
-		disk = fmt.Errorf("found %d GB where /var/lib is, choose a machine with 90 GB or more",
-			hw.DiskTotalGB)
+	if hw.DiskBytes > 0 && hw.DiskBytes < minDiskBytes {
+		disk = fmt.Errorf("found %s where /var/lib is, choose a machine with 90 GB or more",
+			bytesize.Format(hw.DiskBytes))
 	}
 	return []PreflightResult{{checkNameMemory, memory}, {checkNameDisk, disk}}
 }
 
-// gigabytes shows MB as GB with one decimal, rounded down, so a machine just
-// below a limit never shows the limit itself. MB here are MiB, from the KiB
-// count in /proc/meminfo, so "3.4 GB" is the 3400 MB limit.
-func gigabytes(mb int) string {
-	return fmt.Sprintf("%d.%d", mb/1000, mb%1000/100)
-}
-
-// measured shows a measured value for the install log.
-func measured(value int, unit string) string {
-	if value == 0 {
+// measured shows a measured size for the install log.
+func measured(bytes uint64) string {
+	if bytes == 0 {
 		return "not measured"
 	}
-	return fmt.Sprintf("%d %s", value, unit)
+	return bytesize.Format(bytes)
 }
 
 // RunPreflight reports all failed checks before lifecycle initialization.

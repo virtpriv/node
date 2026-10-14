@@ -5,6 +5,7 @@ import (
 
 	"github.com/virtpriv/node/internal/app"
 	"github.com/virtpriv/node/internal/bitcoin"
+	"github.com/virtpriv/node/internal/bytesize"
 	"github.com/virtpriv/node/internal/theme"
 )
 
@@ -33,7 +34,10 @@ func channelAmountText(status *statusSnapshot, sats int64) string {
 }
 
 func bitcoinSize(o app.Observation[bitcoin.BlockchainInfo]) string {
-	return observationText(o, bitcoin.FormatSize(o.Value.SizeOnDisk))
+	if o.Value.SizeOnDisk <= 0 {
+		return observationText(o, "N/A")
+	}
+	return observationText(o, bytesize.Format(uint64(o.Value.SizeOnDisk)))
 }
 
 func nodeVersion(status *statusSnapshot) string {
@@ -63,5 +67,5 @@ func statusNotice(status *statusSnapshot) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return " " + theme.Warn.Render(strings.Join(parts, "; "))
+	return " " + theme.Warn.Render(strings.Join(parts, ", "))
 }

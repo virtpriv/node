@@ -229,10 +229,10 @@ func TestMachineChecks(t *testing.T) {
 		memoryFound string // empty means the memory check passes
 		diskFound   string // empty means the disk check passes
 	}{
-		{"a 4 GB plan with 90 GB", Hardware{RAMMB: 3824, DiskTotalGB: 89}, "", ""},
-		{"at both limits", Hardware{RAMMB: 3400, DiskTotalGB: 80}, "", ""},
-		{"just below both limits", Hardware{RAMMB: 3399, DiskTotalGB: 79}, "3.3 GB", "79 GB"},
-		{"a 2 GB plan with 60 GB", Hardware{RAMMB: 1948, DiskTotalGB: 60}, "1.9 GB", "60 GB"},
+		{"a 4 GB plan with 90 GB", Hardware{MemoryBytes: 4_071_620_608, DiskBytes: 94_300_000_000}, "", ""},
+		{"at both limits", Hardware{MemoryBytes: 3_400_000_000, DiskBytes: 80_000_000_000}, "", ""},
+		{"just below both limits", Hardware{MemoryBytes: 3_399_999_999, DiskBytes: 79_999_999_999}, "3.3 GB", "79.9 GB"},
+		{"a 2 GB plan with 60 GB", Hardware{MemoryBytes: 2_042_626_048, DiskBytes: 62_900_000_000}, "2.0 GB", "62.9 GB"},
 		{"nothing measured", Hardware{}, "", ""},
 	}
 	for _, tc := range cases {

@@ -3,10 +3,10 @@
 // Package bitcoin talks to the local bitcoind over its JSON-RPC
 // interface, authenticating with the node's own staged RPC
 // credential (see internal/host/rpcauth.go). Plain HTTP to
-// 127.0.0.1 with basic auth — bitcoind's RPC is loopback-only
-// on this box — and no privileged operation anywhere: the
-// password is read from the staging board, which the admin
-// user can read by group.
+// 127.0.0.1 with basic auth, because bitcoind's RPC listens only
+// on loopback on this machine, and no privileged operation
+// anywhere. The password is read from the staging board, which
+// the admin user can read by group.
 package bitcoin
 
 import (
@@ -32,8 +32,8 @@ type BlockchainInfo struct {
 	Progress float64
 	Synced   bool
 	// SizeOnDisk is bitcoind's own measure of its data
-	// footprint in bytes — which is why no privileged
-	// du of the data dir is needed for the status screen.
+	// footprint in bytes, which is why the status screen needs
+	// no privileged du of the data dir.
 	SizeOnDisk int64
 }
 
@@ -85,7 +85,7 @@ func GetSubversion(rpcPort int) (string, error) {
 }
 
 // rpcCall performs one JSON-RPC call against loopback. The
-// credential never touches argv or the environment: it is read
+// credential never touches argv or the environment. It is read
 // from the board and sent as HTTP basic auth.
 func rpcCall(rpcPort int, method string,
 	params []any, result any) error {
@@ -127,10 +127,10 @@ func rpcCallContext(ctx context.Context, rpcPort int, method string, params []an
 	switch resp.StatusCode {
 	case http.StatusUnauthorized:
 		// The staged password and the conf's rpcauth line are
-		// replaced together at install; disagreement means one
+		// replaced together at install. Disagreement means one
 		// of them was changed outside this app.
 		return fmt.Errorf(
-			"bitcoind rejected the staged RPC credential — " +
+			"bitcoind rejected the staged RPC credential because " +
 				"bitcoin.conf and the staged password disagree")
 	case http.StatusForbidden:
 		return fmt.Errorf(
@@ -202,12 +202,12 @@ func readFeeEstimate(target int, read func(any) error) (FeeEstimate, error) {
 	}
 	if resp.FeeRate <= 0 || len(resp.Errors) > 0 {
 		return FeeEstimate{}, fmt.Errorf("no estimate for target %d (%s)",
-			target, strings.Join(resp.Errors, "; "))
+			target, strings.Join(resp.Errors, ", "))
 	}
 	if resp.Blocks < 2 || resp.Blocks > 1008 {
 		return FeeEstimate{}, fmt.Errorf("invalid fee estimate target %d", resp.Blocks)
 	}
-	// bitcoind returns BTC/kvB; sat/vB = BTC/kvB × 1e8 / 1000.
+	// bitcoind returns BTC/kvB, and sat/vB is BTC/kvB × 1e8 / 1000.
 	satPerVB := resp.FeeRate * 100000
 	if satPerVB < 1 {
 		satPerVB = 1
@@ -217,21 +217,4 @@ func readFeeEstimate(target int, read func(any) error) (FeeEstimate, error) {
 
 func FormatProgress(progress float64) string {
 	return fmt.Sprintf("%.2f%%", progress*100)
-}
-
-// FormatSize renders a byte count the way the status screen
-// shows data-directory sizes ("12.3 GB").
-func FormatSize(bytes int64) string {
-	const gb = 1 << 30
-	const mb = 1 << 20
-	switch {
-	case bytes >= gb:
-		return fmt.Sprintf("%.1f GB", float64(bytes)/gb)
-	case bytes >= mb:
-		return fmt.Sprintf("%.0f MB", float64(bytes)/mb)
-	case bytes > 0:
-		return fmt.Sprintf("%d B", bytes)
-	default:
-		return "N/A"
-	}
 }

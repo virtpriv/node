@@ -6,35 +6,46 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/virtpriv/node/internal/bytesize"
 )
 
+// DiskInfo is the size and use of a filesystem in bytes. The screen formats
+// them.
 type DiskInfo struct {
-	Total   string
-	Used    string
-	Percent string
+	TotalBytes, UsedBytes uint64
+	Percent               string
 }
 
+// MemInfo is the size and use of memory in bytes. The screen formats them.
 type MemInfo struct {
-	Total   string
-	Used    string
-	Percent string
+	TotalBytes, UsedBytes uint64
+	Percent               string
 }
 
 func ReadDisk(ctx context.Context, path string) (DiskInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "df", "-h", "--output=size,used,pcent", path).Output()
+	out, err := exec.CommandContext(ctx, "df", "-B1", "--output=size,used,pcent", path).Output()
 	if err != nil {
 		return DiskInfo{}, err
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	return parseDisk(string(out))
+}
+
+// parseDisk reads df -B1 output, a header line and then size, used and
+// percent, the sizes in bytes.
+func parseDisk(out string) (DiskInfo, error) {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if len(lines) < 2 {
 		return DiskInfo{}, errors.New("missing disk usage")
 	}
@@ -42,7 +53,12 @@ func ReadDisk(ctx context.Context, path string) (DiskInfo, error) {
 	if len(f) != 3 {
 		return DiskInfo{}, errors.New("invalid disk usage")
 	}
-	return DiskInfo{f[0], f[1], f[2]}, nil
+	size, sizeErr := strconv.ParseUint(f[0], 10, 64)
+	used, usedErr := strconv.ParseUint(f[1], 10, 64)
+	if sizeErr != nil || usedErr != nil {
+		return DiskInfo{}, errors.New("invalid disk usage")
+	}
+	return DiskInfo{TotalBytes: size, UsedBytes: used, Percent: f[2]}, nil
 }
 
 func ReadMemory() (MemInfo, error) {
@@ -53,8 +69,9 @@ func ReadMemory() (MemInfo, error) {
 	return parseMemory(string(data))
 }
 
+// parseMemory reads /proc/meminfo, which counts in units of 1024 bytes.
 func parseMemory(data string) (MemInfo, error) {
-	var total, avail int
+	var total, avail uint64
 	haveTotal, haveAvail := false, false
 	for _, line := range strings.Split(data, "\n") {
 		if strings.HasPrefix(line, "MemTotal:") {
@@ -66,11 +83,11 @@ func parseMemory(data string) (MemInfo, error) {
 			haveAvail = n == 1 && err == nil
 		}
 	}
-	if !haveTotal || !haveAvail || total <= 0 || avail < 0 || avail > total {
+	if !haveTotal || !haveAvail || total == 0 || avail > total || total > math.MaxUint64/1024 {
 		return MemInfo{}, errors.New("invalid memory usage")
 	}
 	used := total - avail
-	return MemInfo{Total: fmtKB(total), Used: fmtKB(used),
+	return MemInfo{TotalBytes: total * 1024, UsedBytes: used * 1024,
 		Percent: fmt.Sprintf("%.0f%%", float64(used)/float64(total)*100)}, nil
 }
 
@@ -107,25 +124,35 @@ func ReadRebootRequired() (bool, error) {
 	return err == nil, err
 }
 
-// DirSize measures a directory tree with du. Root only: the
-// data directories it is used on belong to service users. The
-// unprivileged status screen gets the LND size through the
-// helper's dir-size operation (which calls this as root) and
-// the Bitcoin size from bitcoind's own RPC. It never calls
-// this directly.
+// DirSize measures the disk space a directory tree uses, with du, and
+// formats it for the screen, because the helper sends it as text. Root
+// only, because the data directories it is used on belong to service
+// users. The unprivileged status screen gets the LND size through the
+// helper's dir-size operation (which calls this as root) and the Bitcoin
+// size from bitcoind's own RPC. It never calls this directly.
 func DirSize(path string) string {
 	if os.Geteuid() != 0 {
 		return "N/A"
 	}
-	out, err := exec.Command("du", "-sh", path).CombinedOutput()
+	out, err := exec.Command("du", "-s", "-B1", path).Output()
 	if err != nil {
 		return "N/A"
 	}
-	f := strings.Fields(string(out))
-	if len(f) < 1 {
+	bytes, ok := parseDu(string(out))
+	if !ok {
 		return "N/A"
 	}
-	return f[0]
+	return bytesize.Format(bytes)
+}
+
+// parseDu reads du -s -B1 output, the bytes used, a tab and the path.
+func parseDu(out string) (uint64, bool) {
+	f := strings.Fields(out)
+	if len(f) < 1 {
+		return 0, false
+	}
+	bytes, err := strconv.ParseUint(f[0], 10, 64)
+	return bytes, err == nil
 }
 
 func IsServiceActive(name string) bool {
@@ -187,13 +214,6 @@ func ParseSourceIP(routeOutput string) string {
 	return ip.String()
 }
 
-func fmtKB(kb int) string {
-	if kb >= 1048576 {
-		return fmt.Sprintf("%.1f GB", float64(kb)/1048576.0)
-	}
-	return fmt.Sprintf("%.0f MB", float64(kb)/1024.0)
-}
-
 // SecurityUpdates is what Debian's daily apt job has recorded. LastRun is
 // zero until both the package list refresh and the upgrade have succeeded.
 // Configured is when the install wrote vpn's update settings.
@@ -252,7 +272,7 @@ func ReadUnitProperties(ctx context.Context, units []string, properties ...strin
 	return ParseUnitProperties(string(out)), nil
 }
 
-// ParseUnitProperties reads the output of systemctl show for several units:
+// ParseUnitProperties reads the output of systemctl show for several units,
 // one block of Key=value lines per unit, blocks separated by an empty line.
 // A block without an Id is left out.
 func ParseUnitProperties(out string) map[string]map[string]string {

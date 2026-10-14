@@ -42,8 +42,10 @@ func statusCollectorFixture(t *testing.T) *StatusCollector {
 	t.Cleanup(c.Close)
 	c.sources = statusSources{
 		service: func(context.Context, string) (bool, error) { return false, nil },
-		disk:    func(context.Context, string) (system.DiskInfo, error) { return system.DiskInfo{Used: "1G"}, nil },
-		memory:  func() (system.MemInfo, error) { return system.MemInfo{Used: "1G"}, nil },
+		disk: func(context.Context, string) (system.DiskInfo, error) {
+			return system.DiskInfo{UsedBytes: 1_000_000_000}, nil
+		},
+		memory: func() (system.MemInfo, error) { return system.MemInfo{UsedBytes: 1_000_000_000}, nil },
 		bitcoin: func(context.Context, int) (bitcoin.BlockchainInfo, error) {
 			return bitcoin.BlockchainInfo{Synced: true}, nil
 		},
@@ -80,7 +82,7 @@ func TestStatusPartialFailureAndRecovery(t *testing.T) {
 	c.sources.disk = func(context.Context, string) (system.DiskInfo, error) { return system.DiskInfo{}, failed }
 	partial := c.Collect(*config.Default(), true, rpc).Retain(good)
 	if partial.Balance.Fresh() || partial.Balance.Value.TotalBalance != "20000" || partial.Balance.ObservedAt != good.Balance.ObservedAt ||
-		partial.Channels.Fresh() || len(partial.Channels.Value.Channels) != 2 || !partial.Node.Fresh() || partial.Disk.Fresh() || partial.Disk.Value.Used != "1G" {
+		partial.Channels.Fresh() || len(partial.Channels.Value.Channels) != 2 || !partial.Node.Fresh() || partial.Disk.Fresh() || partial.Disk.Value.UsedBytes != 1_000_000_000 {
 		t.Fatal("partial failure lost last-good data or mislabeled its freshness")
 	}
 	if !good.Balance.Fresh() || len(good.Channels.Value.Channels) != 2 {
