@@ -80,7 +80,7 @@ func snapshotProtectedTree(t *testing.T, root string) []byte {
 
 func installStartupFixture(
 	t *testing.T, f *lifecycleFixture,
-	preflight func() (host.SSHObservation, error),
+	preflight func(checkMachine bool) (host.SSHObservation, error),
 ) (*int, *int) {
 	t.Helper()
 	preflightCalls := 0
@@ -91,9 +91,9 @@ func installStartupFixture(
 	deps.installLock = filepath.Join(deps.runtimeDir, "install.lock")
 	deps.fs = f.fs
 	deps.lookup = f.lookup
-	deps.runPreflight = func() (host.SSHObservation, error) {
+	deps.runPreflight = func(checkMachine bool) (host.SSHObservation, error) {
 		preflightCalls++
-		return preflight()
+		return preflight(checkMachine)
 	}
 	deps.initializeLifecycle = func(
 		lifecycleFS, identityLookup, installContext,
@@ -165,7 +165,7 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 		root := filepath.Dir(f.fs.varLibVPN)
 		before := snapshotProtectedTree(t, root)
 		preflightCalls, initializeCalls := installStartupFixture(
-			t, f, func() (host.SSHObservation, error) {
+			t, f, func(bool) (host.SSHObservation, error) {
 				return host.SSHObservation{}, errors.New("unexpected preflight")
 			})
 
@@ -225,7 +225,7 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 			root := filepath.Dir(f.fs.varLibVPN)
 			before := snapshotProtectedTree(t, root)
 			preflightCalls, initializeCalls := installStartupFixture(
-				t, f, func() (host.SSHObservation, error) {
+				t, f, func(bool) (host.SSHObservation, error) {
 					return host.SSHObservation{}, errors.New("unexpected preflight")
 				})
 
@@ -248,7 +248,7 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 		root := filepath.Dir(f.fs.varLibVPN)
 		before := snapshotProtectedTree(t, root)
 		preflightCalls, initializeCalls := installStartupFixture(
-			t, f, func() (host.SSHObservation, error) {
+			t, f, func(bool) (host.SSHObservation, error) {
 				return host.SSHObservation{}, checkArchitecture("arm64")
 			})
 
@@ -265,6 +265,38 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 			t.Fatal("unsupported architecture changed protected state")
 		}
 	})
+}
+
+// The image build runs on a builder machine whose memory and disk say
+// nothing about the machine the image is deployed to. The machine checks
+// run on every other pass, including first boot on the real machine.
+func TestRootPreflightChecksTheMachineExceptAtBake(t *testing.T) {
+	requireRootTestEnvironment(t)
+	for _, tc := range []struct {
+		name string
+		opts InstallOptions
+		want bool
+	}{
+		{"interactive", InstallOptions{}, true},
+		{"unattended", InstallOptions{Unattended: true}, true},
+		{"image build", InstallOptions{Unattended: true, UntilBake: true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newLifecycleFixture(t)
+			stop := errors.New("stop after preflight")
+			checked := !tc.want
+			installStartupFixture(t, f, func(checkMachine bool) (host.SSHObservation, error) {
+				checked = checkMachine
+				return host.SSHObservation{}, stop
+			})
+			if err := RunInstall(tc.opts, unexpectedInstallFrontend(t)); !errors.Is(err, stop) {
+				t.Fatalf("install did not stop at preflight: %v", err)
+			}
+			if checked != tc.want {
+				t.Fatalf("machine checked %v, want %v", checked, tc.want)
+			}
+		})
+	}
 }
 
 func TestBaseInstallStepsMatchLedgerSchema(t *testing.T) {
@@ -287,9 +319,9 @@ func TestBaseInstallStepsMatchLedgerSchema(t *testing.T) {
 }
 
 // The checkOS tests formerly here moved to preflight_test.go
-// (TestCheckOSRelease*), against the preflight's exactly-13 rule.
-// The NeedsInstall tests died with NeedsInstall itself: commit 6
-// replaced state-sniffing with explicit dispatch (IA-1-8).
+// (TestCheckOSRelease*), against the preflight's exactly-13 rule. The
+// NeedsInstall tests went with NeedsInstall, when `vpn install` stopped
+// inspecting the machine and ran only when asked.
 
 func unexpectedInstallFrontend(t *testing.T) InstallFrontend {
 	t.Helper()

@@ -27,16 +27,14 @@ func SetVersion(v string) { appVersion = v }
 
 // ── Main install flow ────────────────────────────────────
 //
-// `vpn install` — explicit dispatch only (IA-1-8's fix): this
-// runs because the operator asked, never because the binary
-// sniffed box state and decided for itself. The old
-// NeedsInstall() config/service-probe is deleted with the old
-// implicit flow.
+// `vpn install` runs only because the owner asked for it, never because the
+// binary inspected the machine and decided by itself. The old implicit flow
+// and its configuration and service probe are gone.
 //
-// The step model, resume planner, and step runner live in
-// engine.go; the ledger in ledger.go; the interactive session
-// in interactive.go; and presentation in internal/tui/install.
-// The TUI submits choices and observes the engine's progress.
+// The step model, resume planner and step runner live in engine.go, the
+// ledger in ledger.go, the interactive session in interactive.go, and
+// presentation in internal/tui/install. The TUI submits choices and
+// observes the engine's progress.
 
 // InstallOptions carries the `vpn install` command line.
 type InstallOptions struct {
@@ -46,10 +44,10 @@ type InstallOptions struct {
 	// Unattended runs without a TUI or prompts and generates a login password.
 	// SSH keys are configured by the owner after installation.
 	Unattended bool
-	// UntilBake runs only PhaseBake steps (image build
-	// pipeline, ruling iv). Requires Unattended. The run ends
-	// without terminal ledger status, without handoff, without the
-	// verification banner — first-boot steps are still owed.
+	// UntilBake runs only PhaseBake steps, for building an image. It
+	// requires Unattended. The run ends without terminal ledger status,
+	// handoff or verification banner, because first-boot steps are still
+	// owed.
 	UntilBake bool
 }
 
@@ -64,7 +62,7 @@ type installStartupDependencies struct {
 	lookup              identityLookup
 	acquireRunLock      func(string, string) (*os.File, error)
 	classifyLifecycle   func(lifecycleFS, identityLookup) (lifecycleState, error)
-	runPreflight        func() (host.SSHObservation, error)
+	runPreflight        func(checkMachine bool) (host.SSHObservation, error)
 	initializeLifecycle func(lifecycleFS, identityLookup, installContext) (*installLedger, error)
 }
 
@@ -94,10 +92,9 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 			"--until=bake requires --unattended (image build path)")
 	}
 
-	// Non-interactive package operations for the whole run
-	// (absorbed from the retired bootstrap): debconf prompts
-	// suppressed, needrestart auto-restarts services instead of
-	// showing its dialog mid-upgrade.
+	// Package operations run without prompts for the whole run, as the
+	// retired bootstrap script did. debconf asks nothing, and needrestart
+	// restarts services by itself instead of showing its dialog mid-upgrade.
 	os.Setenv("DEBIAN_FRONTEND", "noninteractive")
 	os.Setenv("NEEDRESTART_MODE", "a")
 	deps := newInstallStartupDependencies()
@@ -132,7 +129,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 	}
 
 	// Preflight is read-only and precedes every durable initialization.
-	_, err = deps.runPreflight()
+	_, err = deps.runPreflight(!opts.UntilBake)
 	if err != nil {
 		return err
 	}
@@ -252,12 +249,12 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 	}
 	switch res.Outcome {
 	case RunFailed:
-		// The runner already logged the failure line; the
-		// error surfaces to stderr via main.
+		// The runner already logged the failure line. main prints the
+		// error to stderr.
 		return fmt.Errorf("%s: %w", res.StepName, res.Err)
 	case RunInterrupted:
-		// The log trail must not just stop (commit-5 addendum):
-		// record how far the run got, and that a re-run resumes.
+		// The log must not just stop. Record how far the run got and that
+		// running again resumes.
 		logger.Install(
 			"install INTERRUPTED at step %d/%d: %s, "+
 				"run again to resume", res.StepNum, res.Total,
@@ -269,9 +266,9 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 	}
 
 	if opts.UntilBake {
-		// The bake slice completing is not the install
-		// completing: first-boot steps (identity, hardware fit,
-		// SSH hardening) are still owed on the deployed box.
+		// The bake slice completing is not the install completing. The
+		// first-boot steps (identity, SSH hardening and the rest) are still
+		// owed on the deployed machine.
 		logger.Install(
 			"bake phase complete (%d steps), install NOT marked "+
 				"complete, first-boot steps pending", res.Total)
@@ -286,13 +283,11 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 		}
 		if needsPasswordReapply(dec.GeneratedPassword,
 			dec.PasswordApplied, passwordPending()) {
-			// Fail-then-resume (live-run finding): an earlier
-			// unattended pass applied a generated password and
-			// died before the end-of-run print, so nobody has
-			// ever seen a working credential — and this pass
-			// ledger-skipped the identity step. Re-apply THIS
-			// pass's generated password now, so the line printed
-			// below is one that works.
+			// Seen in a live run. An earlier unattended pass applied a
+			// generated password and died before printing it, so nobody
+			// has seen a working password, and this pass skipped the
+			// identity step from the ledger. Apply this pass's generated
+			// password now, so the line printed below is one that works.
 			if err := host.SetLoginPassword(dec.Password); err != nil {
 				return fmt.Errorf(
 					"re-apply admin password: %w", err)
@@ -305,10 +300,9 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 	}
 
 	if dec.GeneratedPassword != "" && dec.PasswordApplied {
-		// Unattended fallback only (ruling vii), and only when
-		// this pass actually applied it (a ledger-skip with no
-		// pending marker means an older, already-shown password
-		// stands). Printed once, never logged.
+		// Unattended installs only, and only when this pass applied the
+		// password. A ledger skip with no pending marker means an older
+		// password, already shown, still stands. Printed once, never logged.
 		if err := printGeneratedPassword(dec.GeneratedPassword); err != nil {
 			return err
 		}
@@ -326,12 +320,10 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 		printConnectInstructions()
 		return nil
 	}
-	// The done screen offered a real choice (live-run fix):
-	// Enter opens the node TUI here via the identity drop;
-	// ctrl+c means exit, so exit — just leave the connect
-	// command behind. The handoff degrades to printed
-	// instructions, never to an error; the install is already
-	// recorded either way.
+	// The done screen offers a real choice. Enter opens the node TUI here as
+	// the owner, and ctrl+c exits, leaving the connect command behind. The
+	// handoff falls back to printed instructions, never to an error, because
+	// the install is already recorded either way.
 	if openConsole {
 		HandoffToAdminConsole()
 	} else {
@@ -421,7 +413,7 @@ func fillUnattendedDecisions(dec *InstallDecisions) error {
 	if err := fillGeneratedPassword(dec); err != nil {
 		return err
 	}
-	dec.DbCacheMB = RecommendDbCache(DetectHardware().RAMMB)
+	dec.DbCacheMB = recommendedDbCache()
 	return nil
 }
 
@@ -438,9 +430,9 @@ func fillGeneratedPassword(dec *InstallDecisions) error {
 
 // The package upgrade step calls these through variables so that a test can
 // stand in for apt and for Tor. After an upgrade only Tor's own readiness is
-// asked again. The exit probe of the Tor gate is not repeated: a restart of
-// Tor does not change whether torsocks intercepts, and the next download
-// refuses to run without Tor in any case.
+// asked again. The exit probe of the Tor gate is not repeated, because a
+// restart of Tor does not change whether torsocks intercepts, and the next
+// download refuses to run without Tor in any case.
 var (
 	refreshPackageLists   = host.RefreshPackageLists
 	upgradeBasePackages   = host.UpgradePackages
@@ -449,31 +441,28 @@ var (
 	}
 )
 
-// buildInstallSteps returns the initial-install step list. Every
-// step carries a stable Key (the ledger identity — versionless),
-// a Kind (gates re-run every pass), a Group where steps hand
-// ephemeral material to each other (see engine.go), and a Phase
-// (bake vs first-boot, ruling iv — assignments provisional until
-// the image-track session ratifies the map; identity/SSH steps
-// are first-boot per rulings vii/viii: they apply observed,
-// per-box state that an image build box cannot know).
+// buildInstallSteps returns the initial install step list. Every step
+// carries a stable Key, its identity in the ledger without a version, a Kind
+// (gates run again on every pass), a Group where steps hand temporary
+// material to each other (see engine.go), and a Phase, bake or first-boot.
+// The phases are provisional until the image work settles them. Identity
+// and SSH steps run at first boot, because they apply facts about the
+// deployed machine that an image build cannot know.
 //
-// Order (ruling xvi(b)): the firewall step sits immediately
-// after the single clearnet apt op, so default-deny lands before
-// anything else. Outbound stays default-allow so Tor can
-// bootstrap behind it; established SSH sessions are unaffected
-// by `ufw enable`. The base upgrade, which on a stale image is a
-// large download, waits until apt has been sent through Tor.
+// The firewall step comes right after the single apt operation outside Tor,
+// so denying incoming traffic is in place before anything else. Outgoing
+// traffic stays allowed so Tor can start behind it, and `ufw enable` does not
+// break established SSH sessions. The base upgrade, a large download on an
+// old image, waits until apt goes through Tor.
 func buildInstallSteps(
 	cfg *config.AppConfig, dec *InstallDecisions,
 ) []InstallStep {
-	// Pipeline working directories — created in each pipeline's
-	// first step, captured by closures, cleaned up in the final
-	// step. Random paths via os.MkdirTemp prevent symlink
-	// attacks. NOTE these closures are exactly why the btc/lnd
-	// triplets are resume-atomic Groups: the workdir path lives
-	// only in this process, so a resumed process can never
-	// re-enter a pipeline midway.
+	// Pipeline working directories are created in each pipeline's first
+	// step, captured by closures and removed in the final step. Random paths
+	// from os.MkdirTemp prevent symlink attacks. These closures are why the
+	// btc and lnd triplets are Groups that resume as a whole. The workdir
+	// path lives only in this process, so a resumed process can never enter
+	// a pipeline midway.
 	var btcWork, lndWork string
 
 	return []InstallStep{
@@ -508,15 +497,14 @@ func buildInstallSteps(
 				}
 				return host.EnableAndRestartTor()
 			}},
-		// HARD GATE (IA-2-K): no Tor-dependent network step below —
-		// apt over the socks5h proxy, every DownloadRequireTor —
-		// runs unless Tor routing is verified. See torgate.go.
-		// StepGate: re-verified on EVERY pass including resumes —
-		// no download step can execute in a pass whose Tor routing
-		// was not verified in that same pass. The torsocks-present
-		// assertion re-homed here from preflight (ruling xvi(c))
-		// also lives inside this step: post-Tor-install,
-		// pre-first-download.
+		// Hard gate. No network step below that depends on Tor, apt over
+		// the socks5h proxy or any DownloadRequireTor, runs unless Tor
+		// routing is verified. See torgate.go. As a StepGate it is checked
+		// again on every pass, resumes included, so no download runs in a
+		// pass whose Tor routing was not verified in that same pass. The
+		// check that torsocks is present moved here from preflight and
+		// runs inside this step, after Tor is installed and before the
+		// first download.
 		{Key: "tor.gate", Name: "Verifying Tor routing",
 			Kind: StepGate, Fn: verifyTorRouting},
 		{Key: "apt.torproxy", Name: "Configuring apt for Tor",
@@ -527,11 +515,11 @@ func buildInstallSteps(
 				return host.EnsureGPG()
 			}},
 		// Through Tor, like every later apt operation. The package lists
-		// are fetched again first: those from the first step can be days
-		// old when an install resumes, and a superseded package can no
-		// longer be downloaded. An upgrade can restart Tor, for example
-		// with a library Tor uses, so the step reports done only once Tor
-		// is ready again. The next step downloads through it.
+		// are fetched again first, because those from the first step can
+		// be days old when an install resumes, and a superseded package
+		// can no longer be downloaded. An upgrade can restart Tor, for
+		// example with a library Tor uses, so the step reports done only
+		// once Tor is ready again. The next step downloads through it.
 		{Key: "base.upgrade",
 			Name: "Upgrading base packages",
 			Fn: func() error {
@@ -661,10 +649,9 @@ func buildInstallSteps(
 		{Key: "state.stage", Phase: PhaseFirstBoot,
 			Name: "Staging node facts for the TUI",
 			Fn:   StageBoardAll},
-		// Formerly a post-TUI special case that warned but
-		// completed anyway (IA-1-16). As a real step it
-		// inherits the ledger, the completion gate, failure
-		// logging, and resume — the special case is dead.
+		// Once a special case after the TUI that warned but completed
+		// anyway. As a real step it gets the ledger, the completion gate,
+		// failure logging and resume, and the special case is gone.
 		{Key: "shellenv", Name: "Configuring shell environment",
 			Fn: func() error {
 				return host.SetupNodeCLI(cfg)

@@ -20,7 +20,6 @@ type wizardPhase int
 
 const (
 	wzPassword wizardPhase = iota
-	wzHardware
 	wzSteps
 	wzDone
 )
@@ -52,11 +51,6 @@ type wizardModel struct {
 	pwFocus   int // 0 = new, 1 = confirm, 2 = buttons
 	pwErr     string
 
-	dbIdx   int
-	hwFocus int // 0 = dbcache selector, 1 = buttons
-	hwBtn   int // index into hwButtons()
-	hwErr   string
-
 	failed bool
 
 	openConsole bool
@@ -66,17 +60,9 @@ func newWizardModel(info installer.InstallView, session installSession) wizardMo
 	m := wizardModel{info: info, session: session, steps: info.Steps}
 	m.pwInput = newWizardPasswordInput()
 	m.pwConfirm = newWizardPasswordInput()
-	for i, v := range info.DBCacheChoices {
-		if v == info.RecommendedDBCache {
-			m.dbIdx = i
-		}
-	}
-	switch {
-	case m.info.NeedIdentity:
+	if m.info.NeedIdentity {
 		m.enterPasswordScreen()
-	case m.info.NeedHardware:
-		m.phase = wzHardware
-	default:
+	} else {
 		m.phase = wzSteps
 	}
 	return m
@@ -100,7 +86,7 @@ func (m wizardModel) Init() tea.Cmd {
 }
 
 // A start resolves before input is enabled again. Success starts one reader
-// of the ordered progress stream; there are no overlapping attempts.
+// of the ordered progress stream. There are no overlapping attempts.
 func (m wizardModel) startSteps() tea.Cmd {
 	session, input := m.session, m.input
 	return func() tea.Msg { return wizardStartMsg{err: session.Start(input)} }
@@ -128,13 +114,15 @@ func (m wizardModel) Update(
 			if m.stopping {
 				return m, tea.Quit
 			}
-			if m.info.NeedHardware {
-				m.phase = wzHardware
-				m.hwErr = msg.err.Error()
-			} else {
-				m.phase = wzPassword
-				m.pwErr = msg.err.Error()
+			// Only the password screen offers a retry. Without one, the done
+			// screen reports the error.
+			if !m.info.NeedIdentity {
+				m.completeErr = "Could not start the install: " + msg.err.Error()
+				m.phase = wzDone
+				return m, nil
 			}
+			m.phase = wzPassword
+			m.pwErr = "Could not start the install: " + msg.err.Error()
 			return m, nil
 		}
 		m.input.Password = loginpassword.Password{}
@@ -159,8 +147,6 @@ func (m wizardModel) Update(
 		switch m.phase {
 		case wzPassword:
 			return m.updatePassword(msg)
-		case wzHardware:
-			return m.updateHardware(msg)
 		case wzDone:
 			if msg.String() == "enter" && !m.failed &&
 				m.completeErr == "" {
@@ -233,12 +219,6 @@ func (m wizardModel) updatePassword(
 		}
 		m.input.Password = pw
 		m.pwErr = ""
-		if m.info.NeedHardware {
-			m.hwFocus = 1
-			m.hwBtn = len(m.hwButtons()) - 1
-			m.phase = wzHardware
-			return m, nil
-		}
 		m.phase = wzSteps
 		return m, m.startSteps()
 	}
@@ -274,8 +254,8 @@ func (m wizardModel) viewPassword(p *wizPane) {
 		"After installation, you can import existing SSH keys from System, Accounts " +
 		"or add a key from System, SSH Keys.")
 	p.blank()
-	p.text("Use a password manager: generate it, store it " +
-		"there first. Minimum " +
+	p.text("Use a password manager. Generate the password and " +
+		"store it there first. Minimum " +
 		fmt.Sprintf("%d", loginpassword.MinLength) + " bytes.")
 	p.blank()
 
@@ -292,119 +272,9 @@ func (m wizardModel) viewPassword(p *wizPane) {
 		p.warn(m.pwErr)
 	}
 	p.blank()
-	p.buttons([]string{"Continue"}, 0, m.pwFocus == 2)
+	p.buttons([]string{"Start install"}, 0, m.pwFocus == 2)
 	p.blank()
 	p.hint("up/down: move   enter: select   ctrl+c: exit   paste works in both fields")
-}
-
-func (m wizardModel) hwButtons() []string {
-	if m.info.NeedIdentity {
-		return []string{"Back", "Start install"}
-	}
-	return []string{"Start install"}
-}
-
-func (m wizardModel) updateHardware(
-	msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	btns := m.hwButtons()
-	switch msg.String() {
-	case "up", "shift+tab":
-		if m.hwFocus == 1 {
-			m.hwFocus = 0
-		}
-	case "down", "tab":
-		if m.hwFocus == 0 {
-			m.hwFocus = 1
-			m.hwBtn = len(btns) - 1
-		}
-	case "left":
-		if m.hwFocus == 0 && m.dbIdx > 0 {
-			m.dbIdx--
-		}
-		if m.hwFocus == 1 && m.hwBtn > 0 {
-			m.hwBtn--
-		}
-	case "right":
-		if m.hwFocus == 0 && m.dbIdx < len(m.info.DBCacheChoices)-1 {
-			m.dbIdx++
-		}
-		if m.hwFocus == 1 && m.hwBtn < len(btns)-1 {
-			m.hwBtn++
-		}
-	case "enter":
-		if m.hwFocus == 0 {
-			m.hwFocus = 1
-			m.hwBtn = len(btns) - 1
-			return m, nil
-		}
-		if len(btns) == 2 && m.hwBtn == 0 {
-			m.enterPasswordScreen()
-			return m, nil
-		}
-		selected := m.info.DBCacheChoices[m.dbIdx]
-		m.input.DBCacheMB = selected
-		m.phase = wzSteps
-		return m, m.startSteps()
-	}
-	return m, nil
-}
-
-func fitMark(ok bool) string {
-	if ok {
-		return "ok"
-	}
-	return "below recommended"
-}
-
-func (m wizardModel) viewHardware(p *wizPane) {
-	p.header("Hardware fit")
-	p.blank()
-	p.text("What this box has, next to the recommended " +
-		"minimums for a node (2 CPU cores, 4+ GB RAM, " +
-		"90+ GB disk). Short of a minimum is a warning, " +
-		"not a refusal.")
-	p.blank()
-
-	ram := "unknown"
-	if m.info.Hardware.RAMMB > 0 {
-		ram = fmt.Sprintf("%.1f GB, %s",
-			float64(m.info.Hardware.RAMMB)/1024,
-			fitMark(m.info.Hardware.RAMMB >= m.info.Minimum.RAMMB))
-	}
-	disk := "unknown"
-	if m.info.Hardware.DiskTotalGB > 0 {
-		disk = fmt.Sprintf("%d GB total, %d GB free, %s",
-			m.info.Hardware.DiskTotalGB, m.info.Hardware.DiskFreeGB,
-			fitMark(m.info.Hardware.DiskTotalGB >= m.info.Minimum.DiskTotalGB))
-	}
-	p.kv("Memory (RAM)", ram)
-	p.kv("Disk", disk)
-	p.kv("CPU", fmt.Sprintf("%d cores, %s", m.info.Hardware.Cores,
-		fitMark(m.info.Hardware.Cores >= m.info.Minimum.Cores)))
-	p.blank()
-
-	rec := m.info.RecommendedDBCache
-	p.text("Bitcoin Core database cache (dbcache). Larger is " +
-		"faster for the initial sync; it must leave room for " +
-		"LND and Tor.")
-	p.blank()
-	choice := fmt.Sprintf("  ◂ %4d MB ▸", m.info.DBCacheChoices[m.dbIdx])
-	sty := theme.Value
-	if m.hwFocus == 0 {
-		sty = theme.Action
-	}
-	p.line(" " + sty.Render(choice) + theme.Dim.Render(
-		fmt.Sprintf("   (recommended for this box: %d MB)", rec)))
-	if m.hwErr != "" {
-		p.blank()
-		p.warn("Could not record this install decision: " + m.hwErr)
-	}
-	p.blank()
-	p.buttons(m.hwButtons(), m.hwBtn, m.hwFocus == 1)
-	p.blank()
-	p.hint("up/down: cache size or buttons   left/right: " +
-		"adjust or choose   enter: select")
 }
 
 func (m wizardModel) updateSteps(msg wizardProgressMsg) (tea.Model, tea.Cmd) {
@@ -467,9 +337,9 @@ func (m wizardModel) viewSteps(p *wizPane) {
 	renderStepRows(p, m.steps)
 	p.blank()
 	if m.stopping {
-		p.hint("Stopping after the current step is recorded; keep this terminal open.")
+		p.hint("Stopping after the current step is recorded. Keep this terminal open.")
 	} else {
-		p.hint("ctrl+c: stop after the current step; a later install command resumes")
+		p.hint("ctrl+c: stop after the current step, a later install command resumes")
 	}
 }
 
@@ -487,7 +357,7 @@ func (m wizardModel) viewDone(p *wizPane) {
 		renderStepRows(p, m.steps)
 		p.blank()
 		p.warn("Installation stopped after a step failed. Inspect the reported problem before running " +
-			"'sudo vpn install' again; it resumes from the " +
+			"'sudo vpn install' again. It resumes from the " +
 			"first incomplete step.")
 		p.blank()
 		p.hint("ctrl+c: exit")
@@ -516,7 +386,7 @@ func (m wizardModel) viewDone(p *wizPane) {
 		"verify your access.")
 	p.blank()
 	p.hint("enter: open the node TUI   ctrl+c: exit to " +
-		"your shell (your install is saved; connect any time " +
+		"your shell (your install is saved, connect any time " +
 		"with the command above)")
 }
 
@@ -550,11 +420,6 @@ func (p *wizPane) text(s string) {
 		p.line(" " + theme.Label.Render(l))
 	}
 }
-func (p *wizPane) kv(k, v string) {
-	p.line(" " + theme.Label.Render(
-		fmt.Sprintf("  %-14s", k+":")) +
-		theme.Value.Render(" "+v))
-}
 func (p *wizPane) input(label, view string, focused bool) {
 	sty := theme.Label
 	if focused {
@@ -586,8 +451,6 @@ func (m wizardModel) View() tea.View {
 	switch m.phase {
 	case wzPassword:
 		m.viewPassword(p)
-	case wzHardware:
-		m.viewHardware(p)
 	case wzSteps:
 		m.viewSteps(p)
 	case wzDone:
@@ -595,7 +458,7 @@ func (m wizardModel) View() tea.View {
 	}
 
 	title := theme.Title.Render(
-		"Virtual Private Node — Install")
+		"Install Virtual Private Node")
 	box := theme.Box.Width(bw).Render(
 		strings.Join(p.lines, "\n"))
 	full := lipgloss.JoinVertical(lipgloss.Center,
@@ -608,7 +471,7 @@ func (m wizardModel) View() tea.View {
 	return v
 }
 
-// Run presents a session; the installer retains execution and lock ownership.
+// Run presents a session. The installer keeps the execution and the lock.
 func Run(info installer.InstallView, session *installer.InstallSession) (bool, error) {
 	// Root installation uses the built-in theme, not user-owned preferences.
 	theme.Init(true)

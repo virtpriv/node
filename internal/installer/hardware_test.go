@@ -48,20 +48,11 @@ func TestRecommendDbCache(t *testing.T) {
 	}
 }
 
-// Every recommendation must be selectable on the hardware
-// screen — the recommendation is one of the cycle choices.
-func TestRecommendationsAreChoices(t *testing.T) {
+// Every recommendation must be a value the install record accepts.
+func TestRecommendationsAreRecordable(t *testing.T) {
 	for _, ram := range []int{0, 2048, 4096, 8192} {
-		rec := RecommendDbCache(ram)
-		found := false
-		for _, c := range dbCacheChoices {
-			if c == rec {
-				found = true
-			}
-		}
-		if !found {
-			t.Errorf("recommendation %d for %d MB not in "+
-				"choices %v", rec, ram, dbCacheChoices)
+		if rec := RecommendDbCache(ram); !validDbCache(rec) {
+			t.Errorf("recommendation %d for %d MB is not recordable", rec, ram)
 		}
 	}
 }

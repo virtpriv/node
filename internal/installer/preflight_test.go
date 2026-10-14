@@ -67,9 +67,9 @@ func TestCheckOSReleaseRefuses(t *testing.T) {
 	}
 }
 
-// The old checkOS accepted 13-or-newer via substring matching;
-// this guards the two deliberate tightenings (exactly 13, and
-// line-anchored ID parsing) against regression.
+// The old checkOS accepted 13 or newer by matching substrings. This guards
+// the two deliberate tightenings, exactly 13 and ID parsed from the start of
+// a line, against regression.
 func TestCheckOSReleaseExactlyThirteen(t *testing.T) {
 	for _, ver := range []string{"14", "15", "12", "11"} {
 		content := "ID=debian\nVERSION_ID=\"" + ver + "\"\n"
@@ -214,5 +214,42 @@ func TestUfwCandidateVerdict(t *testing.T) {
 
 	if err := ufwCandidateVerdict(""); err == nil {
 		t.Error("empty output accepted")
+	}
+}
+
+// ── machineChecks ────────────────────────────────────────
+
+// A machine below either limit is refused, and the refusal says what was
+// found. At the limit it passes. A value that could not be measured (zero) is
+// not grounds for refusal.
+func TestMachineChecks(t *testing.T) {
+	cases := []struct {
+		name        string
+		hw          Hardware
+		memoryFound string // empty means the memory check passes
+		diskFound   string // empty means the disk check passes
+	}{
+		{"a 4 GB plan with 90 GB", Hardware{RAMMB: 3824, DiskTotalGB: 89}, "", ""},
+		{"at both limits", Hardware{RAMMB: 3400, DiskTotalGB: 80}, "", ""},
+		{"just below both limits", Hardware{RAMMB: 3399, DiskTotalGB: 79}, "3.3 GB", "79 GB"},
+		{"a 2 GB plan with 60 GB", Hardware{RAMMB: 1948, DiskTotalGB: 60}, "1.9 GB", "60 GB"},
+		{"nothing measured", Hardware{}, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			results := machineChecks(tc.hw)
+			if len(results) != 2 || results[0].Name != checkNameMemory || results[1].Name != checkNameDisk {
+				t.Fatalf("checks %+v, want memory then disk", results)
+			}
+			for i, found := range []string{tc.memoryFound, tc.diskFound} {
+				err := results[i].Err
+				if (err == nil) != (found == "") {
+					t.Fatalf("%s: error %v, want refusal %v", results[i].Name, err, found != "")
+				}
+				if err != nil && !strings.Contains(err.Error(), found) {
+					t.Fatalf("%s: refusal %q does not say it found %s", results[i].Name, err, found)
+				}
+			}
+		})
 	}
 }

@@ -58,6 +58,8 @@ funds.
 - Fresh Debian 13 amd64 machine
 - 2 (v)CPU, 4+ GB RAM, 90+ GB total SSD. LND safety-stops at 10% free,
   leaving about 81 GB of operational usage on a 90 GB filesystem.
+- The installer refuses a machine with less than 3.4 GB of memory or 80 GB
+  of disk, before it changes anything.
 
 Running at home or on a VPS? See [Hosting Your Node](docs/hosting.md) for what
 differs.
@@ -76,8 +78,8 @@ differs.
 
 The installer takes a transient whole-run lock, checks the environment, and
 refuses with a full report before starting durable installation work if the box
-is not one it can trust. It then walks you through access setup and hardware
-fit, installs Bitcoin Core and LND with every download after Tor
+is not one it can trust. It then asks for the owner account's password,
+installs Bitcoin Core and LND with every download after Tor
 routed through Tor and verified before install, and drops you
 straight into the TUI. During interactive installation, Ctrl+C requests a stop
 after the active step and its progress record finish. Keep the terminal open

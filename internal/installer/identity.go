@@ -15,26 +15,24 @@ import (
 
 // ── Applying the decisions ───────────────────────────────
 
-// InstallDecisions carries the wizard's answers into the engine
+// InstallDecisions carries the install's decisions into the engine
 // steps. Collected before the steps run (interactively or by the
 // unattended defaults) and read by step closures at execution.
 type InstallDecisions struct {
 	// Password is validated using the initial login-password policy.
 	Password loginpassword.Password
-	// GeneratedPassword is set only on the --unattended path
-	// (ruling vii: random generation survives only there);
-	// printed once at the end of the run, never logged.
+	// GeneratedPassword is set only on the --unattended path, the only
+	// place a random password is generated. It is printed once at the end
+	// of the run, never logged.
 	GeneratedPassword string
-	// PasswordApplied is set by the identity step after
-	// chpasswd succeeded. The generated password is printed
-	// ONLY when this is set: on a resume that ledger-skips the
-	// identity step (or an --until=bake run that filters it
-	// out), this pass generated a password that was never
-	// applied — printing it would hand the operator a
-	// credential that does not work.
+	// PasswordApplied is set by the identity step after chpasswd
+	// succeeded. The generated password is printed only when this is set.
+	// On a resume that skips the identity step from the ledger, or an
+	// --until=bake run that leaves it out, this pass generated a password
+	// that was never applied, and printing it would hand the owner a
+	// password that does not work.
 	PasswordApplied bool
-	// DbCacheMB is the hardware-fit step's confirmed dbcache
-	// (ruling viii).
+	// DbCacheMB is the database cache recorded for this install.
 	DbCacheMB int
 }
 
@@ -77,8 +75,8 @@ func provisionIdentityAccess(dec *InstallDecisions, ops identityAccessOps) error
 }
 
 // generateAdminPassword returns a random alphanumeric password
-// for the --unattended fallback: 25 characters from a 62-symbol
-// alphabet (~148 bits). Uses rejection sampling for uniformity.
+// for the --unattended fallback, 25 characters from a 62-symbol
+// alphabet (about 148 bits). Rejection sampling keeps it uniform.
 func generateAdminPassword() string {
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ" +
 		"abcdefghijklmnopqrstuvwxyz0123456789"

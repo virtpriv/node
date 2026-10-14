@@ -3,7 +3,6 @@ package installer
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"sync"
 
 	"github.com/virtpriv/node/internal/loginpassword"
@@ -11,18 +10,15 @@ import (
 )
 
 // InstallFrontend presents one root installation session. Returning requests
-// a graceful stop; the installer joins admitted work before releasing its lock.
+// a graceful stop, and the installer joins admitted work before releasing its lock.
 type InstallFrontend func(InstallView, *InstallSession) (openConsole bool, err error)
 
 // InstallView contains observations and presentation data, never ledger access
 // or executable installation steps.
 type InstallView struct {
-	NeedIdentity, NeedHardware bool
-	Hardware, Minimum          Hardware
-	DBCacheChoices             []int
-	RecommendedDBCache         int
-	Steps                      []InstallStepView
-	Address                    string
+	NeedIdentity bool
+	Steps        []InstallStepView
+	Address      string
 }
 
 // InstallStepView describes a step without granting execution authority.
@@ -32,10 +28,10 @@ type InstallStepView struct {
 	Err    error
 }
 
-// InteractiveInput contains the operator's confirmed installation choices.
+// InteractiveInput holds the owner's password, the one choice the interactive
+// install asks for.
 type InteractiveInput struct {
-	Password  loginpassword.Password
-	DBCacheMB int
+	Password loginpassword.Password
 }
 
 // InstallEvent reports ordered progress or the engine's terminal outcome.
@@ -49,34 +45,40 @@ type InstallEvent struct {
 }
 
 // InstallSession owns one execution, independently of progress consumption.
-// Stop prevents admission of another step; it does not kill an active subprocess
+// Stop prevents admission of another step. It does not kill an active subprocess
 // or undo its changes. Forced process death still relies on lifecycle resume.
 type InstallSession struct {
-	mu                         sync.Mutex
-	started, stopped           bool
-	runner                     *stepRunner
-	dec                        *InstallDecisions
-	persistDBCache             func(int) error
-	complete                   func() error
-	needIdentity, needHardware bool
-	events                     chan InstallEvent
-	done                       chan struct{}
-	result                     RunResult
-	completionErr              error
+	mu                      sync.Mutex
+	started, stopped        bool
+	runner                  *stepRunner
+	dec                     *InstallDecisions
+	persistDBCache          func(int) error
+	complete                func() error
+	needIdentity, needCache bool
+	// cacheMB is measured once, so a retried Start records the same value.
+	cacheMB       int
+	events        chan InstallEvent
+	done          chan struct{}
+	result        RunResult
+	completionErr error
 }
 
 func newInstallSession(r *stepRunner, dec *InstallDecisions,
 	persistDBCache func(int) error, complete func() error,
 ) *InstallSession {
-	return &InstallSession{
+	s := &InstallSession{
 		runner: r, dec: dec, persistDBCache: persistDBCache, complete: complete,
 		needIdentity: r.willRun("identity.access"),
-		needHardware: r.willRun("btc.install") && r.ledger.Context.DbCacheMB == nil,
+		needCache:    r.willRun("btc.install") && r.ledger.Context.DbCacheMB == nil,
 		// Each step emits running and finished, followed by one final event.
 		// A closed or failed frontend cannot block the installation worker.
 		events: make(chan InstallEvent, 2*len(r.steps)+1), done: make(chan struct{}),
 		result: classifyRun(r.steps, false, false, 0),
 	}
+	if s.needCache {
+		s.cacheMB = recommendedDbCache()
+	}
+	return s
 }
 
 // Start validates and freezes choices before admitting the first step. It may
@@ -98,11 +100,8 @@ func (s *InstallSession) Start(input InteractiveInput) error {
 			return err
 		}
 	}
-	if s.needHardware {
-		if !slices.Contains(dbCacheChoices, input.DBCacheMB) {
-			return errors.New("unsupported database cache choice")
-		}
-		if err := s.persistDBCache(input.DBCacheMB); err != nil {
+	if s.needCache {
+		if err := s.persistDBCache(s.cacheMB); err != nil {
 			return err
 		}
 	}
@@ -172,7 +171,7 @@ func (s *InstallSession) run() {
 	// a stop request raced with the last step. Completion is engine-owned.
 	s.result = classifyRun(s.runner.steps, true, false, len(s.runner.steps))
 	if err := s.complete(); err != nil {
-		s.completionErr = fmt.Errorf("install steps complete but finalization failed: %w; run sudo vpn install again to retry", err)
+		s.completionErr = fmt.Errorf("install steps complete but finalization failed: %w. Run sudo vpn install again to retry", err)
 	}
 }
 
@@ -189,13 +188,9 @@ func runInstallInteractive(s *InstallSession, view InstallView, frontend Install
 }
 
 func installView(s *InstallSession) InstallView {
-	hw := DetectHardware()
 	view := InstallView{
-		NeedIdentity: s.needIdentity, NeedHardware: s.needHardware,
-		Hardware:       hw,
-		Minimum:        Hardware{RAMMB: requiredRAMMB, DiskTotalGB: requiredDiskGB, Cores: requiredCores},
-		DBCacheChoices: slices.Clone(dbCacheChoices), RecommendedDBCache: RecommendDbCache(hw.RAMMB),
-		Address: system.PublicIPv4(),
+		NeedIdentity: s.needIdentity,
+		Address:      system.PublicIPv4(),
 	}
 	for _, step := range s.runner.steps {
 		view.Steps = append(view.Steps, InstallStepView{Name: step.Name})

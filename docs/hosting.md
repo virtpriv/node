@@ -97,5 +97,6 @@ home even more, because you can reach it only from your home network.
 ## Requirements
 
 Both need a fresh Debian 13 amd64 machine with 2 CPUs, 4 GB of RAM or more
-and 90 GB of SSD storage or more. At home, use a machine dedicated
+and 90 GB of SSD storage or more. The installer refuses a machine with less
+than 3.4 GB of memory or 80 GB of disk. At home, use a machine dedicated
 to the Node. See [Release Verification](verifying.md) to install.

@@ -2,22 +2,21 @@
 
 package installer
 
-// Install preflight (sprint principle 3): before the install engine
-// mutates anything, assert the environmental bets this binary makes
-// and refuse to proceed if the box is not one we can trust. All
-// checks run and every failure is reported at once, so the operator
-// fixes everything in one round trip.
+// Install preflight. Before the install engine changes anything, check
+// what this binary relies on and refuse a machine it cannot trust. Every
+// check runs, apart from the machine checks during an image build, and every
+// failure is reported at once, so the owner fixes everything in one round
+// trip.
 //
-// Placement: called at the top of RunInstall(), under root dispatch
-// (`sudo vpn install`), before the wizard opens. A refused box is
-// untouched — no user created, no config written, no service
-// restarted.
+// RunInstall calls it under root (`sudo vpn install`) before the wizard
+// opens. A refused machine keeps its configuration. No user is created, no
+// configuration is written and no service is restarted.
 //
 // Installation is already privileged, so preflight does not require a sudo
 // grant for the invoking account. The installer verifies the new owner's sudo
 // policy after applying its password and before disabling root SSH.
 // Tor availability is checked after package installation. Initial SSH policy
-// must be observable; later SSH and firewall steps verify their own inputs.
+// must be observable. Later SSH and firewall steps verify their own inputs.
 
 import (
 	"context"
@@ -42,7 +41,7 @@ type PreflightResult struct {
 	Err  error
 }
 
-// Check names double as report labels — short, present-tense facts.
+// Check names double as report labels, short facts in the present tense.
 const (
 	checkNameDebian    = "Debian version is exactly 13"
 	checkNameArch      = "CPU architecture is amd64"
@@ -50,13 +49,60 @@ const (
 	checkNameDpkg      = "package system is healthy (dpkg --audit)"
 	checkNameUfw       = "ufw is installable"
 	checkNameSSHState  = "ssh daemon state is observable"
+	checkNameMemory    = "memory is at least 3.4 GB"
+	checkNameDisk      = "disk is at least 80 GB"
 )
+
+// detectHardware is a variable so tests can stand in for the machine.
+var detectHardware = DetectHardware
+
+// machineResults measures the machine and checks it, unless the run builds an
+// image on a builder machine. The measured values go to the install log.
+func machineResults(checkMachine bool) []PreflightResult {
+	if !checkMachine {
+		return nil
+	}
+	hw := detectHardware()
+	logger.Install("Preflight measured memory %s, disk %s",
+		measured(hw.RAMMB, "MB"), measured(hw.DiskTotalGB, "GB"))
+	return machineChecks(hw)
+}
+
+// machineChecks compares the measured machine with the smallest one the
+// installer accepts. A value that was not measured passes.
+func machineChecks(hw Hardware) []PreflightResult {
+	var memory, disk error
+	if hw.RAMMB > 0 && hw.RAMMB < minMemoryMB {
+		memory = fmt.Errorf("found %s GB, choose a machine with 4 GB or more",
+			gigabytes(hw.RAMMB))
+	}
+	if hw.DiskTotalGB > 0 && hw.DiskTotalGB < minDiskGB {
+		disk = fmt.Errorf("found %d GB where /var/lib is, choose a machine with 90 GB or more",
+			hw.DiskTotalGB)
+	}
+	return []PreflightResult{{checkNameMemory, memory}, {checkNameDisk, disk}}
+}
+
+// gigabytes shows MB as GB with one decimal, rounded down, so a machine just
+// below a limit never shows the limit itself. MB here are MiB, from the KiB
+// count in /proc/meminfo, so "3.4 GB" is the 3400 MB limit.
+func gigabytes(mb int) string {
+	return fmt.Sprintf("%d.%d", mb/1000, mb%1000/100)
+}
+
+// measured shows a measured value for the install log.
+func measured(value int, unit string) string {
+	if value == 0 {
+		return "not measured"
+	}
+	return fmt.Sprintf("%d %s", value, unit)
+}
 
 // RunPreflight reports all failed checks before lifecycle initialization.
 // The returned SSH observation describes preflight time, not the effective
 // owner policy that installation will establish and verify later.
-func RunPreflight() (host.SSHObservation, error) {
-	results, obs := runPreflightChecks()
+func RunPreflight(checkMachine bool) (host.SSHObservation, error) {
+	results, obs := runPreflightChecks(checkMachine)
 
 	failed := 0
 	for _, r := range results {
@@ -64,8 +110,8 @@ func RunPreflight() (host.SSHObservation, error) {
 			failed++
 		}
 	}
-	// Warnings never refuse; they are printed and logged so the
-	// operator can judge them.
+	// Warnings never refuse. They are printed and logged so the owner can
+	// judge them.
 	for _, w := range preflightWarnings() {
 		fmt.Fprintf(os.Stderr, "\n  WARNING: %s\n", w)
 		logger.Install("Preflight WARNING: %s", w)
@@ -84,21 +130,24 @@ func RunPreflight() (host.SSHObservation, error) {
 		}
 	}
 	return obs, fmt.Errorf(
-		"preflight: %d of %d checks failed — nothing was changed",
+		"preflight: %d of %d checks failed, nothing was changed",
 		failed, len(results))
 }
 
-// runPreflightChecks executes the checks in order. All checks run
-// unconditionally — root dispatch removed the sudo dependency that
-// used to force failed-as-skipped coupling between checks.
-func runPreflightChecks() ([]PreflightResult, host.SSHObservation) {
+// runPreflightChecks runs every check in order, except the machine checks
+// during an image build. Running as root removed the sudo dependency that
+// once made a failed check skip the checks after it.
+func runPreflightChecks(checkMachine bool) ([]PreflightResult, host.SSHObservation) {
 	results := []PreflightResult{
 		{checkNameDebian, checkDebian13()},
 		{checkNameArch, checkDebianArchitecture()},
-		{checkNameIOLogging, checkSudoersIOLogging()},
-		{checkNameDpkg, checkDpkgAudit()},
-		{checkNameUfw, checkUfwInstallable()},
 	}
+	results = append(results, machineResults(checkMachine)...)
+	results = append(results,
+		PreflightResult{checkNameIOLogging, checkSudoersIOLogging()},
+		PreflightResult{checkNameDpkg, checkDpkgAudit()},
+		PreflightResult{checkNameUfw, checkUfwInstallable()},
+	)
 	obs, obsErr := host.ObserveInitialSSHState()
 	results = append(results,
 		PreflightResult{checkNameSSHState, obsErr})
@@ -134,7 +183,7 @@ func preflightWarnings() []string {
 	if fi, err := os.Stat(paths.SudoersDir); err == nil &&
 		fi.Mode().Perm()&0o004 != 0 {
 		ws = append(ws, fmt.Sprintf(
-			"%s has mode %o; the certified Debian baseline uses 750. VPN leaves host-managed permissions unchanged.",
+			"%s has mode %o, while the certified Debian baseline uses 750. VPN leaves host-managed permissions unchanged.",
 			paths.SudoersDir, fi.Mode().Perm()))
 	}
 	return ws
@@ -142,14 +191,12 @@ func preflightWarnings() []string {
 
 // ── Check 1: OS ──────────────────────────────────────────
 
-// checkDebian13 asserts /etc/os-release says ID=debian AND
-// VERSION_ID exactly 13 (ruling ix). Exactly, not at-least:
-// every external interface this binary invokes (sshd -T -C flags,
-// chpasswd, dpkg, apt) is [LIVE]-verified against the package
-// versions frozen in Debian 13; a future Debian 14 ships new
-// versions that may falsify those contracts (precedent: the
-// commit-2 -G/-C flag rejection). Debian 14 support = re-verify
-// the interface inventory, then widen this check in a release.
+// checkDebian13 requires /etc/os-release to say ID=debian and VERSION_ID
+// exactly 13, not 13 or later. Every outside command this binary runs
+// (sshd -T -C flags, chpasswd, dpkg, apt) was verified on a live system with
+// the package versions of Debian 13. Debian 14 ships new versions that may
+// break those commands. Supporting Debian 14 means verifying the command list
+// again, then widening this check in a release.
 func checkDebian13() error {
 	data, err := os.ReadFile(paths.OSRelease)
 	if err != nil {
@@ -158,9 +205,9 @@ func checkDebian13() error {
 	return checkOSRelease(string(data))
 }
 
-// checkOSRelease parses os-release content. Pure function —
-// unit-tested. Line-anchored prefix parsing, not substring search,
-// so ID_LIKE=debian (Ubuntu and friends) can never match.
+// checkOSRelease parses os-release content without side effects, which the
+// tests cover. It matches keys at the start of a line, not substrings, so
+// ID_LIKE=debian (Ubuntu and others) can never match.
 func checkOSRelease(content string) error {
 	id, versionID := "", ""
 	for _, raw := range strings.Split(content, "\n") {
@@ -179,24 +226,23 @@ func checkOSRelease(content string) error {
 	if versionID != "13" {
 		return fmt.Errorf(
 			"this release is verified for Debian 13 only "+
-				"(found VERSION_ID=%q); newer Debian releases are "+
-				"refused until their system commands are re-verified",
+				"(found VERSION_ID=%q). Newer Debian releases are "+
+				"refused until their system commands are verified again",
 			versionID)
 	}
 	return nil
 }
 
-// ── Check 2: sudo I/O logging (IA-3-H) ───────────────────
+// ── Check 2: sudo I/O logging ────────────────────────────
 
-// checkSudoersIOLogging asserts no sudoers file enables sudo's
-// input/output recording. Scope: /etc/sudoers plus every file
-// sudo's @includedir would parse in /etc/sudoers.d. Residual
-// (documented, accepted): a nonstandard @includedir pointing
-// elsewhere is not followed.
+// checkSudoersIOLogging requires that no sudoers file enables sudo's
+// input and output recording. It reads /etc/sudoers and every file sudo's
+// @includedir would parse in /etc/sudoers.d. As documented and accepted, a
+// nonstandard @includedir pointing elsewhere is not followed.
 //
 // Installation can run through sudo and handles account credentials. Retain
 // the existing refusal of observed terminal recording. Runtime node operations
-// use the helper; owners can also invoke sudo for general host maintenance.
+// use the helper. Owners can also use sudo for general host maintenance.
 func checkSudoersIOLogging() error {
 	files := []string{paths.SudoersFile}
 	dropIns, err := listSudoersDropIns()
@@ -213,22 +259,21 @@ func checkSudoersIOLogging() error {
 		if directive, found :=
 			sudoersEnablesIOLogging(string(data)); found {
 			return fmt.Errorf(
-				"%s enables sudo I/O recording (%s) — it would "+
+				"%s enables sudo I/O recording (%s), which would "+
 					"write the admin password to disk when this app "+
-					"sets it; remove that setting and try again",
+					"sets it. Remove that setting and try again",
 				f, directive)
 		}
 	}
 	return nil
 }
 
-// listSudoersDropIns enumerates the files sudo's @includedir would
-// parse. Running as root, the directory is read directly — the
-// commit-4 `sudo find` workaround (needed because /etc/sudoers.d
-// is 750 root:root on Debian 13 [LIVE] and the check then ran
-// unprivileged) is gone. A missing directory means nothing to
-// scan; any other failure refuses. Subdirectories are skipped —
-// sudo's includedir reads regular files only.
+// listSudoersDropIns lists the files sudo's @includedir would parse. As
+// root it reads the directory directly. An earlier `sudo find` workaround,
+// needed because /etc/sudoers.d is 750 root:root on Debian 13 and the check
+// then ran without root, is gone. A missing directory means nothing to scan,
+// and any other failure refuses. Subdirectories are skipped because sudo's
+// includedir reads regular files only.
 func listSudoersDropIns() ([]string, error) {
 	entries, err := os.ReadDir(paths.SudoersDir)
 	if err != nil {
@@ -251,26 +296,24 @@ func listSudoersDropIns() ([]string, error) {
 	return files, nil
 }
 
-// sudoersFileIncluded mirrors sudo's @includedir rule: files whose
-// names contain a '.' or end in '~' are ignored by sudo, so a
-// finding in them would be a false refusal. Pure — unit-tested.
+// sudoersFileIncluded mirrors sudo's @includedir rule. sudo ignores files
+// whose names contain a '.' or end in '~', so a finding in them would be a
+// false refusal. Covered by the tests.
 func sudoersFileIncluded(name string) bool {
 	return !strings.Contains(name, ".") &&
 		!strings.HasSuffix(name, "~")
 }
 
-// sudoersEnablesIOLogging reports whether sudoers content enables
-// I/O recording, via either mechanism:
+// sudoersEnablesIOLogging reports whether sudoers content enables I/O
+// recording in either of two ways.
 //
-//   - a Defaults option: `Defaults log_input` / `Defaults
-//     log_output` (negation-aware: an odd number of leading '!'
-//     disables; comments and @include/#include lines cannot enable
-//     anything and are skipped)
-//   - a command tag in a user spec: `LOG_INPUT:` / `LOG_OUTPUT:`
-//     (uppercase, colon-suffixed; NOLOG_* tags disable and do not
-//     match)
+//   - A Defaults option, `Defaults log_input` or `Defaults log_output`. An
+//     odd number of leading '!' disables it. Comments and @include or
+//     #include lines cannot enable anything and are skipped.
+//   - A command tag in a user spec, `LOG_INPUT:` or `LOG_OUTPUT:`, in
+//     capitals and ending in a colon. NOLOG_ tags disable and do not match.
 //
-// Direction on ambiguity: over-refusal. Pure — unit-tested.
+// When unsure it refuses. Covered by the tests.
 func sudoersEnablesIOLogging(content string) (string, bool) {
 	// Join backslash line continuations first.
 	content = strings.ReplaceAll(content, "\\\n", " ")
@@ -312,18 +355,17 @@ func sudoersEnablesIOLogging(content string) (string, bool) {
 
 // ── Check 3: dpkg ────────────────────────────────────────
 
-// checkDpkgAudit asserts the package database has no packages stuck
-// in broken states — a wedged dpkg would otherwise kill the install
-// midway through the engine's own apt operations. Read-only; no
-// lock taken.
+// checkDpkgAudit requires that the package database has no packages stuck
+// in a broken state. A stuck dpkg would otherwise stop the install midway
+// through the engine's own apt operations. It only reads and takes no lock.
 func checkDpkgAudit() error {
 	out, err := system.RunOutputWithTimeout(60*time.Second, "dpkg", "--audit")
 	return dpkgAuditVerdict(out, err)
 }
 
-// dpkgAuditVerdict: clean means rc 0 AND empty output — no bet on
-// dpkg's exit-code behavior across versions (principle 2). Pure —
-// unit-tested.
+// dpkgAuditVerdict counts as clean only exit status 0 with empty output, so
+// it does not depend on how dpkg's exit status changes between versions.
+// Covered by the tests.
 func dpkgAuditVerdict(output string, err error) error {
 	if err != nil {
 		return fmt.Errorf("dpkg --audit failed: %v", err)
@@ -331,8 +373,8 @@ func dpkgAuditVerdict(output string, err error) error {
 	if s := strings.TrimSpace(output); s != "" {
 		first := strings.SplitN(s, "\n", 2)[0]
 		return fmt.Errorf(
-			"dpkg reports packages in a broken state (%s ...) — "+
-				"fix with: dpkg --configure -a && "+
+			"dpkg reports packages in a broken state (%s ...). "+
+				"Fix with: dpkg --configure -a && "+
 				"apt-get -f install", first)
 	}
 	return nil
@@ -340,15 +382,14 @@ func dpkgAuditVerdict(output string, err error) error {
 
 // ── Check 4: ufw ─────────────────────────────────────────
 
-// checkUfwInstallable asserts apt's on-disk package index can
-// deliver ufw when the engine's base-package step apt-installs it.
-// Offline; installs nothing; passes instantly when ufw is already
-// present (recognized interrupted-install resumes).
+// checkUfwInstallable requires that apt's package index on disk can provide
+// ufw when the engine's base-package step installs it. It works offline,
+// installs nothing, and passes at once when ufw is already present, as on a
+// resumed install.
 //
-// LOAD-BEARING since the script absorption (commit 6): nothing
-// pre-proves apt anymore — the binary's own base-package step is
-// the first apt operation run for us on this box, and the firewall
-// step immediately after it depends on ufw having arrived.
+// Since the install script became part of this binary, nothing else proves
+// apt works first. The base-package step is the first apt operation on the
+// machine, and the firewall step right after it needs ufw.
 func checkUfwInstallable() error {
 	if _, err := exec.LookPath("ufw"); err == nil {
 		return nil
@@ -360,9 +401,9 @@ func checkUfwInstallable() error {
 	return ufwCandidateVerdict(out)
 }
 
-// runAptCachePolicy runs `apt-cache policy <pkg>` with LC_ALL=C so
-// the Candidate line is stable across locales. Local exec (not the
-// system wrappers) purely for the env override.
+// runAptCachePolicy runs `apt-cache policy <pkg>` with LC_ALL=C so the
+// Candidate line is the same in every locale. It runs the command itself,
+// not through the system wrappers, only to set that variable.
 func runAptCachePolicy(
 	pkg string, timeout time.Duration,
 ) (string, error) {
@@ -378,8 +419,8 @@ func runAptCachePolicy(
 	return string(out), nil
 }
 
-// ufwCandidateVerdict parses apt-cache policy output: installable
-// means a Candidate line with a real version. Pure — unit-tested.
+// ufwCandidateVerdict parses apt-cache policy output. Installable means a
+// Candidate line with a real version. Covered by the tests.
 func ufwCandidateVerdict(output string) error {
 	for _, raw := range strings.Split(output, "\n") {
 		line := strings.TrimSpace(raw)
@@ -389,13 +430,13 @@ func ufwCandidateVerdict(output string) error {
 				return nil
 			}
 			return errors.New(
-				"apt has no installable ufw candidate — package " +
-					"lists may be broken; run: apt-get update")
+				"apt has no installable ufw candidate, package " +
+					"lists may be broken. Run: apt-get update")
 		}
 	}
 	return errors.New(
-		"no Candidate line in apt-cache policy output — apt " +
-			"package lists may be missing; run: apt-get update")
+		"no Candidate line in apt-cache policy output, apt " +
+			"package lists may be missing. Run: apt-get update")
 }
 
 // ── Report formatting ────────────────────────────────────
@@ -403,8 +444,7 @@ func ufwCandidateVerdict(output string) error {
 // FormatPreflightReport renders the full check list with every failure's reason.
 func FormatPreflightReport(results []PreflightResult) string {
 	var b strings.Builder
-	b.WriteString("  Preflight — checking the environment " +
-		"before changing anything:\n\n")
+	b.WriteString("  Checking this machine before changing anything\n\n")
 	failed := 0
 	for _, r := range results {
 		if r.Err == nil {
