@@ -136,7 +136,7 @@ func (s *NodeUpdateScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 		if m.err == nil {
 			if m.kind == "prepare" {
 				if first := m.review.UpdateFirst; first != "" {
-					// Guidance, not an approvable review: offer the release
+					// Guidance, not an approvable review. Offer the release
 					// this node has to install first.
 					s.notice = fmt.Sprintf("v%s can be installed after v%s. Review v%s first.", s.target, first, first)
 					s.target = first
@@ -275,7 +275,8 @@ func (s *NodeUpdateScreen) HandleKey(k string, msg tea.KeyPressMsg) (Screen, tea
 			s.attempt++
 			attempt := s.attempt
 			status := s.status
-			return s, tea.ExecProcess(exec.Command("/usr/local/bin/lncli", args...), func(err error) tea.Msg {
+			unlock := &introducedCommand{introduction: walletUnlockIntroduction, cmd: exec.Command("/usr/local/bin/lncli", args...)}
+			return s, tea.Exec(unlock, func(err error) tea.Msg {
 				return nodeUpdateMsg{owner: s, attempt: attempt, kind: "unlock", status: status, err: err}
 			})
 		}
@@ -508,7 +509,7 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 		p.line(" Affected services will restart. Downloads use Tor.")
 		p.line(" Databases are preserved. A failed update may need repair.")
 	} else if s.status.ID != "" && !s.status.Active && !s.olderThanUpdate() {
-		// A finished or cancelled update is history: one line.
+		// A finished or cancelled update is history, shown in one line.
 		outcome := "complete"
 		if s.status.Phase == "cancelled" {
 			outcome = "cancelled before host changes"
@@ -521,7 +522,7 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 			p.blank()
 			s.drawSteps(p)
 		} else if s.status.Phase != "complete" {
-			// A record without a list: an update that stopped before its
+			// A record without a list comes from an update that stopped before its
 			// worker wrote one, or one started by an older release.
 			p.field("Status: ", s.status.Step)
 			if failed {

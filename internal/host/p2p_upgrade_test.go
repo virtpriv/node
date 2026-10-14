@@ -118,6 +118,10 @@ func TestHybridTransitionRefusalAndCompletionBoundary(t *testing.T) {
 			if tc.fail != "" && !errors.Is(err, failure) {
 				t.Fatalf("lost failure: %v", err)
 			}
+			// The refusals and the firewall check come before the first change.
+			if errors.Is(err, ErrNothingChanged) != (err != nil && tc.completed == 0) {
+				t.Fatalf("only a failure before any change may say nothing changed: %v", err)
+			}
 			if *cfg != before {
 				t.Fatal("changed loaded configuration before publication")
 			}

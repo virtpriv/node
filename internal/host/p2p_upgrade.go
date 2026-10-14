@@ -29,7 +29,7 @@ type p2pUpgradeOps struct {
 // inside the transition's completion boundary and before desired-state publication.
 func UpgradeP2PToHybrid(request p2p.UpgradeRequest, stage func() error, progress func(int)) error {
 	if os.Geteuid() != 0 {
-		return errors.New("hybrid P2P requires the root helper")
+		return nothingChanged(errors.New("hybrid P2P requires the root helper"))
 	}
 	return upgradeP2PToHybrid(request, p2pUpgradeOps{
 		load: config.Load, address: system.ReadPublicIPv4,
@@ -48,48 +48,55 @@ func UpgradeP2PToHybrid(request p2p.UpgradeRequest, stage func() error, progress
 }
 
 func upgradeP2PToHybrid(request p2p.UpgradeRequest, ops p2pUpgradeOps, progress func(int)) error {
+	// Every refusal before the steps, and the firewall check, come before any
+	// change to the node.
 	if request.Address() == "" {
-		return errors.New("review the public IPv4 address before upgrading P2P")
+		return nothingChanged(errors.New("review the public IPv4 address before upgrading P2P"))
 	}
 	cfg, err := ops.load()
 	if err != nil {
-		return fmt.Errorf("read node configuration: %w", err)
+		return nothingChanged(fmt.Errorf("read node configuration: %w", err))
 	}
 	if cfg.P2PMode != "tor" {
-		return fmt.Errorf("hybrid P2P requires authoritative mode tor; current mode is %q", cfg.P2PMode)
+		return nothingChanged(fmt.Errorf("hybrid P2P requires authoritative mode tor, current mode is %q", cfg.P2PMode))
 	}
 	// Read freshly for this invocation. A cached observation from another
 	// process or an earlier request cannot authorize publication of this IP.
 	address, err := ops.address(context.Background())
 	if err != nil {
-		return fmt.Errorf("observe public IPv4: %w", err)
+		return nothingChanged(fmt.Errorf("observe public IPv4: %w", err))
 	}
 	observed, err := p2p.NewUpgradeRequest(address)
 	if err != nil {
-		return err
+		return nothingChanged(err)
 	}
 	if observed != request {
-		return errors.New("public IPv4 changed; reopen P2P Upgrade and review the address again")
+		return nothingChanged(errors.New("public IPv4 changed. Reopen P2P Upgrade and review the address again"))
 	}
 	proposed := *cfg
 	proposed.P2PMode = "hybrid"
 	steps := []struct {
-		name string
-		run  func() error
+		name     string
+		run      func() error
+		noChange bool
 	}{
-		{"check active firewall", ops.firewall},
-		{"update LND configuration", func() error { return ops.configure(&proposed, observed.Address()) }},
-		{"add Hybrid P2P firewall rules", ops.allow},
-		{"restart LND", ops.restart},
+		{"check active firewall", ops.firewall, true},
+		{"update LND configuration", func() error { return ops.configure(&proposed, observed.Address()) }, false},
+		{"add Hybrid P2P firewall rules", ops.allow, false},
+		{"restart LND", ops.restart, false},
 		// LND owns TLS regeneration. Never delete its key or certificate here.
-		{"verify LND TLS IP certificate", func() error { return ops.verifyTLS(observed.Address()) }},
-		{"restage LND TLS certificate", ops.stage},
-		{"publish P2P setting", func() error { return ops.save(&proposed) }},
+		{"verify LND TLS IP certificate", func() error { return ops.verifyTLS(observed.Address()) }, false},
+		{"restage LND TLS certificate", ops.stage, false},
+		{"publish P2P setting", func() error { return ops.save(&proposed) }, false},
 	}
 	for i, step := range steps {
 		if err := step.run(); err != nil {
 			// Earlier live changes can remain. Failure is not a rollback receipt.
-			return fmt.Errorf("%s: %w", step.name, err)
+			err = fmt.Errorf("%s: %w", step.name, err)
+			if step.noChange {
+				return nothingChanged(err)
+			}
+			return err
 		}
 		progress(i)
 	}

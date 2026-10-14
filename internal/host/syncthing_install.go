@@ -15,6 +15,9 @@ import (
 type syncthingInstallStep struct {
 	name string
 	run  func() error
+	// noChange marks a step that changes nothing on the node, so its
+	// failure is reported as a failure before any change.
+	noChange bool
 }
 
 type syncthingInstallOps struct {
@@ -29,10 +32,10 @@ type syncthingInstallOps struct {
 
 // InstallSyncthing owns fresh add-on provisioning and final desired publication.
 // The helper supplies its fixed freshness action. Accepted work continues if the
-// terminal disconnects; neither a failed step nor disconnect implies rollback.
+// terminal disconnects. Neither a failed step nor disconnect implies rollback.
 func InstallSyncthing(stage func() error, progress func(int)) error {
 	if os.Geteuid() != 0 {
-		return errors.New("syncthing installation requires the root helper")
+		return nothingChanged(errors.New("syncthing installation requires the root helper"))
 	}
 	return installSyncthing(syncthingInstallOps{
 		load: config.Load, residue: syncthingResiduePresent,
@@ -43,29 +46,34 @@ func InstallSyncthing(stage func() error, progress func(int)) error {
 }
 
 func installSyncthing(ops syncthingInstallOps, progress func(int)) error {
+	// Every refusal here comes before any change to the node.
 	cfg, err := ops.load()
 	if err != nil {
-		return fmt.Errorf("read node configuration: %w", err)
+		return nothingChanged(fmt.Errorf("read node configuration: %w", err))
 	}
 	if cfg.SyncthingEnabled {
-		return errors.New("Syncthing is already enabled")
+		return nothingChanged(errors.New("Syncthing is already enabled"))
 	}
 	residue, err := ops.residue()
 	if err != nil {
-		return err
+		return nothingChanged(err)
 	}
 	if residue {
-		return errors.New("Syncthing add-on residue exists while desired enablement is false; refusing to modify it; retained-state recovery is not supported")
+		return nothingChanged(errors.New("Syncthing add-on residue exists while desired enablement is false, refusing to modify it. Retained-state recovery is not supported"))
 	}
 	if err := ops.prerequisites(cfg); err != nil {
-		return err
+		return nothingChanged(err)
 	}
 	proposed := *cfg
 	proposed.SyncthingEnabled = true
 	steps, password := ops.steps(&proposed)
 	for i, step := range steps {
 		if err := step.run(); err != nil {
-			return fmt.Errorf("%s: %w", step.name, err)
+			err = fmt.Errorf("%s: %w", step.name, err)
+			if step.noChange {
+				return nothingChanged(err)
+			}
+			return err
 		}
 		progress(i)
 	}
@@ -104,12 +112,16 @@ func syncthingInstallSteps(
 				}
 				return downloadSyncthing(
 					component.SyncthingVersion, syncWork)
-			}},
+			},
+			// The work folder is in the helper's private /tmp
+			// (PrivateTmp=yes), not on the node.
+			noChange: true},
 		{name: "Verifying Syncthing",
 			run: func() error {
 				return verifySyncthing(
 					component.SyncthingVersion, syncWork)
-			}},
+			},
+			noChange: true},
 		{name: "Installing Syncthing",
 			run: func() error {
 				if err := extractAndInstallSyncthing(

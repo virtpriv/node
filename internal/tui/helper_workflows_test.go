@@ -134,22 +134,31 @@ func TestHelperConfigurationPublicationPreservesNewerSettings(t *testing.T) {
 	}
 }
 
+// A failure says what is known about the node. The helper finished, nothing
+// was changed, or changes may have been applied. Only the helper's own report
+// that it stopped before any change may lift the warning.
 func TestHelperFailureDoesNotClaimRollback(t *testing.T) {
-	for _, succeeded := range []bool{false, true} {
+	for _, tc := range []struct {
+		succeeded, unchanged bool
+		want                 string
+	}{
+		{false, false, "Changes may have been applied"},
+		{true, false, "helper completed the change"},
+		{false, true, "stopped before changing anything"},
+	} {
 		ctx := &ScreenContext{Cfg: config.Default()}
 		s := progressFixture(t, app.P2PUpgrade, ctx)
 		called := 0
 		s.onFail = func() tea.Cmd { called++; return nil }
-		message := helperProgressMsg{operation: s.operation, event: app.HelperProgress{Result: &app.HelperWorkflowResult{HelperSucceeded: succeeded, Err: errors.New("injected failure")}}}
+		message := helperProgressMsg{operation: s.operation, event: app.HelperProgress{Result: &app.HelperWorkflowResult{HelperSucceeded: tc.succeeded, NothingChanged: tc.unchanged, Err: errors.New("injected failure")}}}
 		s.HandleMsg(message)
 		s.HandleMsg(message)
 		view := s.View(82, 34)
-		want := "Changes may have been applied"
-		if succeeded {
-			want = "helper completed the change"
-		}
-		if !s.failed || !s.done || called != 1 || !strings.Contains(view, want) || ctx.Cfg.P2PMode != "tor" {
+		if !s.failed || !s.done || called != 1 || !strings.Contains(view, tc.want) || ctx.Cfg.P2PMode != "tor" {
 			t.Fatalf("failure lost its outcome or repeated completion: %s", view)
+		}
+		if tc.unchanged && strings.Contains(view, "may have been applied") {
+			t.Fatalf("a refusal before any change still warns of changes: %s", view)
 		}
 	}
 }

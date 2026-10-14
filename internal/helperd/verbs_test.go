@@ -5,6 +5,7 @@ package helperd
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -18,11 +19,12 @@ import (
 	"github.com/virtpriv/node/internal/autounlock"
 	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/host"
 	"github.com/virtpriv/node/internal/servicecontrol"
 )
 
 // Every verb has a socket deadline. Execution bounds must also be enforced by
-// the operation; a connection deadline alone cannot stop privileged work.
+// the operation. A connection deadline alone cannot stop privileged work.
 func TestEveryVerbHasDeadline(t *testing.T) {
 	if len(verbs) == 0 {
 		t.Fatal("empty verb menu")
@@ -491,6 +493,10 @@ func TestRemovedPasswordResetRefusedOverIPC(t *testing.T) {
 	if err := json.NewDecoder(client).Decode(&event); err != nil || event.OK || event.Event != "end" || !strings.Contains(event.Error, "unknown verb") {
 		t.Fatalf("reset not refused: %+v %v", event, err)
 	}
+	// A request refused before it runs changed nothing, and says so.
+	if event.Code != helper.CodeNothingChanged {
+		t.Fatalf("refusal before running sent code %q", event.Code)
+	}
 	select {
 	case retire := <-done:
 		if retire {
@@ -498,5 +504,67 @@ func TestRemovedPasswordResetRefusedOverIPC(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("reset request did not finish")
+	}
+}
+
+// A failed request tells the client that nothing changed only when the host
+// marked its failure as coming before any change. The helper's words reach the
+// client unchanged either way.
+func TestFailureEndCarriesTheCodeOnlyWhenNothingChanged(t *testing.T) {
+	marked := fmt.Errorf("Syncthing installation refused: Tor is not active: %w", host.ErrNothingChanged)
+	plain := errors.New("Installing Syncthing: extract failed")
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{{marked, helper.CodeNothingChanged}, {plain, ""}} {
+		end := failureEnd(tc.err)
+		if end.Event != "end" || end.OK || end.Error != tc.err.Error() || end.Code != tc.code {
+			t.Fatalf("end event %+v for %v", end, tc.err)
+		}
+	}
+}
+
+// A request the helper cannot read is refused before anything runs, and the
+// end event says that nothing changed.
+func TestMalformedRequestRefusedBeforeRunning(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("kernel peer credentials require Linux")
+	}
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connections := make([]net.Conn, 0, 2)
+	for _, fd := range fds {
+		file := os.NewFile(uintptr(fd), "malformed-request")
+		conn, err := net.FileConn(file)
+		file.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		connections = append(connections, conn)
+	}
+	client, serverConn := connections[0], connections[1].(*net.UnixConn)
+	srv := &server{version: "0.7.0", allowed: map[uint32]bool{uint32(os.Getuid()): true}}
+	done := make(chan bool, 1)
+	go func() { done <- srv.handleConn(serverConn) }()
+	if _, err := client.Write([]byte("{not json\n")); err != nil {
+		t.Fatal(err)
+	}
+	var event helper.Event
+	if err := json.NewDecoder(client).Decode(&event); err != nil || event.OK || !strings.Contains(event.Error, "malformed request") {
+		t.Fatalf("malformed request not refused: %+v %v", event, err)
+	}
+	if event.Code != helper.CodeNothingChanged {
+		t.Fatalf("refusal before running sent code %q", event.Code)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("malformed request did not finish")
 	}
 }
