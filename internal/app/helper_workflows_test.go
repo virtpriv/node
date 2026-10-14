@@ -33,8 +33,14 @@ func TestHelperWorkflowResults(t *testing.T) {
 		name                     string
 		kind                     HelperWorkflowKind
 		stepErr, endErr, loadErr error
+		startErr                 error
 		succeeded                bool
+		unchanged                bool
 	}{
+		{name: "refused before running", kind: P2PUpgrade, unchanged: true, startErr: &helper.EndError{Message: "refused", Code: helper.CodeNothingChanged}},
+		{name: "refused at the final answer", kind: SyncthingInstall, unchanged: true, endErr: &helper.EndError{Message: "refused", Code: helper.CodeNothingChanged}},
+		{name: "refused before any change", kind: SyncthingInstall, unchanged: true,
+			stepErr: &helper.EndError{Message: "refused", Code: helper.CodeNothingChanged}},
 		{name: "syncthing", kind: SyncthingInstall, succeeded: true},
 		{name: "p2p", kind: P2PUpgrade, succeeded: true},
 		{name: "self update", kind: SelfUpdate, succeeded: true},
@@ -69,6 +75,9 @@ func TestHelperWorkflowResults(t *testing.T) {
 							t.Error("wrong reviewed release")
 						}
 					}
+					if tc.startErr != nil {
+						return nil, tc.startErr
+					}
 					return session, nil
 				}
 				w.loadConfig = func() (*config.AppConfig, error) { loads++; return config.Default(), tc.loadErr }
@@ -84,7 +93,7 @@ func TestHelperWorkflowResults(t *testing.T) {
 				// No progress consumer runs until the application has finished. A renderer
 				// must not own the pace of mutation or leave a successful session open.
 				synctest.Wait()
-				if !session.closed {
+				if tc.startErr == nil && !session.closed {
 					t.Fatal("consumer absence stranded the session")
 				}
 				count, terminal := 0, 0
@@ -103,10 +112,10 @@ func TestHelperWorkflowResults(t *testing.T) {
 				if starts != 1 || terminal != 1 || result == nil {
 					t.Fatalf("starts=%d terminal=%d", starts, terminal)
 				}
-				if result.HelperSucceeded != tc.succeeded {
+				if result.HelperSucceeded != tc.succeeded || result.NothingChanged != tc.unchanged {
 					t.Fatalf("wrong mutation outcome: %+v", result)
 				}
-				wantErr := tc.stepErr != nil || tc.endErr != nil || tc.loadErr != nil
+				wantErr := tc.stepErr != nil || tc.endErr != nil || tc.loadErr != nil || tc.startErr != nil
 				if (result.Err != nil) != wantErr {
 					t.Fatalf("wrong error: %v", result.Err)
 				}

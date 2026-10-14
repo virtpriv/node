@@ -5,6 +5,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/virtpriv/node/internal/app"
 	"github.com/virtpriv/node/internal/logger"
@@ -45,6 +46,7 @@ type InstallProgressScreen struct {
 	done            bool
 	failed          bool
 	helperSucceeded bool
+	nothingChanged  bool
 }
 
 func NewInstallProgressScreen(ctx *ScreenContext, operation *app.HelperOperation, onDone, onFail func() tea.Cmd) *InstallProgressScreen {
@@ -113,6 +115,7 @@ func (s *InstallProgressScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 		s.done = true
 		s.failed = result.Err != nil
 		s.helperSucceeded = result.HelperSucceeded
+		s.nothingChanged = result.NothingChanged
 		if result.Config != nil {
 			// Publish only the setting this operation owns. A delayed reload must not
 			// overwrite another workflow's newer setting, such as auto-unlock.
@@ -191,10 +194,13 @@ func (s *InstallProgressScreen) View(
 			[]string{"Done"}, 0,
 			s.ctx.ContentFocused, h)
 	} else if s.failed {
-		if s.helperSucceeded {
+		switch {
+		case s.helperSucceeded:
 			p.warnWrap("The helper completed the change, but local configuration could not be refreshed.")
-		} else {
-			p.warnWrap("The workflow did not complete successfully. Changes may have been applied; check the node before trying again.")
+		case s.nothingChanged:
+			p.fitText(lipgloss.NewStyle(), "The workflow stopped before changing anything.", 0)
+		default:
+			p.warnWrap("The workflow did not complete successfully. Changes may have been applied. Check the node before trying again.")
 		}
 		return p.renderWithBottomButtons(
 			[]string{"Done"}, 0,

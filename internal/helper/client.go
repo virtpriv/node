@@ -17,15 +17,15 @@ import (
 
 // ── Helper client ────────────────────────────────────────
 //
-// One privileged operation = one connection: dial the helper's
+// One privileged operation = one connection. Dial the helper's
 // socket, write one request line, half-close, then read
 // progress events until the ok/error terminator. The socket's
 // ownership (root:vpn 0660) is what authorizes the connection.
-// There is no password and no token: being the admin user IS
+// There is no password and no token. Being the admin user IS
 // the credential, and the helper re-checks the peer's uid on
 // every connection.
 //
-// The helper serializes execution: while it runs one operation,
+// The helper serializes execution. While it runs one operation,
 // a second connection waits its turn in the kernel's queue.
 // Root-side deadlines bound socket I/O, not synchronous handler completion.
 // Caller cancellation stops local I/O. Accepted mutations can continue.
@@ -44,10 +44,10 @@ const maxEventBytes = 1 << 20
 // request waiting leaves the socket unit failed and its node removed, and only
 // a start of the socket brings it back.
 func helperClosed(op string, err error) error {
-	return fmt.Errorf(
+	return notSent{fmt.Errorf(
 		"%s: cannot reach the node's helper. To repair, quit with ctrl+c "+
 			"and run: sudo systemctl restart vpn-helperd.socket, or sudo reboot. "+
-			"Cause: %v", op, err)
+			"Cause: %v", op, err)}
 }
 
 // helperDown is for every other failure. The request may have been sent and
@@ -133,7 +133,7 @@ func StartContext(ctx context.Context, verb string, params any) (*Session, error
 	if _, err := conn.Write(append(line, '\n')); err != nil {
 		return nil, helperDown(verb, err)
 	}
-	// Half-close our sending side: the helper reads a clean EOF
+	// Half-close our sending side, so the helper reads a clean EOF
 	// after the request line even if a future client forgets
 	// the trailing newline.
 	if err := conn.CloseWrite(); err != nil {
@@ -191,7 +191,7 @@ func (s *Session) advance(untilStep int) error {
 			return err
 		}
 		if ev == nil {
-			// Stream ended without a terminator: the helper died
+			// Stream ended without a terminator. The helper died
 			// mid-operation or its deadline expired.
 			s.err = helperDown(s.verb, errors.New(
 				"connection closed before the operation finished"))
@@ -210,7 +210,7 @@ func (s *Session) advance(untilStep int) error {
 				return s.endErr(untilStep)
 			}
 		default:
-			// Unknown event kinds are ignored: additive protocol
+			// Unknown event kinds are ignored, because additive protocol
 			// growth must not break older clients.
 		}
 	}
@@ -229,7 +229,7 @@ func (s *Session) endErr(untilStep int) error {
 		}
 		return nil
 	}
-	s.err = errors.New(s.end.Error)
+	s.err = &EndError{Message: s.end.Error, Code: s.end.Code}
 	return s.err
 }
 
@@ -267,8 +267,8 @@ func (s *Session) Close() {
 	})
 }
 
-// Call performs a whole verb in one blocking call: start, drain
-// any progress events, decode the terminator. For streaming
+// Call performs a whole verb in one blocking call. It starts, drains
+// any progress events and decodes the terminator. For streaming
 // verbs it simply ignores per-step progress.
 func Call(verb string, params, result any) error {
 	s, err := Start(verb, params)
@@ -276,4 +276,30 @@ func Call(verb string, params, result any) error {
 		return err
 	}
 	return s.Wait(result)
+}
+
+// EndError is the failure the helper reported in its end event. Its text is
+// the helper's own words.
+type EndError struct {
+	Message string
+	Code    string
+}
+
+func (e *EndError) Error() string { return e.Message }
+
+// notSent marks a request that never reached the helper.
+type notSent struct{ err error }
+
+func (e notSent) Error() string { return e.err.Error() }
+func (e notSent) Unwrap() error { return e.err }
+
+// NothingChanged reports whether err says for certain that the request changed
+// nothing, because the helper said so or the request never reached it. A lost reply
+// says nothing either way.
+func NothingChanged(err error) bool {
+	if e, ok := errors.AsType[*EndError](err); ok {
+		return e.Code == CodeNothingChanged
+	}
+	_, ok := errors.AsType[notSent](err)
+	return ok
 }

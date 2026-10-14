@@ -24,8 +24,11 @@ const (
 
 // HelperWorkflowResult distinguishes successful mutation from a failed local
 // configuration read. An error never establishes that earlier changes were undone.
+// NothingChanged is set only when the helper reported that the request failed
+// before changing anything, or the request never reached it.
 type HelperWorkflowResult struct {
 	HelperSucceeded bool
+	NothingChanged  bool
 	Config          *config.AppConfig
 	Err             error
 }
@@ -164,19 +167,19 @@ func (w *HelperWorkflows) run(op *HelperOperation, verb string, params any, root
 	}
 	session, err := w.start(w.ctx, verb, params)
 	if err != nil {
-		result.Err = err
+		result.Err, result.NothingChanged = err, helper.NothingChanged(err)
 		return result, 0
 	}
 	defer session.Close()
 	for i := range rootSteps {
 		if err := session.WaitStep(i); err != nil {
-			result.Err = err
+			result.Err, result.NothingChanged = err, helper.NothingChanged(err)
 			return result, i
 		}
 		// A final step event is not the operation's success terminator.
 		if i == rootSteps-1 {
 			if err := session.Wait(nil); err != nil {
-				result.Err = err
+				result.Err, result.NothingChanged = err, helper.NothingChanged(err)
 				return result, i
 			}
 			result.HelperSucceeded = true

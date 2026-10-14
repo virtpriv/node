@@ -61,6 +61,9 @@ func TestSyncthingRefusesBeforeProvisioning(t *testing.T) {
 			if err == nil || !reflect.DeepEqual(*cfg, before) {
 				t.Fatalf("refusal changed configuration or succeeded: %v", err)
 			}
+			if !errors.Is(err, ErrNothingChanged) {
+				t.Fatalf("a refusal before any change is not marked as one: %v", err)
+			}
 			if cause != "enabled" && cause != "residue" && !errors.Is(err, failure) {
 				t.Fatalf("observation failure lost: %v", err)
 			}
@@ -96,7 +99,10 @@ func TestSyncthingPublishesOnlyAfterProvisioningAndBothCredentials(t *testing.T)
 						t.Fatal("proposal was absent or published before provisioning")
 					}
 					return []syncthingInstallStep{
-						{name: "first step", run: func() error { return apply("first step") }},
+						// The first step stands for one that changes nothing on
+						// the node, such as the download into the helper's own
+						// temporary folder.
+						{name: "first step", run: func() error { return apply("first step") }, noChange: true},
 						{name: "second step", run: func() error { return apply("second step") }},
 					}, password
 				},
@@ -135,6 +141,9 @@ func TestSyncthingPublishesOnlyAfterProvisioningAndBothCredentials(t *testing.T)
 			if err != nil && (!errors.Is(err, failure) || strings.Contains(err.Error(), password)) {
 				t.Fatal("failure lost its cause or exposed the password")
 			}
+			if errors.Is(err, ErrNothingChanged) != (failAt == "first step") {
+				t.Fatalf("only a failure before any change may say nothing changed: %v", err)
+			}
 			completed := map[string]int{"first step": 0, "second step": 1, "API staging": 2, "password staging": 2, "save": 3, "": 4}[failAt]
 			if len(progress) != completed {
 				t.Fatalf("failed work counted as completed: %v", progress)
@@ -148,5 +157,21 @@ func TestSyncthingPublishesOnlyAfterProvisioningAndBothCredentials(t *testing.T)
 				t.Fatal("operation changed the loaded snapshot before durable publication")
 			}
 		})
+	}
+}
+
+// Only steps before anything is installed may say that nothing changed. A
+// wrong mark would make the screen claim that nothing changed after a change.
+func TestSyncthingMarksOnlyStepsBeforeInstalling(t *testing.T) {
+	steps, _ := syncthingInstallSteps(config.Default())
+	installing := false
+	for _, step := range steps {
+		installing = installing || step.name == "Installing Syncthing"
+		if installing && step.noChange {
+			t.Fatalf("%q changes the node but is marked as changing nothing", step.name)
+		}
+	}
+	if !installing {
+		t.Fatal("the install step was not found")
 	}
 }

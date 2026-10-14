@@ -58,7 +58,7 @@ const walletCreationIntroduction = `
   Lightning Wallet Creation
 
   Make sure nobody is looking over your shoulder.
-  Password entry is invisible; typing and pasting still work.
+  ` + hiddenInput + `
   Choose and confirm a wallet password, then press 'n' for a new seed.
   The cipher seed passphrase is optional. Keep it with your recovery records
   if you choose one.
@@ -80,3 +80,31 @@ while true; do
 done
 printf '\033[2J\033[3J\033[H'
 `
+
+// hiddenInput is said before every hand-over to lncli for a password.
+const hiddenInput = "Password entry is invisible. Typing and pasting still work."
+
+const walletUnlockIntroduction = `
+  Unlock the LND wallet
+
+  ` + hiddenInput + `
+  Type the wallet password and press Enter.
+
+`
+
+// introducedCommand prints an introduction, then hands the terminal to cmd.
+type introducedCommand struct {
+	introduction string
+	cmd          *exec.Cmd
+}
+
+func (c *introducedCommand) SetStdin(r io.Reader)  { c.cmd.Stdin = r }
+func (c *introducedCommand) SetStdout(w io.Writer) { c.cmd.Stdout = w }
+func (c *introducedCommand) SetStderr(w io.Writer) { c.cmd.Stderr = w }
+
+func (c *introducedCommand) Run() error {
+	if _, err := fmt.Fprint(c.cmd.Stdout, c.introduction); err != nil {
+		return err
+	}
+	return c.cmd.Run()
+}

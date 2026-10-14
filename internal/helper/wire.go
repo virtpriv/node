@@ -4,18 +4,18 @@
 // privilege boundary. It holds three things:
 //
 //   - the wire protocol shared by the root helper (vpn helperd)
-//     and its clients: one JSON request line per connection,
+//     and its clients, one JSON request line per connection
 //     answered by zero or more progress events and exactly one
-//     ok/error terminator (wire.go);
+//     ok/error terminator (wire.go),
 //   - the client the TUI uses to request privileged operations
-//     over the helper's unix socket (client.go);
-//   - the staging-board reader: the root-written
+//     over the helper's unix socket (client.go),
+//   - the staging-board reader, which reads the root-written
 //     files under /var/lib/vpn/state that carry deliberately staged
 //     credentials and fixed facts to the
 //     admin user without any privileged code running on the
 //     read path (board.go).
 //
-// Privileged operations live behind helperd; this package owns their IPC contract.
+// Privileged operations live behind helperd. This package owns their IPC contract.
 package helper
 
 import "encoding/json"
@@ -26,7 +26,7 @@ type RebootResult struct {
 }
 
 // Verb names. The helper serves this fixed menu and nothing
-// else — there is no verb that runs a caller-supplied command,
+// else. There is no verb that runs a caller-supplied command,
 // and no verb that returns a caller-chosen file. Every verb
 // validates its parameters against a closed set of accepted
 // values before touching the system.
@@ -82,14 +82,15 @@ type Request struct {
 //
 //   - "step": progress from a streaming verb. Index is the
 //     0-based position in the verb's fixed step list. The
-//     helper emits a step event on COMPLETION only — a step
-//     that fails produces no step event; the failure arrives
+//     helper emits a step event on COMPLETION only. A step
+//     that fails produces no step event, and the failure arrives
 //     as the error terminator. Err is reserved wire surface
-//     for a per-step error report: the helper never sets it
+//     for a per-step error report. The helper never sets it
 //     today, and clients treat a non-empty Err as fatal if
 //     one ever appears.
 //   - "end": the terminator. Exactly one per connection. OK
-//     with an optional Result payload, or an Error message.
+//     with an optional Result payload, or an Error message,
+//     with Code set when the failure came before any change.
 type Event struct {
 	Event string `json:"event"` // "step" or "end"
 
@@ -100,8 +101,14 @@ type Event struct {
 	// end fields
 	OK     bool            `json:"ok,omitempty"`
 	Error  string          `json:"error,omitempty"`
+	Code   string          `json:"code,omitempty"`
 	Result json.RawMessage `json:"result,omitempty"`
 }
+
+// CodeNothingChanged is the end event's code for a request that failed before
+// it changed anything on the node, such as a refusal at its first checks. A
+// failure without it may have changed something.
+const CodeNothingChanged = "nothing_changed"
 
 // ── Typed parameters ─────────────────────────────────────
 //
@@ -118,7 +125,7 @@ type ServiceActionParams struct {
 }
 
 // DirSizeParams: which data directory to measure. "lnd" is the
-// only accepted value — the bitcoin data dir's size comes from
+// only accepted value. The bitcoin data dir's size comes from
 // bitcoind's own getblockchaininfo (size_on_disk) over RPC,
 // with no privileged operation at all.
 type DirSizeParams struct {
@@ -141,16 +148,16 @@ type StageWalletPasswordParams struct {
 }
 
 // RebuildSSHConfigParams: rewrite the SSH hardening drop-in.
-// The template lives on the root side; the only caller-chosen
+// The template lives on the root side. The only caller-chosen
 // value is the password-auth flag.
 type RebuildSSHConfigParams struct {
 	PasswordAuthDisabled bool `json:"password_auth_disabled"`
 }
 
 // SelfUpdateParams: update the vpn binary to a release version.
-// Validated root-side: canonical stable version, strictly newer, and same-major
+// Validated root-side as a canonical stable version, strictly newer, and same-major
 // only (a cross-major release requires reading its release
-// notes; the helper refuses it no matter what a client asks).
+// notes, and the helper refuses it no matter what a client asks).
 type SelfUpdateParams struct {
 	Version string `json:"version"`
 }
@@ -169,7 +176,7 @@ type UpdateResumeParams struct {
 	ID string `json:"id"`
 }
 
-// NodeAddressesResult is the read-node-addresses answer: the
+// NodeAddressesResult is the read-node-addresses answer, the
 // node's Tor hidden-service hostnames and its Syncthing device
 // ID, read from their sources at the moment of the request. An
 // empty field means the observation is unavailable, including when a
@@ -183,7 +190,7 @@ type NodeAddressesResult struct {
 	SyncthingDeviceID string `json:"syncthing_device_id"`
 }
 
-// SSHAuthResult is the read-ssh-auth answer: whether sshd's
+// SSHAuthResult is the read-ssh-auth answer, whether sshd's
 // EFFECTIVE configuration permits password authentication for
 // the admin user, asked of sshd itself at request time. This
 // answer gates removing the last SSH key, so callers treat a
@@ -215,7 +222,7 @@ type VerifyAdminLoginResult struct {
 // ── Streaming step lists ─────────────────────────────────
 //
 // A streaming verb's step names are fixed per verb and known to
-// both sides: the client renders the full list up front, the
+// both sides. The client renders the full list up front, and the
 // server reports completion by index. Operation tests check the stages
 // against these names.
 

@@ -1,44 +1,44 @@
 // internal/helperd/helperd.go
 
 // Package helperd is the root side of the node's privilege
-// boundary: `vpn helperd`, a socket-activated service that
+// boundary, `vpn helperd`, a socket-activated service that
 // executes a fixed menu of privileged operations ("verbs") for
 // the unprivileged admin user.
 //
-// The trust model, in one breath: systemd owns the unix socket
+// In one breath, the trust model is this. systemd owns the unix socket
 // at /run/vpn-helperd.sock and creates its node root:vpn 0660
 // before this process ever runs, so only root and the admin
-// user can connect — the socket's permissions are the
+// user can connect. The socket's permissions are the
 // authentication. On top of that, every accepted connection is
 // re-identified with SO_PEERCRED (a kernel statement about the
 // connecting process, not a client claim) and refused unless
 // the peer uid is the admin user or root. What a connection can
-// then do is bounded by the verb menu: there is no verb that
+// then do is bounded by the verb menu. There is no verb that
 // runs a caller-supplied command line and no verb that returns
 // a caller-chosen file.
 //
 // Lifecycle: systemd starts this process when a connection
 // arrives and passes it the listening socket. Connections are
-// served ONE AT A TIME — privileged mutations are serialized by
+// served ONE AT A TIME. Privileged mutations are serialized by
 // construction, and a second client simply waits in the
 // kernel's queue. After 120 seconds with no connection the
-// process exits; the socket stays, and the next connection
+// process exits. The socket stays, and the next connection
 // starts a fresh helper. The timer only ever runs between
 // connections, so no in-flight operation can be cut short by
 // it. 120 seconds is an engineering constant, not a security
-// control: it sits far above systemd's default start-rate
+// control. It sits far above systemd's default start-rate
 // limit (5 starts per 10 seconds) so that normal use can never
-// trip rate limiting — at worst the helper is started once per
-// idle period — while a quiet box still runs no resident root
+// trip rate limiting (at worst the helper is started once per
+// idle period), while a quiet box still runs no resident root
 // process. See the unit files the installer writes for the
 // systemd half of this arrangement.
 //
 // Every verb call and outcome is logged to stdout, which
 // journald captures under the vpn-helperd unit. The admin user
 // can read that record (systemd-journal group) but cannot
-// rewrite it — the audit trail of privileged operations
+// rewrite it, so the audit trail of privileged operations
 // survives a compromise of the admin account. Parameters are
-// never logged: some carry secrets.
+// never logged, because some carry secrets.
 package helperd
 
 import (
@@ -54,6 +54,7 @@ import (
 	"time"
 
 	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/host"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/update"
 )
@@ -61,7 +62,7 @@ import (
 const (
 	// idleExit is how long the helper waits for a connection
 	// before exiting. Chosen against systemd's start-rate
-	// limit (see the package comment); not a security dial.
+	// limit (see the package comment). Not a security dial.
 	idleExit = 120 * time.Second
 
 	// headerTimeout bounds reading the request line, so a
@@ -83,8 +84,8 @@ const (
 func Serve(version string) error {
 	if os.Geteuid() != 0 {
 		return errors.New(
-			"vpn helperd runs as root via its systemd unit — " +
-				"it is not meant to be started by hand")
+			"vpn helperd runs as root via its systemd unit " +
+				"and is not meant to be started by hand")
 	}
 	// Non-interactive package operations for apt-running verbs
 	// (same environment the installer uses).
@@ -127,7 +128,7 @@ func Serve(version string) error {
 		if exit {
 			// A verb (self-update) asked the process to exit so
 			// the next activation runs the new binary. Clients
-			// lose nothing: connections queue on systemd's
+			// lose nothing, because connections queue on systemd's
 			// socket while no helper runs.
 			audit("exit", `{"event":"exit-for-update"}`)
 			return nil
@@ -152,7 +153,7 @@ func activationListener() (*net.UnixListener, error) {
 	pidStr := os.Getenv("LISTEN_PID")
 	if pidStr == "" {
 		return nil, errors.New(
-			"not socket-activated (LISTEN_PID unset) — start " +
+			"not socket-activated (LISTEN_PID unset), start " +
 				"vpn-helperd.socket and connect to it instead of " +
 				"running helperd directly")
 	}
@@ -161,7 +162,7 @@ func activationListener() (*net.UnixListener, error) {
 		return nil, fmt.Errorf("bad LISTEN_PID %q: %v", pidStr, err)
 	}
 	if pid != os.Getpid() {
-		// Environment addressed to another process; the fds are
+		// Environment addressed to another process. The fds are
 		// not ours to consume.
 		return nil, fmt.Errorf(
 			"LISTEN_PID %d is not this process (%d)",
@@ -176,7 +177,7 @@ func activationListener() (*net.UnixListener, error) {
 			"want exactly 1 activated socket, got %d", nfds)
 	}
 
-	// systemd passes fds WITHOUT close-on-exec; set it before
+	// systemd passes fds WITHOUT close-on-exec. Set it before
 	// anything can fork+exec, or a child could hold the
 	// listener open past this helper's exit.
 	syscall.CloseOnExec(listenFdsStart)
@@ -185,7 +186,7 @@ func activationListener() (*net.UnixListener, error) {
 	if f == nil {
 		return nil, errors.New("activated fd 3 is not valid")
 	}
-	// net.FileListener duplicates the fd; close our original
+	// net.FileListener duplicates the fd. Close our original
 	// after the wrap.
 	defer f.Close()
 
@@ -203,9 +204,9 @@ func activationListener() (*net.UnixListener, error) {
 }
 
 // resolveAllowedUIDs resolves the peer uids allowed to issue
-// verbs: root and the admin user. Resolved once at startup —
-// resolving per connection would turn a passwd corruption into
-// a fail-open ambiguity; once turns it into a loud start error.
+// verbs, root and the admin user. Resolved once at startup.
+// Resolving per connection would turn a passwd corruption into
+// a fail-open ambiguity. Resolving once turns it into a loud start error.
 func resolveAllowedUIDs() (map[uint32]bool, error) {
 	u, err := user.Lookup(paths.AdminUser)
 	if err != nil {
@@ -259,8 +260,7 @@ func (s *server) handleConn(c *net.UnixConn) (exitAfter bool) {
 	}
 	var req helper.Request
 	if err := json.Unmarshal(sc.Bytes(), &req); err != nil {
-		writeEnd(c, &helper.Event{Event: "end",
-			Error: "malformed request: " + err.Error()})
+		writeEnd(c, refusalEnd("malformed request: "+err.Error()))
 		auditErr("request", `{"event":"error","uid":%d,"detail":"malformed request"}`,
 			cred.Uid)
 		return false
@@ -268,22 +268,21 @@ func (s *server) handleConn(c *net.UnixConn) (exitAfter bool) {
 
 	def, ok := verbs[req.Verb]
 	if !ok {
-		writeEnd(c, &helper.Event{Event: "end",
-			Error: fmt.Sprintf("unknown verb %q", req.Verb)})
+		writeEnd(c, refusalEnd(fmt.Sprintf("unknown verb %q", req.Verb)))
 		auditErr(req.Verb, `{"event":"error","uid":%d,"verb":%q,"detail":"unknown verb"}`,
 			cred.Uid, req.Verb)
 		return false
 	}
 
 	// One absolute deadline bounds this connection's SOCKET
-	// I/O — every remaining read and every response write. It
-	// does NOT reach into the verb's subprocesses: nothing is
+	// I/O, every remaining read and every response write. It
+	// does NOT reach into the verb's subprocesses. Nothing is
 	// waiting on the socket while a privileged command runs, so
-	// a wedged subprocess is bounded by its own limits — the
+	// a wedged subprocess is bounded by its own limits (the
 	// download timeouts and retry caps in system.doDownload,
 	// apt's Acquire timeout configuration, systemd's per-unit
-	// stop timeouts — not by this deadline. Deadlines are per
-	// verb (a package upgrade legitimately needs half an hour;
+	// stop timeouts), not by this deadline. Deadlines are per
+	// verb (a package upgrade legitimately needs half an hour,
 	// a password change does not).
 	if err := c.SetDeadline(time.Now().Add(def.deadline)); err != nil {
 		auditErr(req.Verb, `{"event":"error","detail":"arm verb deadline: %v"}`, err)
@@ -296,19 +295,19 @@ func (s *server) handleConn(c *net.UnixConn) (exitAfter bool) {
 
 	ctx := &verbCtx{conn: c, version: s.version}
 	if err := update.InstalledVersion(s.version); err != nil {
-		writeEnd(c, &helper.Event{Event: "end", Error: err.Error()})
+		writeEnd(c, refusalEnd(err.Error()))
 		return true
 	}
 	unlock, err := guardHelperOperation(req.Verb)
 	if err != nil {
-		writeEnd(c, &helper.Event{Event: "end", Error: err.Error()})
+		writeEnd(c, refusalEnd(err.Error()))
 		return false
 	}
 	defer unlock()
 	result, err := def.handler(ctx, req.Params)
 	ms := time.Since(start).Milliseconds()
 	if err != nil {
-		writeEnd(c, &helper.Event{Event: "end", Error: err.Error()})
+		writeEnd(c, failureEnd(err))
 		auditErr(req.Verb, `{"event":"outcome","verb":%q,"uid":%d,"outcome":"error","ms":%d,"detail":%q}`,
 			req.Verb, cred.Uid, ms, err.Error())
 		return false
@@ -332,7 +331,7 @@ type verbCtx struct {
 	version string
 
 	// exitAfterEnd makes the process exit after this
-	// connection — the self-update contract: the next
+	// connection, the self-update contract. The next
 	// activation runs the freshly installed binary.
 	exitAfterEnd bool
 }
@@ -340,8 +339,8 @@ type verbCtx struct {
 // emitStep reports step i of a streaming verb as complete.
 // Write failures are deliberately not fatal to the OPERATION:
 // a client that vanished mid-stream does not get to abort a
-// privileged mutation halfway — the operation finishes and the
-// journal keeps the record; only the progress reporting is
+// privileged mutation halfway. The operation finishes and the
+// journal keeps the record. Only the progress reporting is
 // lost.
 func (ctx *verbCtx) emitStep(i int) {
 	if ctx.conn == nil {
@@ -366,7 +365,7 @@ func writeEnd(c *net.UnixConn, ev *helper.Event) {
 
 // ── Audit output ─────────────────────────────────────────
 //
-// One line per record to stdout; journald stamps each with
+// One line per record to stdout. journald stamps each with
 // trusted metadata (_UID=0, _SYSTEMD_UNIT=vpn-helperd.service)
 // that no client-side writer can forge. The "<3>" prefix marks
 // error-priority records (journald parses and strips it).
@@ -378,4 +377,19 @@ func audit(_ string, format string, args ...any) {
 
 func auditErr(_ string, format string, args ...any) {
 	fmt.Fprintf(os.Stdout, "<3>"+format+"\n", args...)
+}
+
+// refusalEnd ends a request refused before it ran, so nothing was changed.
+func refusalEnd(message string) *helper.Event {
+	return &helper.Event{Event: "end", Error: message, Code: helper.CodeNothingChanged}
+}
+
+// failureEnd ends a request whose handler failed. It says that nothing was
+// changed only when the host marked the failure as coming before any change.
+func failureEnd(err error) *helper.Event {
+	end := &helper.Event{Event: "end", Error: err.Error()}
+	if errors.Is(err, host.ErrNothingChanged) {
+		end.Code = helper.CodeNothingChanged
+	}
+	return end
 }
