@@ -118,7 +118,7 @@ func TestInteractiveFinalizationDoesNotNeedObserver(t *testing.T) {
 					events = append(events, e)
 				}
 				if len(events) != 3 || events[0].Status != StepRunning || events[1].Status != StepDone || !events[2].Final {
-					t.Fatalf("expected running, done, final progress; got %+v", events)
+					t.Fatalf("expected running, done, final progress, got %+v", events)
 				}
 				if events[2].Result.Outcome != RunComplete || !errors.Is(events[2].CompletionErr, completionErr) {
 					t.Fatal("final event lost execution or publication result")
@@ -170,31 +170,55 @@ func TestInteractiveFailureAndPublicationStopExecution(t *testing.T) {
 	}
 }
 
-func TestInteractiveInputValidationAndRetry(t *testing.T) {
-	calls, writes := 0, 0
-	s, input := interactiveFixture(t, []InstallStep{{Key: "binary.install", Name: "Binary", Fn: func() error { calls++; return nil }}}, func() error { return nil })
-	s.needHardware = true
-	writeErr := errors.New("cache decision not saved")
-	s.persistDBCache = func(int) error { writes++; return writeErr }
-	input.DBCacheMB = 512
-	for _, invalid := range []InteractiveInput{
-		{DBCacheMB: 512},
-		{Password: input.Password, DBCacheMB: 999},
-	} {
-		if err := s.Start(invalid); err == nil {
-			t.Fatal("invalid decisions accepted")
-		}
+// A fresh install records the cache recommended for the measured memory,
+// after the password is accepted and before any step runs. A failed record
+// admits no step, and a retry can still start the install.
+func TestInteractiveStartRecordsRecommendedCache(t *testing.T) {
+	original := detectHardware
+	t.Cleanup(func() { detectHardware = original })
+	detectHardware = func() Hardware { return Hardware{MemoryBytes: 6144 << 20} }
+
+	ledger, err := newLedger(installContext{Network: "mainnet", InitialP2PMode: "tor"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if writes != 0 || calls != 0 || s.started {
+	path := filepath.Join(t.TempDir(), "ledger.json")
+	if err := ledger.save(path); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	step := func() error { calls++; return nil }
+	runner, err := newStepRunner([]InstallStep{
+		{Key: "identity.access", Name: "Identity", Fn: step},
+		{Key: "btc.install", Name: "Core", Fn: step},
+	}, "test", ledger, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var written []int
+	writeErr := errors.New("cache decision not saved")
+	s := newInstallSession(runner, &InstallDecisions{},
+		func(v int) error { written = append(written, v); return writeErr },
+		func() error { return nil })
+
+	if err := s.Start(InteractiveInput{}); err == nil {
+		t.Fatal("missing password accepted")
+	}
+	if len(written) != 0 || calls != 0 || s.started {
 		t.Fatal("invalid input crossed mutation boundary")
 	}
+	pw, err := loginpassword.New("exact-test-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := InteractiveInput{Password: pw}
 	if err := s.Start(input); !errors.Is(err, writeErr) {
 		t.Fatalf("cache error=%v", err)
 	}
 	if s.started || calls != 0 || s.dec.Password.Text() != "" {
 		t.Fatal("failed decision persistence admitted execution")
 	}
-	s.persistDBCache = func(int) error { writes++; return nil }
+	s.persistDBCache = func(v int) error { written = append(written, v); return nil }
 	if err := s.Start(input); err != nil {
 		t.Fatal(err)
 	}
@@ -202,8 +226,9 @@ func TestInteractiveInputValidationAndRetry(t *testing.T) {
 		t.Fatal("duplicate start accepted")
 	}
 	<-s.done
-	if calls != 1 || writes != 2 {
-		t.Fatalf("calls=%d writes=%d", calls, writes)
+	want := RecommendDbCache(6144)
+	if len(written) != 2 || written[0] != want || written[1] != want {
+		t.Fatalf("written=%v, want the recommendation for 6144 MB twice", written)
 	}
 }
 
@@ -245,7 +270,7 @@ func TestInteractiveResumeExecutesGateAndPublishesSkips(t *testing.T) {
 	calls := make(map[string]int)
 	steps := testSteps(calls)
 	ledger := testLedger()
-	// Resume after identity: mutations and the completed pipeline stay saved,
+	// Resume after identity. Mutations and the completed pipeline stay saved,
 	// but this pass must recheck its gate before reaching the remaining step.
 	for _, step := range steps[:6] {
 		if err := ledger.markDone(step.Key, "previous"); err != nil {
@@ -264,7 +289,7 @@ func TestInteractiveResumeExecutesGateAndPublishesSkips(t *testing.T) {
 	s := newInstallSession(runner, &InstallDecisions{},
 		func(int) error { t.Error("resume overwrote cache choice"); return nil },
 		func() error { finalized++; return nil })
-	if s.needIdentity || s.needHardware {
+	if s.needIdentity || s.needCache {
 		t.Fatal("resume requested previously recorded choices")
 	}
 	if err := s.Start(InteractiveInput{}); err != nil {
@@ -299,7 +324,7 @@ func TestRootRunInstallExitRetainsRunLock(t *testing.T) {
 	if err := ledger.save(f.fs.ledger); err != nil {
 		t.Fatal(err)
 	}
-	installStartupFixture(t, f, func() (host.SSHObservation, error) {
+	installStartupFixture(t, f, func(bool) (host.SSHObservation, error) {
 		return host.SSHObservation{PasswordAuth: true}, nil
 	})
 	deps := newInstallStartupDependencies()

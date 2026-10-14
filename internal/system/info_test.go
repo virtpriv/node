@@ -98,6 +98,47 @@ func TestMemoryUnavailableIsNotFullUsage(t *testing.T) {
 	}
 }
 
+// /proc/meminfo counts in units of 1024 bytes. The screen gets bytes.
+func TestMemoryIsReadInBytes(t *testing.T) {
+	info, err := parseMemory("MemTotal: 1000 kB\nMemAvailable: 250 kB")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.TotalBytes != 1_024_000 || info.UsedBytes != 768_000 || info.Percent != "75%" {
+		t.Fatalf("got %+v, want 1024000 total, 768000 used, 75%%", info)
+	}
+}
+
+// df -B1 prints a header, then size, used and percent in bytes. Anything
+// else is an unreadable observation, never a guess.
+func TestDiskUsageIsReadInBytes(t *testing.T) {
+	info, err := parseDisk("     1B-blocks        Used Use%\n96636764160 4400000000   5%\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.TotalBytes != 96_636_764_160 || info.UsedBytes != 4_400_000_000 || info.Percent != "5%" {
+		t.Fatalf("got %+v", info)
+	}
+	for _, bad := range []string{"", "1B-blocks Used Use%", "1B-blocks Used Use%\n96G 4G 5%", "1B-blocks Used Use%\n100 50"} {
+		if _, err := parseDisk(bad); err == nil {
+			t.Errorf("unreadable df output accepted: %q", bad)
+		}
+	}
+}
+
+// du -s -B1 prints the bytes used, a tab and the path. Anything else is
+// unknown.
+func TestDirectorySizeIsReadInBytes(t *testing.T) {
+	if got, ok := parseDu("108003328\t/var/lib/lnd\n"); !ok || got != 108_003_328 {
+		t.Fatalf("got %d %v", got, ok)
+	}
+	for _, bad := range []string{"", "108M\t/var/lib/lnd", "\t/var/lib/lnd"} {
+		if _, ok := parseDu(bad); ok {
+			t.Errorf("unreadable du output accepted: %q", bad)
+		}
+	}
+}
+
 func TestServiceReadDistinguishesInactiveAndFailedQuery(t *testing.T) {
 	dir := t.TempDir()
 	// Deliberately return a plausible state with a failed process exit as well

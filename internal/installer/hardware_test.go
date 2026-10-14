@@ -4,23 +4,21 @@ package installer
 
 import "testing"
 
-// ── parseMemTotalMB ──────────────────────────────────────
+// ── parseMemTotal ────────────────────────────────────────
 
-func TestParseMemTotalMB(t *testing.T) {
+// MemTotal is given in units of 1024 bytes. A missing or garbled line is
+// unknown (zero), never a guess.
+func TestParseMemTotal(t *testing.T) {
 	meminfo := "MemTotal:        3915776 kB\n" +
 		"MemFree:          123456 kB\n" +
 		"MemAvailable:    2345678 kB\n"
-	if got := parseMemTotalMB(meminfo); got != 3824 {
-		t.Errorf("got %d MB, want 3824", got)
+	if got := parseMemTotal(meminfo); got != 4_009_754_624 {
+		t.Errorf("got %d bytes, want 4009754624", got)
 	}
-	if got := parseMemTotalMB(""); got != 0 {
-		t.Errorf("empty: got %d, want 0", got)
-	}
-	if got := parseMemTotalMB("MemTotal: garbage kB\n"); got != 0 {
-		t.Errorf("garbled: got %d, want 0", got)
-	}
-	if got := parseMemTotalMB("MemTotal:\n"); got != 0 {
-		t.Errorf("missing value: got %d, want 0", got)
+	for _, bad := range []string{"", "MemTotal: garbage kB\n", "MemTotal:\n"} {
+		if got := parseMemTotal(bad); got != 0 {
+			t.Errorf("%q: got %d, want 0", bad, got)
+		}
 	}
 }
 
@@ -48,20 +46,11 @@ func TestRecommendDbCache(t *testing.T) {
 	}
 }
 
-// Every recommendation must be selectable on the hardware
-// screen — the recommendation is one of the cycle choices.
-func TestRecommendationsAreChoices(t *testing.T) {
+// Every recommendation must be a value the install record accepts.
+func TestRecommendationsAreRecordable(t *testing.T) {
 	for _, ram := range []int{0, 2048, 4096, 8192} {
-		rec := RecommendDbCache(ram)
-		found := false
-		for _, c := range dbCacheChoices {
-			if c == rec {
-				found = true
-			}
-		}
-		if !found {
-			t.Errorf("recommendation %d for %d MB not in "+
-				"choices %v", rec, ram, dbCacheChoices)
+		if rec := RecommendDbCache(ram); !validDbCache(rec) {
+			t.Errorf("recommendation %d for %d MB is not recordable", rec, ram)
 		}
 	}
 }

@@ -27,7 +27,6 @@ func (s *fakeSession) Events() <-chan installer.InstallEvent { return s.events }
 func wizardFixture() (wizardModel, *fakeSession) {
 	session := &fakeSession{events: make(chan installer.InstallEvent, 10)}
 	info := installer.InstallView{NeedIdentity: true,
-		DBCacheChoices: []int{512, 1024, 2048}, RecommendedDBCache: 1024,
 		Steps: []installer.InstallStepView{{Name: "First"}, {Name: "Second"}}}
 	return newWizardModel(info, session), session
 }
@@ -151,25 +150,31 @@ func TestWizardStopWaitsForEngineResult(t *testing.T) {
 	assertQuit(t, cmd)
 }
 
+// A start the installer refuses, for example because the cache decision was
+// not saved, returns to the password screen with the error and can be retried.
 func TestWizardDecisionRetryAndCompletionFailure(t *testing.T) {
 	m, session := wizardFixture()
-	m.phase = wzSteps
+	m.pwInput.SetValue("abcdefghijklmnop")
+	m.pwConfirm.SetValue("abcdefghijklmnop")
+	m.pwFocus = 2
 	session.err = errors.New("cache write failed")
-	m.info.NeedHardware = true
-	m, cmd := updateWizard(t, m, m.Init()())
-	if m.phase != wzHardware || m.hwErr == "" || cmd != nil {
+	m, cmd := updateWizard(t, m, enter())
+	if m.phase != wzSteps || cmd == nil {
+		t.Fatal("password did not lead straight to the install")
+	}
+	m, cmd = updateWizard(t, m, cmd())
+	if m.phase != wzPassword || m.pwErr == "" || cmd != nil {
 		t.Fatal("decision error not recoverable")
 	}
 	session.err = nil
-	m.hwFocus = 1
-	m.hwBtn = len(m.hwButtons()) - 1
+	m.pwFocus = 2
 	m, cmd = updateWizard(t, m, enter())
 	if cmd == nil {
 		t.Fatal("retry not scheduled")
 	}
 	m, wait := updateWizard(t, m, cmd())
-	if wait == nil || session.starts != 2 || session.input.DBCacheMB != 1024 {
-		t.Fatal("retry did not submit selected cache")
+	if wait == nil || session.starts != 2 || session.input.Password.Text() != "abcdefghijklmnop" {
+		t.Fatal("retry did not submit the password")
 	}
 	event := installer.InstallEvent{Index: 0, Status: installer.StepSkipped}
 	session.events <- event

@@ -13,6 +13,7 @@ import (
 
 	"github.com/virtpriv/node/internal/app"
 	"github.com/virtpriv/node/internal/bitcoin"
+	"github.com/virtpriv/node/internal/bytesize"
 	"github.com/virtpriv/node/internal/lndrpc"
 	"github.com/virtpriv/node/internal/release"
 	"github.com/virtpriv/node/internal/servicecontrol"
@@ -21,16 +22,16 @@ import (
 )
 
 // ── SystemHomeScreen ──────────────────────────────────
-// Section home for System. Two focus zones: buttons
-// and scrollable service list with hotkey actions.
+// Section home for System. Two focus zones, the buttons and
+// the scrollable service list with hotkey actions.
 //
-// Buttons are dynamic. Only actionable buttons appear:
-//   Update Packages and Accounts (always),
-//   Node Updates (always, including saved recovery), Reboot (when required).
+// Buttons are dynamic and only actionable ones appear. Update
+// Packages and Accounts always show, Node Updates always shows
+// (including saved recovery), and Reboot shows when required.
 //
-// Confirms are screen-owned: svcConfirm and sysConfirm
-// live here. When active, they intercept all keys and
-// show y/n prompt in the view and helpbar.
+// The screen owns its confirms. svcConfirm and sysConfirm live
+// here. When active, they intercept all keys and show a y/n
+// prompt in the view and helpbar.
 
 const (
 	sysHomeZoneButtons  = 0
@@ -456,10 +457,10 @@ func (s *SystemHomeScreen) View(
 			// Standard service hints, dim
 			hint := theme.Dim.Render(
 				"  r restart  s stop  a start  l logs")
-			// LND-specific destructive hotkeys:
-			// the hotkey letter itself is rendered
-			// in red so users see they're sensitive,
-			// while the description stays dim.
+			// LND-specific destructive hotkeys. The
+			// hotkey letter itself is rendered in red
+			// so users see they're sensitive, while
+			// the description stays dim.
 			if name == "lnd" &&
 				s.ctx.Cfg.P2PMode == "tor" {
 				hint += "  " +
@@ -535,14 +536,14 @@ func (s *SystemHomeScreen) View(
 			" " + theme.Label.Render("Disk: ") +
 				theme.Value.Render(
 					observationText(status.Disk, fmt.Sprintf("%s / %s (%s)",
-						status.Disk.Value.Used,
-						status.Disk.Value.Total,
+						bytesize.Format(status.Disk.Value.UsedBytes),
+						bytesize.Format(status.Disk.Value.TotalBytes),
 						status.Disk.Value.Percent))),
 			" " + theme.Label.Render("RAM:  ") +
 				theme.Value.Render(
 					observationText(status.Memory, fmt.Sprintf("%s / %s (%s)",
-						status.Memory.Value.Used,
-						status.Memory.Value.Total,
+						bytesize.Format(status.Memory.Value.UsedBytes),
+						bytesize.Format(status.Memory.Value.TotalBytes),
 						status.Memory.Value.Percent))),
 			" " + theme.Label.Render("BTC:  ") +
 				theme.Value.Render(
