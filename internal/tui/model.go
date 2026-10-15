@@ -53,6 +53,7 @@ const (
 	tabChannelHistory                   // channel history view
 	tabSyncthingInstall                 // Syncthing install flow
 	tabP2PUpgrade                       // P2P mode upgrade flow
+	tabUpdates                          // Node Updates and Debian packages
 	tabNodeUpdates                      // Node update flow
 	tabAutoUnlock                       // Auto-unlock configuration flow
 	tabWalletCreate                     // Wallet creation flow
@@ -73,14 +74,13 @@ type openTab struct {
 	// Section remains the tab's owner across wallet-to-auto-unlock transitions.
 	Section int
 	// Parent declares which tab kind owns this tab.
-	// Zero means "section home is the parent" (top-
+	// Zero means "section home is the parent" (top
 	// level detail tabs opened from home screens).
 	// Non-zero means this tab is a child of another
 	// detail tab (e.g. tabSyncthingDevice's Parent is
-	// tabSyncthing). Used by closeTab for cascade-
-	// close and by focusParentMsg for backspace
-	// navigation. No grandchild tabs exist, depth
-	// is at most two levels.
+	// tabSyncthing). Used by closeTab, which also
+	// closes children and their children, and by
+	// focusParentMsg for backspace navigation.
 	Parent tabKind
 	Screen Screen // owns all state for this tab's content (nil = legacy path)
 }

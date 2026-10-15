@@ -39,7 +39,7 @@ func ensureOperatorAccount(lookup func(string) (*user.User, error), run func(str
 // ConfigureOperatorAutoLaunch opens the node TUI for interactive SSH logins.
 // Installer calls it after recording successful password application.
 func ConfigureOperatorAutoLaunch() error {
-	profile := `# Virtual Private Node — auto-launch
+	profile := `# Virtual Private Node, auto-launch
 if [ -n "$SSH_CONNECTION" ] && [ -t 0 ]; then
     ` + paths.BinaryPath + `
 fi
@@ -47,10 +47,10 @@ fi
 # Source .bashrc after the TUI exits (cli wrappers live there)
 [ -f ~/.bashrc ] && source ~/.bashrc
 `
-	if err := system.WriteFileRoot(paths.AdminBashProfile, []byte(profile), 0644); err != nil {
+	if err := system.WriteFileRootOwned(paths.AdminBashProfile, []byte(profile), 0644, paths.AdminUser, paths.AdminUser); err != nil {
 		return fmt.Errorf("write .bash_profile: %w", err)
 	}
-	return system.RunRoot("chown", paths.AdminUser+":"+paths.AdminUser, paths.AdminBashProfile)
+	return nil
 }
 
 // SetOperatorLogOwnership gives the operator its application log. System

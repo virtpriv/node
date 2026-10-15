@@ -82,10 +82,7 @@ func WriteTorConfig(cfg *config.AppConfig) error {
 }
 
 func writeTorConfig(content []byte) error {
-	if err := system.WriteFileRoot(paths.Torrc, content, 0640); err != nil {
-		return err
-	}
-	return system.RunRoot("chown", "root:debian-tor", paths.Torrc)
+	return system.WriteFileRootOwned(paths.Torrc, content, 0640, "root", "debian-tor")
 }
 
 func validateTorConfig(content []byte) error {

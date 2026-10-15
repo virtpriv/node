@@ -18,17 +18,33 @@ func TestSavedUpdateCanBeResumedWithoutReleaseDiscovery(t *testing.T) {
 	client := &nodeUpdateClientStub{status: protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1-rc.1", Phase: "failed", Active: true}}
 	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0"}
 	home := NewSystemHomeScreen(ctx)
-	home.btnIdx = slices.Index(home.buttonActions(), sysBtnUpdateNode)
+	home.btnIdx = slices.Index(home.buttonActions(), sysBtnUpdates)
 	if home.btnIdx < 0 {
 		t.Fatal("saved update is unreachable without release discovery")
 	}
 	_, cmd := home.HandleKey("enter", tea.KeyPressMsg{})
 	if cmd == nil {
-		t.Fatal("Node Updates did not open")
+		t.Fatal("Updates did not open")
 	}
 	opened, ok := cmd().(openTabMsg)
+	if !ok || opened.Kind != tabUpdates {
+		t.Fatal("Updates did not open a tab")
+	}
+	updates, ok := opened.Screen.(*UpdatesScreen)
 	if !ok {
-		t.Fatal("Node Updates did not open a tab")
+		t.Fatal("Updates opened the wrong screen")
+	}
+	updates.button = slices.Index(updates.buttons(), "Node Updates")
+	if updates.button < 0 {
+		t.Fatal("Updates has no Node Updates button")
+	}
+	_, cmd = updates.HandleKey("enter", tea.KeyPressMsg{})
+	if cmd == nil {
+		t.Fatal("Node Updates did not open")
+	}
+	opened, ok = cmd().(openTabMsg)
+	if !ok || opened.Parent != tabUpdates {
+		t.Fatal("Node Updates did not open a tab under Updates")
 	}
 	s, ok := opened.Screen.(*NodeUpdateScreen)
 	if !ok {

@@ -61,11 +61,11 @@ debuglevel=info
 %s
 
 # Let LND own its TLS cert lifecycle. At startup, LND
-# replaces an expired cert; tlsautorefresh also replaces
+# replaces an expired cert. tlsautorefresh also replaces
 # it when configured SAN inputs change (e.g. tlsextraip is
 # added during a P2P upgrade). It does not renew an
 # unchanged cert before expiry. tlsdisableautofill keeps
-# the cert deterministic; it contains only what we set
+# the cert deterministic. It contains only what we set
 # explicitly here, not autodetected interface IPs.
 # This is the same pattern used by Raspiblitz.
 tlsautorefresh=1
@@ -123,7 +123,7 @@ protocol.simple-taproot-chans=true
 # This is distinct from Tor onion-service routing.
 protocol.no-onion-messages=false
 # LND requires RBF cooperative close support whenever final
-# Taproot channels are enabled. Keep that dependency explicit;
+# Taproot channels are enabled. Keep that dependency explicit.
 # VPN's operator-driven fee-bump workflow remains deferred.
 protocol.rbf-coop-close=true
 # Accept channels larger than 0.16 BTC.
@@ -145,10 +145,10 @@ db.use-native-sql=true
 # Three attempts can stop LND after roughly 4-6.5 minutes.
 # A failed check currently requests graceful exit status 0,
 # which Restart=on-failure does not restart. Re-evaluate the
-# budget and upstream issue 5625 / PR 10944 on each upgrade.
+# budget and LND issue 5625 at each LND upgrade.
 # Keep TLS checking disabled explicitly. It only detects an
-# already-expired cert and requests the same graceful stop;
-# startup, not this check, performs certificate replacement.
+# already-expired cert and requests the same graceful stop.
+# Startup, not this check, performs certificate replacement.
 healthcheck.tls.attempts=0
 # Reconnect LND's controller and recreate the same dynamic
 # onion after Tor restarts. Ten attempts retain the upstream
@@ -193,10 +193,7 @@ func WriteLNDConfigWithRPCPassword(
 	if err != nil {
 		return err
 	}
-	if err := system.WriteFileRoot(paths.LNDConf, []byte(content), 0640); err != nil {
-		return err
-	}
-	return system.RunRoot("chown", "root:lnd", paths.LNDConf)
+	return system.WriteFileRootOwned(paths.LNDConf, []byte(content), 0640, "root", lndUser)
 }
 
 // readRequiredLNDRESTOnion enforces the dependency between Tor's
