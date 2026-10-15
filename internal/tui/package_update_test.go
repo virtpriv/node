@@ -23,16 +23,47 @@ func (s *packageUpdatesStub) Update() <-chan app.PackageUpdateResult {
 }
 func (*packageUpdatesStub) Close() {}
 
+// openUpdates opens the Updates tab from the System screen's Updates button
+// and returns it with its Update Packages button selected.
+func openUpdates(t *testing.T, m *Model, home *SystemHomeScreen) *UpdatesScreen {
+	t.Helper()
+	m.focusContent()
+	home.focusZone = sysHomeZoneButtons
+	home.btnIdx = slices.Index(home.buttonActions(), sysBtnUpdates)
+	if home.btnIdx < 0 {
+		t.Fatal("System has no Updates button")
+	}
+	cmd := statusUpdate(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("Updates did not open")
+	}
+	statusUpdate(m, cmd())
+	var updates *UpdatesScreen
+	for _, tab := range m.effectiveTabs() {
+		if s, ok := tab.Screen.(*UpdatesScreen); ok && tab.Kind == tabUpdates {
+			updates = s
+		}
+	}
+	if updates == nil || m.effectiveTabs()[m.activeTab].Screen != Screen(updates) {
+		t.Fatal("Updates did not open as the active tab")
+	}
+	updates.button = slices.Index(updates.buttons(), "Update Packages")
+	if updates.button < 0 {
+		t.Fatal("Updates has no Update Packages button")
+	}
+	return updates
+}
+
 func TestPackageUpdateHiddenCompletionAndRetryIdentity(t *testing.T) {
 	m, _ := statusModelFixture(t)
 	fake := &packageUpdatesStub{}
 	m.screenCtx.PackageUpdates = fake
 	m.nav.ActiveItem, m.nav.Cursor = secSystem, secSystem
-	m.focusContent()
 	s := NewSystemHomeScreen(m.screenCtx)
 	m.sectionScreens[secSystem] = s
 	m.sectionScreens[secAddons] = NewAddonsHomeScreen(m.screenCtx)
 	press := func(code rune) tea.Cmd { return statusUpdate(&m, tea.KeyPressMsg{Code: code}) }
+	updates := openUpdates(t, &m, s)
 	press(tea.KeyEnter)
 	confirm := press('y')
 	if confirm == nil {
@@ -49,7 +80,7 @@ func TestPackageUpdateHiddenCompletionAndRetryIdentity(t *testing.T) {
 	if !strings.Contains(ansi.Strip(m.viewMain()), "Updating...") {
 		t.Fatal("pending update hidden")
 	}
-	for _, binding := range s.HelpBindings() {
+	for _, binding := range updates.HelpBindings() {
 		if slices.Contains(binding.Keys(), "enter") {
 			t.Fatal("pending help advertises blocked action")
 		}
@@ -58,8 +89,22 @@ func TestPackageUpdateHiddenCompletionAndRetryIdentity(t *testing.T) {
 	if press('y') != nil || fake.calls != 1 {
 		t.Fatal("duplicate update accepted while pending")
 	}
+	// Closing the Updates tab and opening it again must neither lose the
+	// running update nor let a second one start.
+	statusUpdate(&m, closeTabMsg{})
+	if slices.ContainsFunc(m.effectiveTabs(), func(tab openTab) bool { return tab.Screen == Screen(updates) }) {
+		t.Fatal("Updates tab did not close")
+	}
+	updates = openUpdates(t, &m, s)
+	if !strings.Contains(ansi.Strip(m.viewMain()), "Updating...") {
+		t.Fatal("reopened Updates lost the running update")
+	}
+	press(tea.KeyEnter)
+	if press('y') != nil || fake.calls != 1 {
+		t.Fatal("reopened Updates started a second update")
+	}
 	// Navigate through root dispatch while the same System screen stays mounted.
-	statusUpdate(&m, press(tea.KeyLeft)())
+	statusUpdate(&m, emitFocusSidebar())
 	press(tea.KeyUp)
 	press(tea.KeyEnter)
 	if m.nav.ActiveSection() == secSystem {
@@ -71,12 +116,13 @@ func TestPackageUpdateHiddenCompletionAndRetryIdentity(t *testing.T) {
 	if s.pkgPending != nil {
 		t.Fatal("hidden owner did not complete")
 	}
-	statusUpdate(&m, press(tea.KeyLeft)())
+	statusUpdate(&m, emitFocusSidebar())
 	press(tea.KeyDown)
 	press(tea.KeyEnter)
 	if m.nav.ActiveSection() != secSystem {
 		t.Fatal("did not return to System")
 	}
+	updates = openUpdates(t, &m, s)
 	view := ansi.Strip(m.viewMain())
 	if !strings.Contains(view, "Package update outcome unconfirmed") || !strings.Contains(view, "administrator") {
 		t.Fatalf("retained outcome missing: %s", view)
@@ -107,12 +153,12 @@ func TestPackageUpdateRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 	fake := &packageUpdatesStub{}
 	m.screenCtx.PackageUpdates = fake
 	m.nav.ActiveItem = secSystem
-	m.focusContent()
 	s := NewSystemHomeScreen(m.screenCtx)
 	m.sectionScreens[secSystem] = s
 	m.statusScope = m.currentStatusScope()
 	m.screenCtx.Status = &app.StatusSnapshot{Reboot: freshStatus(false), Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
 	before, beforeDone := startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
+	openUpdates(t, &m, s)
 	statusUpdate(&m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	confirm := statusUpdate(&m, tea.KeyPressMsg{Code: 'y'})
 	resultCmd := statusUpdate(&m, confirm())
@@ -145,7 +191,9 @@ func TestPackageUpdateRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 		t.Fatal("post-update observation did not recover")
 	}
 	view := ansi.Strip(m.viewMain())
-	if !strings.Contains(view, "Reboot required") || !strings.Contains(view, "Package update completed.") {
+	// The open view is Updates. It shows the result and that a reboot is
+	// now needed, which System's resources card shows too.
+	if !strings.Contains(view, "Reboot") || !strings.Contains(view, "Package update completed.") {
 		t.Fatalf("existing view did not refresh: %s", view)
 	}
 }

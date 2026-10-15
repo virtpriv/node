@@ -214,13 +214,8 @@ func initializeSyncthingConfig(password string) error {
 	rendered := renderSyncthingConfig(
 		gen.Devices[0].ID, gen.Devices[0].Name,
 		gen.GUI.APIKey, string(hash))
-	if err := system.WriteFileRoot(paths.SyncthingConfigXML,
-		[]byte(rendered), 0640); err != nil {
-		return err
-	}
-	if err := system.RunRoot("chown",
-		syncthingUser+":"+syncthingUser,
-		paths.SyncthingConfigXML); err != nil {
+	if err := system.WriteFileRootOwned(paths.SyncthingConfigXML,
+		[]byte(rendered), 0640, syncthingUser, syncthingUser); err != nil {
 		return err
 	}
 

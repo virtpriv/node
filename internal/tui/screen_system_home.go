@@ -25,13 +25,16 @@ import (
 // Section home for System. Two focus zones, the buttons and
 // the scrollable service list with hotkey actions.
 //
-// Buttons are dynamic and only actionable ones appear. Update
-// Packages and Accounts always show, Node Updates always shows
-// (including saved recovery), and Reboot shows when required.
+// Buttons are dynamic and only actionable ones appear. Updates
+// and Accounts always show, and Reboot shows when required.
+// Updates opens Node Updates, which stays reachable for a saved
+// update, and Update Packages.
 //
 // The screen owns its confirms. svcConfirm and sysConfirm live
 // here. When active, they intercept all keys and show a y/n
-// prompt in the view and helpbar.
+// prompt in the view and helpbar. It also owns the package
+// update the Updates tab starts, so the update and its result
+// outlive that tab.
 
 const (
 	sysHomeZoneButtons  = 0
@@ -43,9 +46,8 @@ const (
 type sysBtn int
 
 const (
-	sysBtnUpdatePkg sysBtn = iota
+	sysBtnUpdates sysBtn = iota
 	sysBtnAccounts
-	sysBtnUpdateNode
 	sysBtnReboot
 )
 
@@ -57,11 +59,12 @@ type SystemHomeScreen struct {
 
 	// Confirmed service identity is independent of the cursor.
 	svcConfirm *servicecontrol.Request
-	sysConfirm string // "Update packages", "Reboot"
+	sysConfirm string // "Reboot"
 
 	// Background service action in progress
-	svcPending     *serviceAttempt
-	svcResult      string
+	svcPending *serviceAttempt
+	svcResult  string
+	// The package update the Updates tab started and shows.
 	pkgPending     *packageAttempt
 	pkgResult      string
 	rebootPending  *rebootAttempt
@@ -240,22 +243,10 @@ func (s *SystemHomeScreen) HandleKey(
 		if s.focusZone == sysHomeZoneButtons &&
 			s.btnIdx < len(actions) {
 			switch actions[s.btnIdx] {
-			case sysBtnUpdatePkg:
-				if s.pkgPending == nil {
-					s.sysConfirm = "Update packages"
-				}
+			case sysBtnUpdates:
+				return s, openUpdatesCmd(s)
 			case sysBtnAccounts:
 				return s, openAccountsCmd(s.ctx)
-			case sysBtnUpdateNode:
-				screen := NewNodeUpdateScreen(
-					s.ctx)
-				return s, func() tea.Msg {
-					return openTabMsg{
-						Kind:   tabNodeUpdates,
-						Label:  "Updates",
-						Screen: screen,
-					}
-				}
 			case sysBtnReboot:
 				if s.rebootPending == nil && !s.rebootAccepted {
 					s.sysConfirm = "Reboot"
@@ -287,21 +278,13 @@ func (s *SystemHomeScreen) handleSysConfirm(
 ) (Screen, tea.Cmd) {
 	action := s.sysConfirm
 	s.sysConfirm = ""
-	if keyStr == "y" {
-		if action == "Reboot" {
-			if s.rebootPending != nil || s.rebootAccepted {
-				return s, nil
-			}
-			attempt := &rebootAttempt{}
-			s.rebootPending, s.rebootResult = attempt, ""
-			return s, func() tea.Msg { return rebootRequestMsg{owner: s, attempt: attempt} }
-		}
-		if s.pkgPending != nil {
+	if keyStr == "y" && action == "Reboot" {
+		if s.rebootPending != nil || s.rebootAccepted {
 			return s, nil
 		}
-		s.pkgPending = &packageAttempt{}
-		s.pkgResult = ""
-		return s, packageUpdateCmd(s, s.pkgPending)
+		attempt := &rebootAttempt{}
+		s.rebootPending, s.rebootResult = attempt, ""
+		return s, func() tea.Msg { return rebootRequestMsg{owner: s, attempt: attempt} }
 	}
 	return s, nil
 }
@@ -371,11 +354,6 @@ func (s *SystemHomeScreen) View(
 
 	if s.svcResult != "" {
 		result := lipgloss.NewStyle().Width(max(1, w-4)).Render(s.svcResult)
-		headerLines = append(headerLines, strings.Split(result, "\n")...)
-		headerLines = append(headerLines, "")
-	}
-	if s.pkgResult != "" {
-		result := lipgloss.NewStyle().Width(max(1, w-4)).Render(s.pkgResult)
 		headerLines = append(headerLines, strings.Split(result, "\n")...)
 		headerLines = append(headerLines, "")
 	}
@@ -715,8 +693,7 @@ func (s *SystemHomeScreen) HelpBindings() []key.Binding {
 	bindings := homeButtonBindings("services", s.btnIdx, s.ctx.HasTabs)
 	actions := s.buttonActions()
 	blocked := s.btnIdx < len(actions) &&
-		((actions[s.btnIdx] == sysBtnUpdatePkg && s.pkgPending != nil) ||
-			(actions[s.btnIdx] == sysBtnReboot && (s.rebootPending != nil || s.rebootAccepted)))
+		actions[s.btnIdx] == sysBtnReboot && (s.rebootPending != nil || s.rebootAccepted)
 	if blocked {
 		for i := range bindings {
 			if slices.Contains(bindings[i].Keys(), "enter") {
@@ -768,7 +745,7 @@ func (s *SystemHomeScreen) hasUpdate() bool {
 func (s *SystemHomeScreen) buttonActions() []sysBtn {
 	// Saved updates must remain reachable without release discovery, including
 	// after a reboot, failed startup, or a completed VPN binary replacement.
-	actions := []sysBtn{sysBtnUpdatePkg, sysBtnAccounts, sysBtnUpdateNode}
+	actions := []sysBtn{sysBtnUpdates, sysBtnAccounts}
 	if s.rebootPending != nil || s.rebootAccepted ||
 		(s.ctx.Status != nil && s.ctx.Status.Reboot.Value) {
 		actions = append(actions, sysBtnReboot)
@@ -777,10 +754,9 @@ func (s *SystemHomeScreen) buttonActions() []sysBtn {
 }
 
 var sysBtnLabel = map[sysBtn]string{
-	sysBtnUpdatePkg:  "Update Packages",
-	sysBtnAccounts:   "Accounts",
-	sysBtnUpdateNode: "Node Updates",
-	sysBtnReboot:     "Reboot",
+	sysBtnUpdates:  "Updates",
+	sysBtnAccounts: "Accounts",
+	sysBtnReboot:   "Reboot",
 }
 
 func (s *SystemHomeScreen) buttonLabels() []string {
@@ -788,7 +764,7 @@ func (s *SystemHomeScreen) buttonLabels() []string {
 	labels := make([]string, len(actions))
 	for i, a := range actions {
 		labels[i] = sysBtnLabel[a]
-		if a == sysBtnUpdatePkg && s.pkgPending != nil {
+		if a == sysBtnUpdates && s.pkgPending != nil {
 			labels[i] = "Updating..."
 		}
 		if a == sysBtnReboot {

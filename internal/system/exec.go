@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -138,9 +140,29 @@ func RunRootSilent(name string, args ...string) error {
 // The new file is root owned. Callers must ensure the destination is suitable.
 // Failures are logged centrally.
 func WriteFileRoot(path string, content []byte, perm os.FileMode) error {
+	return writeFileRootLogged(path, func() error {
+		return writeFile(path, content, perm, keepOwner, keepOwner)
+	})
+}
+
+// WriteFileRootOwned is WriteFileRoot for a file a service account reads. The
+// file reaches its name already owned by owner and group, so the service
+// never finds a new file it cannot read. If the owner or the group cannot be
+// found, or the owner cannot be set, the old file is left as it was.
+func WriteFileRootOwned(path string, content []byte, perm os.FileMode, owner, group string) error {
+	return writeFileRootLogged(path, func() error {
+		uid, gid, err := lookupOwner(owner, group)
+		if err != nil {
+			return fmt.Errorf("write %s: look up owner: %w", path, err)
+		}
+		return writeFile(path, content, perm, uid, gid)
+	})
+}
+
+func writeFileRootLogged(path string, write func() error) error {
 	err := requireRoot("write " + path)
 	if err == nil {
-		err = writeFile(path, content, perm)
+		err = write()
 	}
 	if err != nil {
 		logger.System("%v", err)
@@ -148,13 +170,36 @@ func WriteFileRoot(path string, content []byte, perm os.FileMode) error {
 	return err
 }
 
+// lookupOwner returns the numeric ids of an account and a group.
+func lookupOwner(owner, group string) (uid, gid int, err error) {
+	u, err := user.Lookup(owner)
+	if err != nil {
+		return 0, 0, err
+	}
+	g, err := user.LookupGroup(group)
+	if err != nil {
+		return 0, 0, err
+	}
+	if uid, err = strconv.Atoi(u.Uid); err != nil {
+		return 0, 0, fmt.Errorf("account %s has id %q", owner, u.Uid)
+	}
+	if gid, err = strconv.Atoi(g.Gid); err != nil {
+		return 0, 0, fmt.Errorf("group %s has id %q", group, g.Gid)
+	}
+	return uid, gid, nil
+}
+
+// keepOwner leaves the owner or the group as the new file gets it.
+const keepOwner = -1
+
 // writeFile writes a private temporary file with an unused random name in the
-// target's folder, sets the final mode, saves it to disk, renames it over the
-// target and then saves the folder. The rename replaces a link at the target
-// instead of writing through it. If a step before the rename fails, the target
-// is left as it was and the temporary file is removed. A failure to save the
-// folder is returned after the target has been replaced.
-func writeFile(path string, content []byte, perm os.FileMode) error {
+// target's folder, sets the owner and then the final mode, saves it to disk,
+// renames it over the target and then saves the folder. The owner is set on
+// the open file, which never follows a link. The rename replaces a link at the
+// target instead of writing through it. If a step before the rename fails, the
+// target is left as it was and the temporary file is removed. A failure to
+// save the folder is returned after the target has been replaced.
+func writeFile(path string, content []byte, perm os.FileMode, uid, gid int) error {
 	fail := func(step string, err error) error {
 		return fmt.Errorf("write %s: %s: %w", path, step, err)
 	}
@@ -174,6 +219,12 @@ func writeFile(path string, content []byte, perm os.FileMode) error {
 
 	if _, err := tmp.Write(content); err != nil {
 		return fail("write temporary", err)
+	}
+	// Before the mode, since changing the owner can clear mode bits.
+	if uid != keepOwner || gid != keepOwner {
+		if err := tmp.Chown(uid, gid); err != nil {
+			return fail("set owner", err)
+		}
 	}
 	if err := tmp.Chmod(perm); err != nil {
 		return fail("set mode", err)

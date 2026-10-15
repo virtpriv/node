@@ -253,9 +253,10 @@ continued working. Check status and logs before retrying. Leaving the TUI does
 not undo an accepted action. An older helper that supplies no verified result
 also produces an unconfirmed outcome. Run the TUI and helper from the same build.
 
-Update Packages refreshes Debian package lists, upgrades packages while preserving
-existing configuration on conflict, and checks package consistency with `dpkg --audit`.
-The result stays on System when you navigate away and return. Completion confirms
+Update Packages, under System > Updates, refreshes Debian package lists, upgrades
+packages while preserving existing configuration on conflict, and checks package
+consistency with `dpkg --audit`. The result stays on the Updates screen when you
+close it or go elsewhere and return. Completion confirms
 these commands succeeded. It does not establish service health or that no reboot
 is needed. A failed refresh stops the upgrade. If the outcome is unconfirmed,
 ask your administrator to check package state and logs before retrying. Closing

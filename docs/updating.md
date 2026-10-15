@@ -112,7 +112,7 @@ Any revised candidate receives a new RC number.
 
 Normal discovery uses GitHub's latest stable release and rejects RC tags,
 drafts and prereleases. It caches stable discovery for up to 24 hours. To test
-an exact release, open System > Node Updates > Select release and enter its
+an exact release, open System > Updates > Node Updates > Select release and enter its
 tag. This bypasses latest-release discovery, including that cache, but retains
 the normal Tor download, signature, source admission and explicit approval
 path. No alternate repository, signing key or persistent testing channel is
