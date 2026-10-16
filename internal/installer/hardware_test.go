@@ -24,33 +24,36 @@ func TestParseMemTotal(t *testing.T) {
 
 // ── RecommendDbCache ─────────────────────────────────────
 
+// LND gets memory first. Bitcoin Core's cache is 512 MiB below 7.5 GB of
+// memory, 1024 MiB from 7.5 GB and 2048 MiB from 15 GB, 1 GB being
+// 1,000,000,000 bytes as the System screen shows it.
 func TestRecommendDbCache(t *testing.T) {
+	const mib = 1 << 20
 	cases := []struct {
-		ramMB, want int
+		memBytes uint64
+		want     int
 	}{
-		{0, 512},    // unknown → the historical hardcode
-		{1024, 512}, // 1 GB
-		{2048, 512}, // 2 GB
-		{3072, 1024},
-		{3824, 1024}, // a nominal "4 GB" box
-		{4096, 1024},
-		{6144, 2048},
-		{7800, 2048}, // a nominal "8 GB" box
-		{16384, 2048},
+		{0, 512},               // memory could not be read
+		{3824 * mib, 512},      // a machine sold as 4 GB
+		{7_499_999_999, 512},   // just under 7.5 GB
+		{7_500_000_000, 1024},  // 7.5 GB
+		{7800 * mib, 1024},     // a machine sold as 8 GB
+		{14_999_999_999, 1024}, // just under 15 GB
+		{15_000_000_000, 2048}, // 15 GB
 	}
 	for _, tt := range cases {
-		if got := RecommendDbCache(tt.ramMB); got != tt.want {
+		if got := RecommendDbCache(tt.memBytes); got != tt.want {
 			t.Errorf("RecommendDbCache(%d) = %d, want %d",
-				tt.ramMB, got, tt.want)
+				tt.memBytes, got, tt.want)
 		}
 	}
 }
 
 // Every recommendation must be a value the install record accepts.
 func TestRecommendationsAreRecordable(t *testing.T) {
-	for _, ram := range []int{0, 2048, 4096, 8192} {
-		if rec := RecommendDbCache(ram); !validDbCache(rec) {
-			t.Errorf("recommendation %d for %d MB is not recordable", rec, ram)
+	for _, mem := range []uint64{0, 4_000_000_000, 8_000_000_000, 16_000_000_000} {
+		if rec := RecommendDbCache(mem); !validDbCache(rec) {
+			t.Errorf("recommendation %d for %d bytes is not recordable", rec, mem)
 		}
 	}
 }
