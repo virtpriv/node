@@ -531,6 +531,10 @@ func buildInstallSteps(
 				}
 				return verifyTorAfterUpgrade()
 			}},
+		// Debian's zram package, so it comes after apt uses Tor, and before
+		// Bitcoin Core's first sync, when memory is shortest.
+		{Key: "swap.zram", Name: "Setting up compressed swap",
+			Fn: host.SetUpCompressedSwap},
 		{Key: "btc.download", Group: "btc",
 			Name: "Downloading Bitcoin Core " + component.BitcoinCoreVersion,
 			Fn: func() error {

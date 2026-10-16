@@ -104,3 +104,15 @@ to the Node. See [Release Verification](verifying.md) to install.
 LND gets memory first. With less than 7.5 GB of memory, the installer gives
 Bitcoin Core a small cache, so its first sync takes longer. After the first
 sync the cache hardly matters.
+
+When the kernel supports it, the installer also adds compressed swap in
+memory (zram, from Debian's systemd-zram-generator package). When memory
+runs short, the kernel compresses memory that is not in use instead of
+stopping a program. It never writes to the disk. It is a cushion, not more
+memory.
+
+If your provider set up swap on disk, the installer leaves it. Memory moved
+there, LND's included, stays on that disk. To switch it off, find its name
+with `swapon --show`, run `sudo swapoff` with that name, for example
+`sudo swapoff /swap.img`, and remove its line from `/etc/fstab`. Do not use
+`swapoff -a`, which also switches off the compressed swap.
