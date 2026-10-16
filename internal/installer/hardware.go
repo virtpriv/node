@@ -77,19 +77,22 @@ func parseMemTotal(meminfo string) uint64 {
 	return 0
 }
 
-// RecommendDbCache maps measured memory to a bitcoind dbcache in MB. ramMB
-// counts units of 1,048,576 bytes, as Bitcoin Core's dbcache does. The table
-// is conservative and stops at 2048, because sync gains flatten beyond that
-// on a node that also runs LND and Tor, which need their own memory.
-//
-//	unknown or below 3072 → 512
-//	3072 or more          → 1024
-//	6144 or more          → 2048
-func RecommendDbCache(ramMB int) int {
+// Memory from which Bitcoin Core gets a larger cache. LND gets memory first,
+// so a machine below 7.5 GB keeps the small cache and its first sync
+// takes longer. After the first sync the cache hardly matters.
+const (
+	mediumCacheMemoryBytes = 7_500 * bytesize.MB
+	largeCacheMemoryBytes  = 15 * bytesize.GB
+)
+
+// RecommendDbCache maps measured memory, in bytes, to Bitcoin Core's
+// dbcache, which Core reads in MiB. Unknown memory (zero) gets the small
+// cache.
+func RecommendDbCache(memBytes uint64) int {
 	switch {
-	case ramMB >= 6144:
+	case memBytes >= largeCacheMemoryBytes:
 		return 2048
-	case ramMB >= 3072:
+	case memBytes >= mediumCacheMemoryBytes:
 		return 1024
 	default:
 		return 512
@@ -97,4 +100,4 @@ func RecommendDbCache(ramMB int) int {
 }
 
 // recommendedDbCache is the cache the installer records for this machine.
-func recommendedDbCache() int { return RecommendDbCache(int(detectHardware().MemoryBytes >> 20)) }
+func recommendedDbCache() int { return RecommendDbCache(detectHardware().MemoryBytes) }

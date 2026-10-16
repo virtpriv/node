@@ -176,7 +176,7 @@ func TestInteractiveFailureAndPublicationStopExecution(t *testing.T) {
 func TestInteractiveStartRecordsRecommendedCache(t *testing.T) {
 	original := detectHardware
 	t.Cleanup(func() { detectHardware = original })
-	detectHardware = func() Hardware { return Hardware{MemoryBytes: 6144 << 20} }
+	detectHardware = func() Hardware { return Hardware{MemoryBytes: 7800 << 20} } // sold as 8 GB
 
 	ledger, err := newLedger(installContext{Network: "mainnet", InitialP2PMode: "tor"})
 	if err != nil {
@@ -226,9 +226,10 @@ func TestInteractiveStartRecordsRecommendedCache(t *testing.T) {
 		t.Fatal("duplicate start accepted")
 	}
 	<-s.done
-	want := RecommendDbCache(6144)
-	if len(written) != 2 || written[0] != want || written[1] != want {
-		t.Fatalf("written=%v, want the recommendation for 6144 MB twice", written)
+	// 1024 differs from the cache for unknown memory, so it shows the
+	// measured memory reached the record.
+	if len(written) != 2 || written[0] != 1024 || written[1] != 1024 {
+		t.Fatalf("written=%v, want 1024 twice", written)
 	}
 }
 

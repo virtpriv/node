@@ -60,6 +60,8 @@ funds.
   leaving about 81 GB of operational usage on a 90 GB filesystem.
 - The installer refuses a machine with less than 3.4 GB of memory or 80 GB
   of disk, before it changes anything.
+- LND gets memory first. With less than 7.5 GB of memory, Bitcoin Core gets
+  a small cache, so its first sync takes longer.
 
 Running at home or on a VPS? See [Hosting Your Node](docs/hosting.md) for what
 differs.
