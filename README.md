@@ -48,6 +48,7 @@ funds.
 - **fail2ban:** brute force protection
 - **Unattended upgrades:** automatic Debian security updates, with a restart at 04:00 server time when an update needs one
 - **NTP clock sync:** accurate time for block timestamps, HTLC timeouts, and macaroon expiry
+- **Compressed swap:** when memory runs short, unused memory is compressed and kept in memory, never written to disk (zram, when the kernel supports it)
 
 ### Optional (from the TUI)
 

@@ -365,6 +365,33 @@ func TestPackageUpgradeRunsBehindTorAndFirewallStaysFirst(t *testing.T) {
 	}
 }
 
+// Compressed swap is a Debian package, so it comes after apt uses Tor, and it
+// is on before Bitcoin Core starts its first sync, in a full install and in an
+// image build alike.
+func TestCompressedSwapComesBeforeBitcoinCore(t *testing.T) {
+	steps := buildInstallSteps(config.Default(), &InstallDecisions{})
+	for name, list := range map[string][]InstallStep{"full": steps, "bake": FilterPhase(steps, PhaseBake)} {
+		t.Run(name, func(t *testing.T) {
+			at := func(key string) int {
+				t.Helper()
+				for i, s := range list {
+					if s.Key == key {
+						return i
+					}
+				}
+				t.Fatalf("step %q is missing", key)
+				return -1
+			}
+			if at("swap.zram") != at("base.upgrade")+1 {
+				t.Fatal("compressed swap does not follow the package upgrade directly")
+			}
+			if at("btc.download") != at("swap.zram")+1 {
+				t.Fatal("compressed swap is not set up just before Bitcoin Core")
+			}
+		})
+	}
+}
+
 // An upgrade can restart Tor. The step must not report done until Tor routes
 // again, or the next download starts into a Tor that is still coming back.
 func TestPackageUpgradeConfirmsTorBeforeItReportsDone(t *testing.T) {
