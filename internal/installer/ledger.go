@@ -163,8 +163,9 @@ func validateLedger(l *installLedger) error {
 	if err := config.ValidateNetwork(l.Context.Network); err != nil {
 		return fmt.Errorf("invalid install network %q", l.Context.Network)
 	}
-	if l.Context.InitialP2PMode != "tor" &&
-		l.Context.InitialP2PMode != "hybrid" {
+	// Every install starts Tor only. Hybrid comes later, through the Hybrid
+	// upgrade, which saves the address the owner reviewed.
+	if l.Context.InitialP2PMode != "tor" {
 		return fmt.Errorf("invalid initial P2P mode %q",
 			l.Context.InitialP2PMode)
 	}

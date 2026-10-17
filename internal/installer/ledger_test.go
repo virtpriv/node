@@ -51,6 +51,7 @@ func TestParseLedgerRefusesAmbiguousOrInvalidState(t *testing.T) {
 		"bad network":            `{"schema":1,"status":"in_progress","context":{"network":"signet","initial_p2p_mode":"tor"},"steps":{}}`,
 		"controlled signet":      `{"schema":1,"status":"in_progress","context":{"network":"controlled-signet-v1","initial_p2p_mode":"tor"},"steps":{}}`,
 		"bad p2p":                `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"open"},"steps":{}}`,
+		"hybrid start":           `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"hybrid"},"steps":{}}`,
 		"bad dbcache":            `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","db_cache_mb":999},"steps":{}}`,
 		"null steps":             `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor"},"steps":null}`,
 		"unknown root field":     `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor"},"steps":{},"extra":true}`,

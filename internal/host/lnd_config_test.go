@@ -17,12 +17,10 @@ import (
 )
 
 func mustBuildLNDConfig(
-	t *testing.T, cfg *config.AppConfig, publicIPv4, restOnion,
-	user, password string,
+	t *testing.T, cfg *config.AppConfig, restOnion, user, password string,
 ) string {
 	t.Helper()
-	content, err := BuildLNDConfig(
-		cfg, publicIPv4, restOnion, user, password)
+	content, err := BuildLNDConfig(cfg, restOnion, user, password)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,14 +46,14 @@ func activeLNDConfigValues(content string) map[string][]string {
 }
 
 // The generated lnd.conf binds by the literal loopback
-// addresses defined once in paths. the same constants every
-// client dials. and carries no host name anywhere. On this
+// addresses defined once in paths, the same constants every
+// client dials, and carries no host name anywhere. On this
 // node, which disables IPv6, the name localhost can resolve to
 // an unusable IPv6 address, so it must never appear.
 func TestBuildLNDConfigBindsByAddress(t *testing.T) {
-	// Tor-only: every listener on the loopback constants.
+	// Tor-only, every listener on the loopback constants.
 	cfg := config.Default()
-	torOnly := mustBuildLNDConfig(t, cfg, "", "", "lnd", "secret")
+	torOnly := mustBuildLNDConfig(t, cfg, "", "lnd", "secret")
 	for _, want := range []string{
 		"listen=" + paths.LNDP2PBind,
 		"restlisten=" + paths.LNDRESTEndpoint,
@@ -66,12 +64,11 @@ func TestBuildLNDConfigBindsByAddress(t *testing.T) {
 		}
 	}
 
-	// Hybrid: P2P and REST bind all interfaces as computed;
-	// gRPC stays on the loopback constant.
+	// Hybrid, P2P and REST bind all interfaces with the saved
+	// address. gRPC stays on the loopback constant.
 	hybrid := config.Default()
-	hybrid.P2PMode = "hybrid"
-	hybridConf := mustBuildLNDConfig(
-		t, hybrid, "203.0.113.7", "", "lnd", "secret")
+	hybrid.P2PMode, hybrid.P2PAddress = "hybrid", "203.0.113.7"
+	hybridConf := mustBuildLNDConfig(t, hybrid, "", "lnd", "secret")
 	for _, want := range []string{
 		"listen=0.0.0.0:9735",
 		"restlisten=0.0.0.0:8080",
@@ -86,7 +83,7 @@ func TestBuildLNDConfigBindsByAddress(t *testing.T) {
 
 	// No host name in either variant, with or without a REST
 	// onion for tlsextradomain.
-	withOnion := mustBuildLNDConfig(t, cfg, "",
+	withOnion := mustBuildLNDConfig(t, cfg,
 		"exampleonionaddress.onion", "lnd", "secret")
 	for name, conf := range map[string]string{
 		"tor-only": torOnly,
@@ -165,7 +162,7 @@ func TestVerifyCertificateDNSName(t *testing.T) {
 
 func TestBuildLNDConfigUsesIndependentBitcoindRPCIdentity(t *testing.T) {
 	content := mustBuildLNDConfig(
-		t, config.Default(), "", "", "lnd", "secret")
+		t, config.Default(), "", "lnd", "secret")
 	for _, want := range []string{
 		"bitcoind.rpcuser=lnd",
 		"bitcoind.rpcpass=secret",
@@ -187,7 +184,7 @@ func TestBuildLNDConfigUsesIndependentBitcoindRPCIdentity(t *testing.T) {
 
 func TestBuildLNDConfigPinsTorAndHealthPolicy(t *testing.T) {
 	content := mustBuildLNDConfig(
-		t, config.Default(), "", "", "lnd", "secret")
+		t, config.Default(), "", "lnd", "secret")
 	values := activeLNDConfigValues(content)
 	want := map[string]string{
 		"lnddir":                              "/var/lib/lnd",
@@ -240,7 +237,7 @@ func TestBuildLNDConfigNetworkProfiles(t *testing.T) {
 		t.Run(tt.network, func(t *testing.T) {
 			cfg := config.Default()
 			cfg.Network = tt.network
-			content := mustBuildLNDConfig(t, cfg, "", "", "lnd", "secret")
+			content := mustBuildLNDConfig(t, cfg, "", "lnd", "secret")
 			for _, want := range []string{
 				tt.flag,
 				"bitcoind.rpchost=127.0.0.1:" + tt.rpc,
@@ -270,10 +267,29 @@ func TestBuildLNDConfigNetworkProfiles(t *testing.T) {
 	}
 }
 
+// lnd.conf is generated only from a valid node configuration. A Hybrid mode
+// without its reviewed address must not quietly produce a Tor-only file, and a
+// Tor node must not publish an address.
+func TestBuildLNDConfigRefusesAddressThatDoesNotFitTheMode(t *testing.T) {
+	for name, set := range map[string]func(*config.AppConfig){
+		"hybrid without address": func(c *config.AppConfig) { c.P2PMode = "hybrid" },
+		"hybrid private address": func(c *config.AppConfig) { c.P2PMode, c.P2PAddress = "hybrid", "10.1.2.3" },
+		"tor with an address":    func(c *config.AppConfig) { c.P2PAddress = "203.0.113.7" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := config.Default()
+			set(cfg)
+			if content, err := BuildLNDConfig(cfg, "", "lnd", "secret"); err == nil {
+				t.Fatalf("generated lnd.conf:\n%s", content)
+			}
+		})
+	}
+}
+
 func TestBuildLNDConfigRejectsUnknownProfile(t *testing.T) {
 	cfg := config.Default()
 	cfg.Network = "signet"
-	if _, err := BuildLNDConfig(cfg, "", "", "lnd", "secret"); err == nil {
+	if _, err := BuildLNDConfig(cfg, "", "lnd", "secret"); err == nil {
 		t.Fatal("raw signet profile generated an LND config")
 	}
 }

@@ -63,6 +63,7 @@ func TestPreferencesStrictAndSymlinkSafe(t *testing.T) {
 		`{"schema":1,"theme":"dark","extra":true}`,
 		`{"schema":1,"schema":1,"theme":"dark"}`,
 		`{"schema":1}`,
+		`{"schema":1,"theme":null}`,
 	}
 	for _, input := range cases {
 		if err := os.WriteFile(store.Path, []byte(input), 0o600); err != nil {

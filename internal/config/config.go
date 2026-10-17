@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/virtpriv/node/internal/p2p"
 	"github.com/virtpriv/node/internal/paths"
 )
 
@@ -33,6 +34,7 @@ type AppConfig struct {
 	PruneSize        int    `json:"prune_size_gb"`
 	DbCache          int    `json:"db_cache_mb"`
 	P2PMode          string `json:"p2p_mode"`
+	P2PAddress       string `json:"p2p_address"`
 	AutoUnlock       bool   `json:"auto_unlock_enabled"`
 	SyncthingEnabled bool   `json:"syncthing_enabled"`
 }
@@ -120,17 +122,26 @@ func validateObject(path string, wantDir bool, mode os.FileMode, uid, gid int) e
 	return nil
 }
 
+// systemFields are the fields this release knows. Each must be present. A
+// field written by a later release is read and ignored, so an older vpn still
+// running during an update can read the newer file. A later field that older
+// code must obey raises the schema number instead, and older code refuses the
+// file.
 var systemFields = map[string]bool{
 	"schema":              true,
 	"network":             true,
 	"prune_size_gb":       true,
 	"db_cache_mb":         true,
 	"p2p_mode":            true,
+	"p2p_address":         true,
 	"auto_unlock_enabled": true,
 	"syncthing_enabled":   true,
 }
 
-func decodeObject(data []byte, allowed map[string]bool) (map[string]json.RawMessage, error) {
+// decodeObject reads one JSON object whose known fields are all present,
+// unique and not null. With readLater, a field this release does not know is
+// read and ignored. Without it, such a field is refused.
+func decodeObject(data []byte, allowed map[string]bool, readLater bool) (map[string]json.RawMessage, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	tok, err := dec.Token()
 	if err != nil {
@@ -140,6 +151,7 @@ func decodeObject(data []byte, allowed map[string]bool) (map[string]json.RawMess
 		return nil, errors.New("top-level JSON value must be an object")
 	}
 	fields := make(map[string]json.RawMessage, len(allowed))
+	seen := make(map[string]bool, len(allowed))
 	for dec.More() {
 		tok, err := dec.Token()
 		if err != nil {
@@ -149,17 +161,24 @@ func decodeObject(data []byte, allowed map[string]bool) (map[string]json.RawMess
 		if !ok {
 			return nil, errors.New("object key is not a string")
 		}
-		if !allowed[name] {
-			return nil, fmt.Errorf("unknown field %q", name)
-		}
-		if _, exists := fields[name]; exists {
+		if seen[name] {
 			return nil, fmt.Errorf("duplicate field %q", name)
 		}
+		seen[name] = true
 		var raw json.RawMessage
 		if err := dec.Decode(&raw); err != nil {
 			return nil, err
 		}
-		fields[name] = raw
+		if allowed[name] {
+			// A known field always holds a value. JSON null would read as
+			// empty or false.
+			if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				return nil, fmt.Errorf("field %q is null", name)
+			}
+			fields[name] = raw
+		} else if !readLater {
+			return nil, fmt.Errorf("unknown field %q", name)
+		}
 	}
 	if _, err := dec.Token(); err != nil {
 		return nil, err
@@ -179,11 +198,18 @@ func decodeObject(data []byte, allowed map[string]bool) (map[string]json.RawMess
 }
 
 func decodeSystem(data []byte) (*AppConfig, error) {
-	if _, err := decodeObject(data, systemFields); err != nil {
+	fields, err := decodeObject(data, systemFields, true)
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+	// Decode the known fields only. Go matches names without regard to case,
+	// so a later name such as "P2P_Mode" would otherwise set p2p_mode.
+	known, err := json.Marshal(fields)
+	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	var cfg AppConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := json.Unmarshal(known, &cfg); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	if err := cfg.Validate(); err != nil {
@@ -207,7 +233,18 @@ func (c *AppConfig) Validate() error {
 	default:
 		return fmt.Errorf("db cache %d MB is not one of 512, 1024, 2048", c.DbCache)
 	}
-	if c.P2PMode != "tor" && c.P2PMode != "hybrid" {
+	switch c.P2PMode {
+	case "tor":
+		if c.P2PAddress != "" {
+			return errors.New("P2P address must be empty in Tor mode")
+		}
+	case "hybrid":
+		// The address the owner reviewed at the Hybrid upgrade, by the same
+		// rule that upgrade applies.
+		if _, err := p2p.NewUpgradeRequest(c.P2PAddress); err != nil {
+			return fmt.Errorf("hybrid P2P needs a public IPv4 address, got %q", c.P2PAddress)
+		}
+	default:
 		return fmt.Errorf("unknown P2P mode %q", c.P2PMode)
 	}
 	return nil

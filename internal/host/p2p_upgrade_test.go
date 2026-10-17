@@ -81,11 +81,13 @@ func TestHybridTransitionRefusalAndCompletionBoundary(t *testing.T) {
 					}
 					return nil
 				},
-				configure: func(proposed *config.AppConfig, address string) error {
+				// lnd.conf is written from the same proposed setting that is
+				// saved last, so the file and config.json hold one address.
+				configure: func(proposed *config.AppConfig) error {
 					want := before
-					want.P2PMode = "hybrid"
-					if *proposed != want || address != request.Address() {
-						t.Fatal("unreviewed setting or address")
+					want.P2PMode, want.P2PAddress = "hybrid", request.Address()
+					if *proposed != want {
+						t.Fatalf("unreviewed setting or address: %+v", proposed)
 					}
 					return action("configure")
 				},
@@ -100,9 +102,9 @@ func TestHybridTransitionRefusalAndCompletionBoundary(t *testing.T) {
 				stage: func() error { return action("stage") },
 				save: func(proposed *config.AppConfig) error {
 					want := before
-					want.P2PMode = "hybrid"
+					want.P2PMode, want.P2PAddress = "hybrid", request.Address()
 					if *proposed != want {
-						t.Fatal("changed an unrelated desired setting")
+						t.Fatalf("saved another address or changed an unrelated setting: %+v", proposed)
 					}
 					return action("save")
 				},
