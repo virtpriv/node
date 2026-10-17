@@ -61,29 +61,52 @@ func TestSystemConfigContainsOnlyDesiredNonSecretFields(t *testing.T) {
 }
 
 func TestDecodeSystemStrict(t *testing.T) {
-	valid := `{"schema":1,"network":"testnet4","prune_size_gb":25,"db_cache_mb":1024,"p2p_mode":"hybrid","auto_unlock_enabled":true,"syncthing_enabled":false}`
+	valid := `{"schema":1,"network":"testnet4","prune_size_gb":25,"db_cache_mb":1024,"p2p_mode":"hybrid","p2p_address":"203.0.113.7","auto_unlock_enabled":true,"syncthing_enabled":false}`
 	cfg, err := decodeSystem([]byte(valid))
 	if err != nil {
 		t.Fatalf("valid config: %v", err)
 	}
 	if cfg.Network != "testnet4" || cfg.DbCache != 1024 ||
-		cfg.P2PMode != "hybrid" || !cfg.AutoUnlock || cfg.SyncthingEnabled {
+		cfg.P2PMode != "hybrid" || cfg.P2PAddress != "203.0.113.7" ||
+		!cfg.AutoUnlock || cfg.SyncthingEnabled {
 		t.Fatalf("decoded wrong values: %+v", cfg)
 	}
+	tor := strings.Replace(strings.Replace(valid, `"hybrid"`, `"tor"`, 1), `"203.0.113.7"`, `""`, 1)
+	if _, err := decodeSystem([]byte(tor)); err != nil {
+		t.Fatalf("valid Tor config: %v", err)
+	}
 
+	withAddress := func(address string) string {
+		return strings.Replace(valid, `"203.0.113.7"`, address, 1)
+	}
 	cases := map[string]string{
-		"malformed":          `{`,
-		"not object":         `[]`,
-		"unknown":            strings.TrimSuffix(valid, `}`) + `,"extra":1}`,
-		"duplicate":          strings.Replace(valid, `"schema":1`, `"schema":1,"schema":1`, 1),
-		"missing":            strings.Replace(valid, `"network":"testnet4",`, ``, 1),
-		"future schema":      strings.Replace(valid, `"schema":1`, `"schema":2`, 1),
-		"bad network":        strings.Replace(valid, `"testnet4"`, `"signet"`, 1),
-		"bad p2p":            strings.Replace(valid, `"hybrid"`, `"clearnet"`, 1),
-		"bad db cache":       strings.Replace(valid, `1024`, `999`, 1),
-		"zero prune":         strings.Replace(valid, `"prune_size_gb":25`, `"prune_size_gb":0`, 1),
-		"trailing value":     valid + ` {}`,
-		"wrong boolean type": strings.Replace(valid, `"syncthing_enabled":false`, `"syncthing_enabled":"false"`, 1),
+		"malformed":               `{`,
+		"not object":              `[]`,
+		"duplicate":               strings.Replace(valid, `"schema":1`, `"schema":1,"schema":1`, 1),
+		"duplicate later field":   strings.TrimSuffix(valid, `}`) + `,"later":1,"later":2}`,
+		"missing":                 strings.Replace(valid, `"network":"testnet4",`, ``, 1),
+		"missing p2p address":     strings.Replace(valid, `"p2p_address":"203.0.113.7",`, ``, 1),
+		"missing boolean":         strings.Replace(valid, `"auto_unlock_enabled":true,`, ``, 1),
+		"future schema":           strings.Replace(valid, `"schema":1`, `"schema":2`, 1),
+		"bad network":             strings.Replace(valid, `"testnet4"`, `"signet"`, 1),
+		"bad p2p":                 strings.Replace(valid, `"hybrid"`, `"clearnet"`, 1),
+		"bad db cache":            strings.Replace(valid, `1024`, `999`, 1),
+		"zero prune":              strings.Replace(valid, `"prune_size_gb":25`, `"prune_size_gb":0`, 1),
+		"trailing value":          valid + ` {}`,
+		"wrong boolean type":      strings.Replace(valid, `"syncthing_enabled":false`, `"syncthing_enabled":"false"`, 1),
+		"tor with an address":     strings.Replace(valid, `"hybrid"`, `"tor"`, 1),
+		"hybrid without address":  withAddress(`""`),
+		"hybrid private address":  withAddress(`"10.1.2.3"`),
+		"hybrid loopback address": withAddress(`"127.0.0.1"`),
+		"hybrid link local":       withAddress(`"169.254.1.2"`),
+		"hybrid IPv6 address":     withAddress(`"2001:db8::7"`),
+		"hybrid mapped IPv4":      withAddress(`"::ffff:203.0.113.7"`),
+		"hybrid address and port": withAddress(`"203.0.113.7:9735"`),
+		"hybrid malformed":        withAddress(`"203.0.113"`),
+		"hybrid address type":     withAddress(`7`),
+		"null address":            strings.Replace(tor, `"p2p_address":""`, `"p2p_address":null`, 1),
+		"null boolean":            strings.Replace(valid, `"syncthing_enabled":false`, `"syncthing_enabled":null`, 1),
+		"null network":            strings.Replace(valid, `"network":"testnet4"`, `"network":null`, 1),
 	}
 	for name, input := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -94,8 +117,69 @@ func TestDecodeSystemStrict(t *testing.T) {
 	}
 }
 
+// A later release may add fields this one does not know. An older vpn still
+// running during an update must read that file, and validate what it knows.
+func TestDecodeSystemReadsALaterFile(t *testing.T) {
+	later := `{"schema":1,"network":"public-signet","prune_size_gb":25,"db_cache_mb":512,"p2p_mode":"hybrid","p2p_address":"203.0.113.7","auto_unlock_enabled":true,"syncthing_enabled":true,"lnd_alias":"node","later_settings":{"list":[1,2],"on":true},"later_unset":null}`
+	cfg, err := decodeSystem([]byte(later))
+	if err != nil {
+		t.Fatalf("later file refused: %v", err)
+	}
+	if cfg.Network != NetworkPublicSignet || cfg.P2PMode != "hybrid" ||
+		cfg.P2PAddress != "203.0.113.7" || !cfg.AutoUnlock || !cfg.SyncthingEnabled {
+		t.Fatalf("decoded wrong values: %+v", cfg)
+	}
+	// Go's JSON decoder matches names without regard to case. A later or
+	// mistyped name that only differs in case must not reach a known field.
+	shadow := strings.TrimSuffix(later, `}`) + `,"P2P_Mode":"tor","P2P_ADDRESS":"","Network":"mainnet"}`
+	if cfg, err := decodeSystem([]byte(shadow)); err != nil ||
+		cfg.P2PMode != "hybrid" || cfg.P2PAddress != "203.0.113.7" || cfg.Network != NetworkPublicSignet {
+		t.Fatalf("a name differing only in case changed a known field: %+v, %v", cfg, err)
+	}
+	for name, input := range map[string]string{
+		"known field still validated": strings.Replace(later, `"db_cache_mb":512`, `"db_cache_mb":3`, 1),
+		"known field still required":  strings.Replace(later, `"p2p_mode":"hybrid",`, ``, 1),
+		"schema still checked":        strings.Replace(later, `"schema":1`, `"schema":2`, 1),
+		"later value still JSON":      strings.Replace(later, `"lnd_alias":"node"`, `"lnd_alias":node`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeSystem([]byte(input)); err == nil {
+				t.Fatalf("accepted %s", input)
+			}
+		})
+	}
+}
+
+func TestStoreKeepsTheReviewedHybridAddress(t *testing.T) {
+	store := testStore(t)
+	cfg := Default()
+	cfg.P2PMode, cfg.P2PAddress = "hybrid", "203.0.113.7"
+	if err := store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load()
+	if err != nil || loaded.P2PMode != "hybrid" || loaded.P2PAddress != "203.0.113.7" {
+		t.Fatalf("loaded %+v, %v", loaded, err)
+	}
+	for name, bad := range map[string]func(*AppConfig){
+		"tor with an address":    func(c *AppConfig) { c.P2PMode, c.P2PAddress = "tor", "203.0.113.7" },
+		"hybrid without address": func(c *AppConfig) { c.P2PMode, c.P2PAddress = "hybrid", "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := Default()
+			bad(c)
+			if err := store.Save(c); err == nil {
+				t.Fatal("saved an address that does not fit the P2P mode")
+			}
+			if again, err := store.Load(); err != nil || *again != *loaded {
+				t.Fatalf("refused save changed the file: %+v, %v", again, err)
+			}
+		})
+	}
+}
+
 func TestDecodeSystemAcceptsPublicSignetProfile(t *testing.T) {
-	data := []byte(`{"schema":1,"network":"public-signet","prune_size_gb":25,"db_cache_mb":512,"p2p_mode":"tor","auto_unlock_enabled":false,"syncthing_enabled":false}`)
+	data := []byte(`{"schema":1,"network":"public-signet","prune_size_gb":25,"db_cache_mb":512,"p2p_mode":"tor","p2p_address":"","auto_unlock_enabled":false,"syncthing_enabled":false}`)
 	cfg, err := decodeSystem(data)
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +228,7 @@ func TestStoreAtomicallyReplacesConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := Default()
-	cfg.P2PMode = "hybrid"
+	cfg.P2PMode, cfg.P2PAddress = "hybrid", "203.0.113.7"
 	if err := store.Save(cfg); err != nil {
 		t.Fatal(err)
 	}

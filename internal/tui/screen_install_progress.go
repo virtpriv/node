@@ -124,6 +124,7 @@ func (s *InstallProgressScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 				s.ctx.Cfg.SyncthingEnabled = result.Config.SyncthingEnabled
 			case app.P2PUpgrade:
 				s.ctx.Cfg.P2PMode = result.Config.P2PMode
+				s.ctx.Cfg.P2PAddress = result.Config.P2PAddress
 			}
 		}
 		if s.failed {

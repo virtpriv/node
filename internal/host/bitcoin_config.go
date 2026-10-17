@@ -76,5 +76,5 @@ func WriteInitialNodeRPCConfig(cfg *config.AppConfig) error {
 		paths.BitcoinConf, []byte(content), 0640, "root", bitcoinUser); err != nil {
 		return err
 	}
-	return WriteLNDConfigWithRPCPassword(cfg, "", creds.lndPassword)
+	return WriteLNDConfigWithRPCPassword(cfg, creds.lndPassword)
 }

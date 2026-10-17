@@ -473,7 +473,7 @@ func buildInstallSteps(
 			Name: "Installing base packages",
 			Fn:   host.InstallBasePackages},
 		{Key: "firewall", Name: "Configuring firewall",
-			Fn: func() error { return host.ConfigureInitialFirewall(cfg) }},
+			Fn: host.ConfigureInitialFirewall},
 		{Key: "host.prep",
 			Name: "Configuring hostname and clock sync",
 			Fn:   host.PrepareBaseHost},
@@ -619,7 +619,7 @@ func buildInstallSteps(
 				// restart and rewrite lnd.conf with the preserved,
 				// LND-only bitcoind credential. Missing or invalid
 				// onion state fails closed inside host.WriteLNDConfig.
-				return host.WriteLNDConfig(cfg, "")
+				return host.WriteLNDConfig(cfg)
 			}},
 		{Key: "lnd.start", Name: "Starting LND", Fn: host.EnableAndRestartLND},
 		{Key: "lnd.tls-san", Kind: StepGate,

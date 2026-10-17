@@ -4,8 +4,6 @@ import (
 	"errors"
 	"reflect"
 	"testing"
-
-	"github.com/virtpriv/node/internal/config"
 )
 
 func withInitialFirewallTestDeps(t *testing.T) {
@@ -34,7 +32,7 @@ func TestConfigureFirewallRefusesBeforeMutationWhenSSHObservationFails(t *testin
 	readUFWDefaultForFirewall = func() (string, error) { mutated = true; return "", nil }
 	writeUFWDefaultForFirewall = func([]byte) error { mutated = true; return nil }
 	runInitialFirewallCommand = func([]string) error { mutated = true; return nil }
-	if err := ConfigureInitialFirewall(config.Default()); err == nil {
+	if err := ConfigureInitialFirewall(); err == nil {
 		t.Fatal("firewall rewrite accepted unavailable SSH observation")
 	}
 	if mutated {
@@ -59,10 +57,7 @@ func TestConfigureFirewallUsesFreshObservedPorts(t *testing.T) {
 		got = append(got, append([]string(nil), args...))
 		return nil
 	}
-	cfg := config.Default()
-	cfg.P2PMode = "hybrid"
-	cfg.SyncthingEnabled = true
-	if err := ConfigureInitialFirewall(cfg); err != nil {
+	if err := ConfigureInitialFirewall(); err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{
@@ -70,9 +65,6 @@ func TestConfigureFirewallUsesFreshObservedPorts(t *testing.T) {
 		{"ufw", "default", "allow", "outgoing"},
 		{"ufw", "allow", "2222/tcp"},
 		{"ufw", "allow", "22022/tcp"},
-		{"ufw", "allow", "9735/tcp"},
-		{"ufw", "allow", "8080/tcp"},
-		{"ufw", "allow", "22000/tcp"},
 		{"ufw", "--force", "enable"},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -95,7 +87,7 @@ func TestConfigureFirewallReobservesAfterPackagePreparation(t *testing.T) {
 	readUFWDefaultForFirewall = func() (string, error) { rewritten = true; return "", nil }
 	writeUFWDefaultForFirewall = func([]byte) error { rewritten = true; return nil }
 	runInitialFirewallCommand = func([]string) error { rewritten = true; return nil }
-	if err := ConfigureInitialFirewall(config.Default()); err == nil {
+	if err := ConfigureInitialFirewall(); err == nil {
 		t.Fatal("rewrite accepted failed final SSH observation")
 	}
 	if calls != 2 || rewritten {

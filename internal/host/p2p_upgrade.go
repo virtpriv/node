@@ -16,7 +16,7 @@ type p2pUpgradeOps struct {
 	load      func() (*config.AppConfig, error)
 	address   func(context.Context) (string, error)
 	firewall  func() error
-	configure func(*config.AppConfig, string) error
+	configure func(*config.AppConfig) error
 	allow     func() error
 	restart   func() error
 	verifyTLS func(string) error
@@ -74,14 +74,14 @@ func upgradeP2PToHybrid(request p2p.UpgradeRequest, ops p2pUpgradeOps, progress 
 		return nothingChanged(errors.New("public IPv4 changed. Reopen P2P Upgrade and review the address again"))
 	}
 	proposed := *cfg
-	proposed.P2PMode = "hybrid"
+	proposed.P2PMode, proposed.P2PAddress = "hybrid", observed.Address()
 	steps := []struct {
 		name     string
 		run      func() error
 		noChange bool
 	}{
 		{"check active firewall", ops.firewall, true},
-		{"update LND configuration", func() error { return ops.configure(&proposed, observed.Address()) }, false},
+		{"update LND configuration", func() error { return ops.configure(&proposed) }, false},
 		{"add Hybrid P2P firewall rules", ops.allow, false},
 		{"restart LND", ops.restart, false},
 		// LND owns TLS regeneration. Never delete its key or certificate here.

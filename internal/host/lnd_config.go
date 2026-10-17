@@ -17,17 +17,22 @@ import (
 // LNDBitcoindRPCUser is LND's independent Bitcoin RPC identity.
 const LNDBitcoindRPCUser = "lnd"
 
-// BuildLNDConfig generates lnd.conf content. Pure logic with no
-// side effects. LND binds by the literal loopback addresses
-// defined once in paths, the same constants every client
-// dials, so the two ends of each connection cannot disagree,
-// and the name localhost appears nowhere in the file (on this
-// node, which disables IPv6, that name can resolve to an
+// BuildLNDConfig generates lnd.conf content from a valid node
+// configuration. Pure logic with no side effects. Hybrid uses the
+// address saved in the configuration, so the file, the certificate
+// and config.json hold the same one. LND binds by the literal
+// loopback addresses defined once in paths, the same constants
+// every client dials, so the two ends of each connection cannot
+// disagree, and the name localhost appears nowhere in the file (on
+// this node, which disables IPv6, that name can resolve to an
 // unusable IPv6 address).
 func BuildLNDConfig(
-	cfg *config.AppConfig, publicIPv4, restOnion,
+	cfg *config.AppConfig, restOnion,
 	bitcoindRPCUser, bitcoindRPCPass string,
 ) (string, error) {
+	if err := cfg.Validate(); err != nil {
+		return "", err
+	}
 	net, err := cfg.NetworkConfig()
 	if err != nil {
 		return "", err
@@ -37,11 +42,11 @@ func BuildLNDConfig(
 	restListenLine := "restlisten=" + paths.LNDRESTEndpoint
 	externalLine := ""
 	tlsExtraIP := ""
-	if cfg.P2PMode == "hybrid" && publicIPv4 != "" {
+	if cfg.P2PMode == "hybrid" {
 		listenLine = "listen=0.0.0.0:9735"
 		restListenLine = "restlisten=0.0.0.0:8080"
-		externalLine = fmt.Sprintf("externalhosts=%s:9735", publicIPv4)
-		tlsExtraIP = fmt.Sprintf("tlsextraip=%s", publicIPv4)
+		externalLine = fmt.Sprintf("externalhosts=%s:9735", cfg.P2PAddress)
+		tlsExtraIP = fmt.Sprintf("tlsextraip=%s", cfg.P2PAddress)
 	}
 
 	tlsExtraDomain := ""
@@ -169,17 +174,15 @@ healthcheck.diskspace.interval=12h
 		net.RPCPort, net.ZMQBlockPort, net.ZMQTxPort), nil
 }
 
-func WriteLNDConfig(cfg *config.AppConfig, publicIPv4 string) error {
+func WriteLNDConfig(cfg *config.AppConfig) error {
 	password, err := readLNDBitcoindRPCPassword()
 	if err != nil {
 		return err
 	}
-	return WriteLNDConfigWithRPCPassword(cfg, publicIPv4, password)
+	return WriteLNDConfigWithRPCPassword(cfg, password)
 }
 
-func WriteLNDConfigWithRPCPassword(
-	cfg *config.AppConfig, publicIPv4, password string,
-) error {
+func WriteLNDConfigWithRPCPassword(cfg *config.AppConfig, password string) error {
 	if password == "" {
 		return fmt.Errorf("refusing to write lnd.conf with an empty " +
 			"bitcoind RPC password")
@@ -188,7 +191,7 @@ func WriteLNDConfigWithRPCPassword(
 	if err != nil {
 		return err
 	}
-	content, err := BuildLNDConfig(cfg, publicIPv4, restOnion,
+	content, err := BuildLNDConfig(cfg, restOnion,
 		LNDBitcoindRPCUser, password)
 	if err != nil {
 		return err

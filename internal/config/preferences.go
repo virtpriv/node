@@ -76,7 +76,7 @@ func (s *PreferencesStore) Load() (*Preferences, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := decodeObject(data, preferenceFields); err != nil {
+	if _, err := decodeObject(data, preferenceFields, false); err != nil {
 		return nil, fmt.Errorf("preferences: %w", err)
 	}
 	var prefs Preferences
