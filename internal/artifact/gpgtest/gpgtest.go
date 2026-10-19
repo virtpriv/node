@@ -11,16 +11,19 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Home is one private gpg keyring holding the secret keys of a test.
 type Home struct {
 	t   *testing.T
 	dir string
+	// steps counts the gpg runs made at a chosen moment, see at.
+	steps int
 }
 
-// NewHome fails the test when gpg is missing: a skipped signature test would
-// look like a pass.
+// NewHome fails the test when gpg is missing, because a skipped signature test
+// would look like a pass.
 func NewHome(t *testing.T) *Home {
 	t.Helper()
 	if _, err := exec.LookPath("gpg"); err != nil {
@@ -85,19 +88,30 @@ func (h *Home) fingerprints(name string) []string {
 // made then with a one-year life has expired by the time a test checks it.
 const Past = "20241001T000000"
 
-// at turns a moment into gpg's option for pretending it is that time.
-func at(when string) []string {
+// at turns a moment into gpg's option for pretending it is that time. The
+// clock is stopped, and each run is one second later than the run before it.
+// A running clock starts again at the moment in every run, so a key created
+// a second late in one run looked created in the future to the next run,
+// which then refused to sign with it. One second apart also keeps two
+// signatures on one key from sharing a second, which gpg refuses.
+func (h *Home) at(when string) []string {
 	if when == "" {
 		return nil
 	}
-	return []string{"--faked-system-time", when}
+	start, err := time.Parse("20060102T150405", when)
+	if err != nil {
+		h.t.Fatalf("moment %q: %v", when, err)
+	}
+	h.steps++
+	moment := start.Add(time.Duration(h.steps) * time.Second)
+	return []string{"--faked-system-time", moment.Format("20060102T150405") + "!"}
 }
 
 // Key makes a key that signs with its primary key and returns the primary
 // fingerprint. An empty when means now.
 func (h *Home) Key(name, expire, when string) string {
 	h.t.Helper()
-	h.gpg(append(at(when), "--quick-generate-key", name+" <"+name+"@test.invalid>", "ed25519", "sign,cert", expire)...)
+	h.gpg(append(h.at(when), "--quick-generate-key", name+" <"+name+"@test.invalid>", "ed25519", "sign,cert", expire)...)
 	return h.fingerprints(name)[0]
 }
 
@@ -105,7 +119,7 @@ func (h *Home) Key(name, expire, when string) string {
 // away from the signing machine does. It never expires.
 func (h *Home) Master(name, when string) string {
 	h.t.Helper()
-	h.gpg(append(at(when), "--quick-generate-key", name+" <"+name+"@test.invalid>", "ed25519", "cert", "never")...)
+	h.gpg(append(h.at(when), "--quick-generate-key", name+" <"+name+"@test.invalid>", "ed25519", "cert", "never")...)
 	return h.fingerprints(name)[0]
 }
 
@@ -113,7 +127,7 @@ func (h *Home) Master(name, when string) string {
 func (h *Home) Subkey(name, expire, when string) string {
 	h.t.Helper()
 	fprs := h.fingerprints(name)
-	h.gpg(append(at(when), "--quick-add-key", fprs[0], "ed25519", "sign", expire)...)
+	h.gpg(append(h.at(when), "--quick-add-key", fprs[0], "ed25519", "sign", expire)...)
 	fprs = h.fingerprints(name)
 	return fprs[len(fprs)-1]
 }
@@ -121,7 +135,7 @@ func (h *Home) Subkey(name, expire, when string) string {
 // Expire gives the whole key a life counted from the moment when.
 func (h *Home) Expire(name, expire, when string) {
 	h.t.Helper()
-	h.gpg(append(at(when), "--quick-set-expire", h.fingerprints(name)[0], expire)...)
+	h.gpg(append(h.at(when), "--quick-set-expire", h.fingerprints(name)[0], expire)...)
 }
 
 // Revocation reasons as gpg numbers them.
@@ -179,7 +193,7 @@ func (h *Home) File(name, data string) string {
 func (h *Home) Sign(fingerprint, when, data, file string) string {
 	h.t.Helper()
 	sig := filepath.Join(h.dir, file)
-	h.gpg(append(at(when), "--armor", "--local-user", fingerprint+"!", "--detach-sign", "--output", sig, data)...)
+	h.gpg(append(h.at(when), "--armor", "--local-user", fingerprint+"!", "--detach-sign", "--output", sig, data)...)
 	return sig
 }
 
@@ -188,7 +202,7 @@ func (h *Home) Sign(fingerprint, when, data, file string) string {
 func (h *Home) SignExpiring(fingerprint, when, life, data, file string) string {
 	h.t.Helper()
 	sig := filepath.Join(h.dir, file)
-	h.gpg(append(at(when), "--default-sig-expire", life, "--armor", "--local-user", fingerprint+"!", "--detach-sign", "--output", sig, data)...)
+	h.gpg(append(h.at(when), "--default-sig-expire", life, "--armor", "--local-user", fingerprint+"!", "--detach-sign", "--output", sig, data)...)
 	return sig
 }
 
@@ -246,7 +260,7 @@ func (h *Home) WithoutUserID(keyFile, file string) string {
 		switch tag {
 		case 13, 17: // user ID, user attribute
 			drop = true
-		case 2: // signature: belongs to whatever came before it
+		case 2: // a signature, which belongs to whatever came before it
 		default:
 			drop = false
 		}
