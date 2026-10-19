@@ -17,7 +17,7 @@ Every signature check, for VPN and for each component, follows one rule. A
 pinned signer counts only when gpg reports its signature as good. A signature
 made with a revoked key, or a revoked signing subkey, never counts, whatever
 date the signature carries. An expired key still counts. Bitcoin Core still
-needs two of its five pinned builders after a revoked one is left out.
+needs three of its five pinned builders after a revoked one is left out.
 
 The node reads the VPN release key from two places on every review: the file
 `keys/ripsline.asc` in this repository and keys.openpgp.org. It uses both

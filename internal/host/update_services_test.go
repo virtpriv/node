@@ -9,8 +9,8 @@ import (
 
 // The outputs below were printed by the released programs themselves. A plan
 // lists exact installed versions, so each must keep reading as it does today.
-// A later format must still be read: after a failed update the installed
-// helper has to name a program that update already replaced.
+// A later format must still be read, because after a failed update the
+// installed helper has to name a program that update already replaced.
 func TestComponentVersionReadsReleasedAndLaterFormats(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -20,6 +20,8 @@ func TestComponentVersionReadsReleasedAndLaterFormats(t *testing.T) {
 	}{
 		{"Core 29.3", protocol.Bitcoin, "Bitcoin Core daemon version v29.3.0\nCopyright (C) 2009-2025 The Bitcoin Core developers\n", "29.3"},
 		{"Core 29.4", protocol.Bitcoin, "Bitcoin Core daemon version v29.4.0\nCopyright (C) 2009-2025 The Bitcoin Core developers\n", "29.4"},
+		// From Core 30 on the first line also names the program.
+		{"Core 31.1", protocol.Bitcoin, "Bitcoin Core daemon version v31.1.0 bitcoind\nCopyright (C) 2009-2026 The Bitcoin Core developers\n", "31.1"},
 		{"LND 0.21.2", protocol.LND, "lnd version 0.21.2-beta commit=v0.21.2-beta\n", "0.21.2-beta"},
 		{"LND 0.21.4", protocol.LND, "lnd version 0.21.4-beta commit=v0.21.4-beta\n", "0.21.4-beta"},
 		{"Syncthing 2.1.5", protocol.Syncthing, `syncthing v2.1.5 "Hafnium Hornet" (go1.27.1 linux-amd64) builder@github.syncthing.net 2026-09-08 06:57:55 UTC`, "2.1.5"},

@@ -41,7 +41,7 @@ funds.
 
 ### Base (automatic)
 
-- **Bitcoin Core:** pruned node, all P2P through Tor, GPG-verified with 5 independent signatures
+- **Bitcoin Core:** pruned node, all P2P through Tor, GPG-verified with at least 3 of 5 pinned builder signatures
 - **LND:** Lightning Network daemon with Tor hidden services, installed Tor-only by default
 - **Tor:** Bitcoin Core, LND, updates and every download once the installer has set up Tor go through Tor. The exceptions are listed under [Privacy & Network Traffic](#privacy--network-traffic)
 - **UFW firewall:** deny all incoming except SSH
@@ -460,7 +460,7 @@ All software is verified with GPG signatures and SHA256 checksums:
 
 - **Bitcoin Core:** 5 trusted builder keys from
   [bitcoin-core/guix.sigs](https://github.com/bitcoin-core/guix.sigs).
-  Requires 2 of 5 valid signatures. A bad signature (BADSIG) from any
+  Requires 3 of 5 valid signatures. A bad signature (BADSIG) from any
   key is a hard stop.
 - **LND:** Roasbeef's signing key verified against known fingerprint.
 - **Syncthing:** pinned release binary, verified against the Syncthing

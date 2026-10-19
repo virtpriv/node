@@ -31,26 +31,29 @@ func DownloadBitcoinCore(version, workDir string) error {
 		filepath.Join(workDir, "SHA256SUMS.asc"))
 }
 
+// bitcoinCorePrograms are the programs a node uses from Core's archive. The
+// archive also holds a desktop app, a launcher and tools vpn never runs.
+var bitcoinCorePrograms = []string{"bitcoind", "bitcoin-cli"}
+
 // InstallBitcoinCoreBinaries installs the archive after VerifyBitcoinCore succeeds.
-// The caller owns the private workspace and lifecycle admission.
+// Only bitcoinCorePrograms are unpacked and installed. tar fails when one is
+// missing from the archive. The caller owns the private workspace and
+// lifecycle admission.
 func InstallBitcoinCoreBinaries(version, workDir string) error {
 	filename := fmt.Sprintf("bitcoin-%s-x86_64-linux-gnu.tar.gz", version)
-	if err := system.Run("tar", "-xzf",
-		filepath.Join(workDir, filename),
-		"-C", workDir); err != nil {
+	members := make([]string, 0, len(bitcoinCorePrograms))
+	for _, name := range bitcoinCorePrograms {
+		members = append(members, fmt.Sprintf("bitcoin-%s/bin/%s", version, name))
+	}
+	args := append([]string{"-xzf", filepath.Join(workDir, filename),
+		"-C", workDir}, members...)
+	if err := system.Run("tar", args...); err != nil {
 		return err
 	}
-	extractDir := filepath.Join(workDir,
-		fmt.Sprintf("bitcoin-%s", version), "bin")
-	entries, err := os.ReadDir(extractDir)
-	if err != nil {
-		return fmt.Errorf("read dir: %w", err)
-	}
-	for _, entry := range entries {
-		src := filepath.Join(extractDir, entry.Name())
+	for _, member := range members {
 		if err := system.RunRoot("install", "-m", "0755",
 			"-o", "root", "-g", "root",
-			src, "/usr/local/bin/"); err != nil {
+			filepath.Join(workDir, member), "/usr/local/bin/"); err != nil {
 			return err
 		}
 	}
@@ -60,10 +63,12 @@ func InstallBitcoinCoreBinaries(version, workDir string) error {
 // bitcoinCoreSigners are the trusted Bitcoin Core builder keys.
 // Source: github.com/bitcoin-core/guix.sigs/tree/main/builder-keys
 // Cross-check: each key's fingerprint against the .gpg file at
-// the listed URL. Verified against the Bitcoin Core 29.4
-// SHA256SUMS.asc, which all five signed (October 6 2026).
-// Primary-key fingerprints, not subkeys. Threshold: 2 of 5
-// distinct signers required.
+// the listed URL. Verified against the Bitcoin Core 31.1
+// SHA256SUMS.asc, which all five signed (October 19 2026).
+// Each attested every final release from 29.3 to 31.1 in guix.sigs.
+// Primary-key fingerprints, not subkeys. Threshold: 3 of 5
+// distinct signers required, the default of Core's own
+// contrib/verify-binaries script.
 var bitcoinCoreSigners = []struct {
 	name        string
 	fingerprint string
@@ -85,9 +90,9 @@ var bitcoinCoreSigners = []struct {
 		keyURL:      "https://raw.githubusercontent.com/bitcoin-core/guix.sigs/main/builder-keys/hebasto.gpg",
 	},
 	{
-		name:        "theStack",
-		fingerprint: "6A8F9C266528E25AEB1D7731C2371D91CB716EA7",
-		keyURL:      "https://raw.githubusercontent.com/bitcoin-core/guix.sigs/main/builder-keys/theStack.gpg",
+		name:        "pinheadmz",
+		fingerprint: "E61773CD6E01040E2F1BD78CE7E2984B6289C93A",
+		keyURL:      "https://raw.githubusercontent.com/bitcoin-core/guix.sigs/main/builder-keys/pinheadmz.gpg",
 	},
 	{
 		name:        "willcl-ark",
@@ -96,9 +101,9 @@ var bitcoinCoreSigners = []struct {
 	},
 }
 
-// VerifyBitcoinCore requires two distinct pinned signers before checking the archive.
+// VerifyBitcoinCore requires three distinct pinned signers before checking the archive.
 func VerifyBitcoinCore(workDir string) error {
-	const minValid = 2
+	const minValid = 3
 	logger.Verify("--- Bitcoin Core signature verification ---")
 
 	sumsFile := filepath.Join(workDir, "SHA256SUMS")
@@ -114,7 +119,7 @@ func VerifyBitcoinCore(workDir string) error {
 	}
 
 	// Pin ALL fingerprints regardless of download success.
-	// The pinned set is the trust anchor; it does not change
+	// The pinned set is the trust anchor. It does not change
 	// based on which keys we managed to download.
 	pinnedFPs := make(map[string]bool)
 	for _, signer := range bitcoinCoreSigners {
