@@ -72,7 +72,7 @@ The plan has these fields:
 | `networks` | Explicitly supported installed profiles: `mainnet`, `testnet4`, `public-signet` |
 | `bitcoin`, `lnd`, `syncthing` | Each has `version` and the upstream archive's lowercase `sha256`, both equal to the values pinned in `internal/component/versions.go` at the release commit |
 | `host_steps` | Ordered operation IDs implemented in the target worker |
-| `host_services` | Optional affected component names for host steps. Stopping Core also includes LND |
+| `host_services` | Optional affected component names for host steps. Stopping Core also includes LND. A plan with `lnd-config-v1` must list `lnd` |
 | `recovery_from` | Optional exact VPN archive digests this release can repair |
 | `bridge` | Optional earlier VPN version. A node this plan does not admit is told to install that release first. A stable release must name a stable bridge |
 
@@ -90,11 +90,18 @@ step, a release should also admit those older sources, so that a node behind by
 VPN-only releases updates in one step. Each admitted source still needs its own
 transition test, which is light when no component or host change is skipped.
 
-The initial host operation is `lnd-service-v1`. It installs the reviewed LND
+There are two host operations. `lnd-service-v1` installs the reviewed LND
 systemd template, preserves the configured auto-unlock choice, validates the unit,
-and reloads systemd. Additional host operations require implementation in the
+and reloads systemd. `lnd-config-v1` writes `/etc/lnd/lnd.conf` again from the
+release's template while LND is stopped. The network and Hybrid address come from
+`/etc/vpn/config.json`, the onion address from Tor, and LND's Bitcoin Core
+password from the current file. Settings chosen in VPN are kept, changes made by
+hand are not. When the current file disagrees with those settings, the step
+refuses to write it, and an update that has not changed anything yet is refused
+at "Check the node". Additional host operations require implementation in the
 target worker, including repeat-safe preconditions and postconditions. The plan
-cannot supply shell commands, file destinations, signing keys, or arbitrary URLs.
+cannot supply shell commands, file destinations, signing keys, or arbitrary
+URLs.
 
 ## Release candidates and publication
 

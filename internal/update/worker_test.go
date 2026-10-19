@@ -48,6 +48,26 @@ func TestWorkerRejectsPlanForDifferentBuild(t *testing.T) {
 	}
 }
 
+// The installed helper works out which services an update stops with its own
+// code, which knows only lnd-service-v1. A plan with lnd-config-v1 must
+// therefore name lnd itself, or LND would keep running while its file is
+// rewritten.
+func TestWorkerNeedsLNDServiceForLNDConfigStep(t *testing.T) {
+	m := workflowFixture().Review.Manifest
+	m.Bitcoin.Version, m.LND.Version, m.Syncthing.Version = component.BitcoinCoreVersion, component.LNDVersion, component.SyncthingVersion
+	m.Bitcoin.SHA256, m.LND.SHA256, m.Syncthing.SHA256 = component.BitcoinCoreArchiveSHA256, component.LNDArchiveSHA256, component.SyncthingArchiveSHA256
+	m.HostSteps = []string{"lnd-config-v1"}
+	m.HostServices = []protocol.Component{protocol.LND}
+	if err := ValidateBuild(m, "0.7.1"); err != nil {
+		t.Fatal("plan with lnd-config-v1 and lnd refused:", err)
+	}
+	m.HostServices = nil
+	err := ValidateBuild(m, "0.7.1")
+	if err == nil || !strings.Contains(err.Error(), "host_services") {
+		t.Fatalf("plan with lnd-config-v1 and no lnd service: %v", err)
+	}
+}
+
 // The installed helper may understand less of a plan than the worker must.
 // The worker therefore reads the approved plan bytes itself, in full.
 func TestWorkerReadsApprovedPlanInFull(t *testing.T) {

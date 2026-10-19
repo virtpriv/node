@@ -204,6 +204,7 @@ func TestBuildLNDConfigPinsTorAndHealthPolicy(t *testing.T) {
 		"healthcheck.diskspace.diskrequired":  "0.10",
 		"healthcheck.diskspace.attempts":      "2",
 		"healthcheck.diskspace.interval":      "12h",
+		"allow-circular-route":                "false",
 	}
 	for key, wantValue := range want {
 		got := values[key]
@@ -310,5 +311,93 @@ func TestParseLNDBitcoindRPCPassword(t *testing.T) {
 		if _, err := parseLNDBitcoindRPCPassword(content); err == nil {
 			t.Errorf("%s password accepted", name)
 		}
+	}
+}
+
+// The update step lnd-config-v1 writes lnd.conf again from vpn's settings. It
+// takes LND's Core password from the current file and the onion address from
+// Tor, and refuses, before anything changes, a current file that disagrees
+// with the node configuration. Hand edits elsewhere in the file are not kept.
+func TestRewrittenLNDConfig(t *testing.T) {
+	onion := strings.Repeat("a", 56) + ".onion"
+	other := strings.Repeat("b", 56) + ".onion"
+	tor := config.Default()
+	tor.Network = config.NetworkPublicSignet
+	hybrid := config.Default()
+	hybrid.Network = config.NetworkPublicSignet
+	hybrid.P2PMode, hybrid.P2PAddress = "hybrid", "203.0.113.7"
+	testnet := config.Default()
+	testnet.Network = config.NetworkTestnet4
+	otherAddress := *hybrid
+	otherAddress.P2PAddress = "203.0.113.8"
+
+	for _, network := range config.SupportedNetworks() {
+		for _, mode := range []string{"tor", "hybrid"} {
+			node := config.Default()
+			node.Network = network
+			if mode == "hybrid" {
+				node.P2PMode, node.P2PAddress = "hybrid", "203.0.113.7"
+			}
+			t.Run("keeps settings on a "+network+" "+mode+" node", func(t *testing.T) {
+				keepsSettings(t, node, onion)
+			})
+		}
+	}
+
+	torFile := mustBuildLNDConfig(t, tor, onion, "lnd", "secret")
+	hybridFile := mustBuildLNDConfig(t, hybrid, onion, "lnd", "secret")
+	for _, tc := range []struct {
+		name    string
+		node    *config.AppConfig
+		current string
+		refused string
+	}{
+		{"one hybrid address line on a tor node", tor, torFile + "externalhosts=203.0.113.7:9735\n", "Hybrid lines"},
+		{"open REST listener on a tor node", tor, strings.Replace(torFile, "restlisten="+paths.LNDRESTEndpoint, "restlisten=0.0.0.0:8080", 1), "Hybrid lines"},
+		{"hybrid file without its certificate address", hybrid, strings.Replace(hybridFile, "tlsextraip=203.0.113.7\n", "", 1), "Hybrid address 203.0.113.7"},
+		{"hybrid REST listener limited by hand", hybrid, strings.Replace(hybridFile, "restlisten=0.0.0.0:8080", "restlisten="+paths.LNDRESTEndpoint, 1), "Hybrid address 203.0.113.7"},
+		{"two onion addresses", tor, torFile + "tlsextradomain=" + onion + "\n", "onion address"},
+		{"another network switched off", tor, torFile + "bitcoin.testnet4=false\n", "public-signet network"},
+		{"hybrid lines on a tor node", tor, hybridFile, "Hybrid lines"},
+		{"tor file on a hybrid node", hybrid, torFile, "Hybrid address 203.0.113.7"},
+		{"another hybrid address", hybrid, mustBuildLNDConfig(t, &otherAddress, onion, "lnd", "secret"), "Hybrid address 203.0.113.7"},
+		{"another onion address", tor, mustBuildLNDConfig(t, tor, other, "lnd", "secret"), "onion address"},
+		{"no onion address", tor, mustBuildLNDConfig(t, tor, "", "lnd", "secret"), "onion address"},
+		{"another network", tor, mustBuildLNDConfig(t, testnet, onion, "lnd", "secret"), "public-signet network"},
+		{"no password", tor, strings.Replace(torFile, "bitcoind.rpcpass=secret\n", "", 1), "rpcpass"},
+		{"two passwords", tor, torFile + "bitcoind.rpcpass=other\n", "rpcpass"},
+		{"public P2P listener on a tor node", tor, strings.Replace(torFile, "listen="+paths.LNDP2PBind, "listen=0.0.0.0:9735", 1), "Hybrid lines"},
+		{"one certificate address on a tor node", tor, torFile + "tlsextraip=203.0.113.7\n", "Hybrid lines"},
+		{"hybrid P2P listener on loopback", hybrid, strings.Replace(hybridFile, "listen=0.0.0.0:9735", "listen="+paths.LNDP2PBind, 1), "Hybrid address 203.0.113.7"},
+		{"hybrid file without its announced address", hybrid, strings.Replace(hybridFile, "externalhosts=203.0.113.7:9735\n", "", 1), "Hybrid address 203.0.113.7"},
+		{"no network selected", tor, strings.Replace(torFile, "bitcoin.signet=true\n", "", 1), "public-signet network"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := rewrittenLNDConfig(tc.current, tc.node, onion)
+			if err == nil || !strings.Contains(err.Error(), tc.refused) {
+				t.Fatalf("got %v, want a refusal naming %q, file:\n%s", err, tc.refused, got)
+			}
+		})
+	}
+}
+
+// keepsSettings rewrites a file with the node's settings, an older value of
+// allow-circular-route and a hand edit. It expects vpn's template with the
+// node's settings, and the same bytes from a second run.
+func keepsSettings(t *testing.T, node *config.AppConfig, onion string) {
+	t.Helper()
+	current := mustBuildLNDConfig(t, node, onion, "lnd", "secret")
+	current = strings.Replace(current, "allow-circular-route=false", "allow-circular-route=true", 1)
+	current += "alias=hand-edited\n"
+	got, err := rewrittenLNDConfig(current, node, onion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := mustBuildLNDConfig(t, node, onion, "lnd", "secret"); got != want {
+		t.Fatalf("rewritten file differs from vpn's template:\n%s", got)
+	}
+	again, err := rewrittenLNDConfig(got, node, onion)
+	if err != nil || again != got {
+		t.Fatalf("a second rewrite changed the file or failed: %v", err)
 	}
 }

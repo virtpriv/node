@@ -68,7 +68,17 @@ func RunWorker(version string) error {
 	return runJob(j, workflowOps{
 		save: func(j *job) error { return saveJob(Root, j) },
 		identify: func(j *job) error {
-			return observeIdentity(j, host.CheckUpdateProcess, func() (bool, error) { return host.WalletExists(cfg.Network) }, host.SyncthingDeviceID)
+			if err := observeIdentity(j, host.CheckUpdateProcess, func() (bool, error) { return host.WalletExists(cfg.Network) }, host.SyncthingDeviceID); err != nil {
+				return err
+			}
+			// A host step that cannot run is refused here, while Cancel still
+			// leaves the node as it was.
+			for _, step := range j.Review.Manifest.HostSteps {
+				if err := host.CheckUpdateHostStep(step, cfg); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
 		stage: func(j *job) error { return stageJob(j) },
 		capacity: func(j *job) error {
@@ -110,7 +120,7 @@ func loadPlan(root string, j *job) (protocol.Manifest, error) {
 	return protocol.Decode(data)
 }
 
-// inheritFailed gives a repair job the duties of the failed update it follows:
+// inheritFailed gives a repair job the duties of the failed update it follows,
 // the services that update affected, what may already have run, and the wallet
 // and device identity recorded before any change. The helper retained each
 // failed record as result.json. A failed repair whose worker never ran has not
@@ -178,7 +188,7 @@ func inheritFailed(root string, j *job) error {
 // observeIdentity requires every affected service to run its installed
 // executable, then records the wallet and device identity that the health
 // checks compare against after the update. This rule belongs to the worker so
-// that a release can change it: a helper that enforced it would keep a node
+// that a release can change it. A helper that enforced it would keep a node
 // from the very update that repairs a service which cannot start.
 func observeIdentity(j *job, running func(protocol.Component) error, wallet func() (bool, error), device func() string) error {
 	for _, c := range j.Affected {
@@ -253,7 +263,7 @@ func quarantine(components []protocol.Component) error {
 
 const installDir = "/usr/local/bin"
 
-// A spaceNeed is what one path's filesystem must hold before services stop:
+// A spaceNeed is what one path's filesystem must hold before services stop,
 // the free space that has to remain, plus the bytes still to be written there.
 type spaceNeed struct {
 	path         string
@@ -297,7 +307,7 @@ func spaceNeeds(root, binary string, j *job) ([]spaceNeed, error) {
 }
 
 // checkSpaceNeeds counts each filesystem once, even when several paths share
-// it: the largest floor plus all remaining writes must fit.
+// it. The largest floor plus all remaining writes must fit.
 func checkSpaceNeeds(needs []spaceNeed, observe func(path string) (dev, avail uint64, err error)) error {
 	type total struct {
 		spaceNeed
@@ -489,7 +499,15 @@ func ValidateBuild(m protocol.Manifest, version string) error {
 		return errors.New("release plan archive hashes differ from this VPN build's pinned hashes")
 	}
 	for _, step := range m.HostSteps {
-		if step != "lnd-service-v1" {
+		switch step {
+		case "lnd-service-v1":
+		case "lnd-config-v1":
+			// The installed helper picks the services to stop with its own
+			// code, which does not know this step.
+			if !slices.Contains(m.HostServices, protocol.LND) {
+				return errors.New("a plan with host step lnd-config-v1 must list lnd in host_services")
+			}
+		default:
 			return fmt.Errorf("this worker does not implement host step %q", step)
 		}
 	}

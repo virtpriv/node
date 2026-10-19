@@ -89,8 +89,9 @@ func ObserveUpdateVersions(vpn string, cfg *config.AppConfig) (protocol.Versions
 // componentVersion finds the version in a program's own version output. A
 // version in the format this build knows is preferred, so known releases read
 // as they always have. Otherwise the first word that looks like a version is
-// returned: after a failed update this helper must still name a program that a
-// later release installed, so that its repair release can be reviewed.
+// returned, because after a failed update this helper must still name a
+// program that a later release installed, so that its repair release can be
+// reviewed.
 func componentVersion(c protocol.Component, out string) string {
 	later := ""
 	for _, word := range strings.Fields(out) {
@@ -258,6 +259,20 @@ func CheckUpdateProcess(c protocol.Component) error {
 	return nil
 }
 
+// CheckUpdateHostStep reports, before an update changes anything, why a host
+// step cannot run on this node. The step checks again when it runs.
+func CheckUpdateHostStep(step string, cfg *config.AppConfig) error {
+	switch step {
+	case "lnd-service-v1":
+		return nil
+	case "lnd-config-v1":
+		_, err := readLNDConfigRewrite(cfg)
+		return err
+	default:
+		return fmt.Errorf("unknown host update step %q", step)
+	}
+}
+
 func ApplyUpdateHostStep(step string, cfg *config.AppConfig) error {
 	switch step {
 	case "lnd-service-v1":
@@ -270,6 +285,15 @@ func ApplyUpdateHostStep(step string, cfg *config.AppConfig) error {
 			return err
 		}
 		return system.RunRoot("systemctl", "daemon-reload")
+	case "lnd-config-v1":
+		// The release opts into its reviewed lnd.conf template. The owner's
+		// settings are carried over, hand edits are not. LND is stopped.
+		if err := rewriteLNDConfig(cfg); err != nil {
+			return err
+		}
+		// The update worker's output is its journal, the update log.
+		fmt.Fprintln(os.Stderr, "lnd.conf rewritten from vpn's settings.")
+		return nil
 	default:
 		return fmt.Errorf("unknown host update step %q", step)
 	}
