@@ -3,6 +3,7 @@ package host
 import (
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -54,7 +55,9 @@ func BuildLNDConfig(
 		tlsExtraDomain = fmt.Sprintf("tlsextradomain=%s", restOnion)
 	}
 
-	return fmt.Sprintf(`# Virtual Private Node. LND
+	return fmt.Sprintf(`# Virtual Private Node, LND configuration
+# vpn writes this file from its own settings. An update can
+# write it again, so changes made by hand are not kept.
 [Application Options]
 lnddir=/var/lib/lnd
 %s
@@ -65,14 +68,13 @@ debuglevel=info
 %s
 %s
 
-# Let LND own its TLS cert lifecycle. At startup, LND
-# replaces an expired cert. tlsautorefresh also replaces
-# it when configured SAN inputs change (e.g. tlsextraip is
-# added during a P2P upgrade). It does not renew an
-# unchanged cert before expiry. tlsdisableautofill keeps
-# the cert deterministic. It contains only what we set
-# explicitly here, not autodetected interface IPs.
-# This is the same pattern used by Raspiblitz.
+# LND manages its own TLS certificate. At startup it
+# replaces an expired certificate, and with tlsautorefresh
+# also one whose names or addresses set here changed, for
+# example when Hybrid adds tlsextraip. It does not renew a
+# certificate before it expires. With tlsdisableautofill
+# the certificate holds only the names and addresses set
+# here, not the machine's own addresses.
 tlsautorefresh=1
 tlsdisableautofill=1
 
@@ -85,9 +87,10 @@ accept-amp=true
 # bloat on long-running nodes.
 gc-canceled-invoices-on-the-fly=true
 
-# Allow routing payments that arrive and depart on the
-# same channel. Required for circular rebalancing.
-allow-circular-route=true
+# Do not forward a payment that arrives and leaves on the
+# same channel, LND's default. The node's own payments,
+# rebalancing included, are not affected.
+allow-circular-route=false
 
 [Bitcoin]
 %s
@@ -107,64 +110,58 @@ tor.control=127.0.0.1:9051
 tor.targetipaddress=127.0.0.1
 tor.v3=true
 tor.streamisolation=true
-# Pin the durable dynamic P2P onion identity to LND's
-# existing derived path. Keep the key plaintext under the
-# lnd:lnd 0750 directory, key mode 0600, and UMask 0077:
-# wallet-seed encryption adds little protection on this
-# auto-unlocked appliance and couples recovery to the
-# matching wallet keyring.
+# Keep the key of the node's onion address where LND
+# already keeps it. It stays unencrypted in LND's private
+# folder (lnd:lnd 0750, the key 0600). Encrypting it with
+# the wallet adds little protection and ties the address
+# to the wallet for recovery.
 tor.privatekeypath=/var/lib/lnd/v3_onion_private_key
 tor.encryptkey=false
-# Tor-only policy is explicit rather than inherited from
-# an upstream default: never bypass the SOCKS proxy for a
-# clearnet target.
+# Never bypass Tor, also for a clearnet address. Written
+# here so it does not depend on LND's default.
 tor.skip-proxy-for-clearnet-targets=false
 
 [protocol]
-# Taproot channels: smaller, cheaper cooperative closes
-# with better on-chain privacy (MuSig2 key spend).
+# Taproot channels give smaller, cheaper cooperative
+# closes with better privacy on chain (MuSig2 key spend).
 protocol.simple-taproot-chans=true
 # Keep onion-message forwarding available in the background.
 # This is distinct from Tor onion-service routing.
 protocol.no-onion-messages=false
 # LND requires RBF cooperative close support whenever final
 # Taproot channels are enabled. Keep that dependency explicit.
-# VPN's operator-driven fee-bump workflow remains deferred.
 protocol.rbf-coop-close=true
 # Accept channels larger than 0.16 BTC.
 protocol.wumbo-channels=true
-# Channels referenced by alias instead of on-chain UTXO
-# for better privacy in gossip.
+# A private channel can be named by an alias instead of
+# its funding transaction, so invoices do not reveal it.
 protocol.option-scid-alias=true
 
 [db]
-# Fresh v0.7.0 nodes use LND's local SQLite backend and its native SQL
-# stores. These settings are permanent for the lifetime of the node.
-# Leave SQLite durability, locking, WAL, checkpoint, and vacuum behavior
-# at the pinned LND release's defaults.
+# LND keeps its data in SQLite with its native SQL stores.
+# This cannot change for the life of the node. SQLite's
+# own settings stay at LND's defaults.
 db.backend=sqlite
 db.use-native-sql=true
 
 [healthcheck]
-# Keep LND's chain-backend check at its upstream defaults.
-# Three attempts can stop LND after roughly 4-6.5 minutes.
-# A failed check currently requests graceful exit status 0,
-# which Restart=on-failure does not restart. Re-evaluate the
-# budget and LND issue 5625 at each LND upgrade.
-# Keep TLS checking disabled explicitly. It only detects an
-# already-expired cert and requests the same graceful stop.
-# Startup, not this check, performs certificate replacement.
+# LND's check of Bitcoin Core keeps LND's defaults. After
+# three failed attempts, roughly 4 to 6.5 minutes, LND stops
+# itself with exit status 0, which systemd does not restart
+# (LND issue 5625). Start LND again from the System tab.
+# The TLS check stays off. It only notices an expired
+# certificate and stops LND the same way. LND replaces the
+# certificate at startup.
 healthcheck.tls.attempts=0
-# Reconnect LND's controller and recreate the same dynamic
-# onion after Tor restarts. Ten attempts retain the upstream
-# cadence while allowing roughly 9-11 minutes for recovery.
+# After Tor restarts, LND reconnects to it and brings back
+# the same onion address. Ten attempts at LND's usual pace
+# allow roughly 9 to 11 minutes.
 healthcheck.torconnection.interval=1m
 healthcheck.torconnection.timeout=5s
 healthcheck.torconnection.backoff=1m
 healthcheck.torconnection.attempts=10
-# Graceful shutdown if filesystem free space falls to 10%%.
-# On a 90GB filesystem this preserves roughly 9GB and allows
-# about 81GB of operational usage before the safety stop.
+# LND stops itself when free disk space falls to 10%%.
+# On a 90 GB disk that keeps about 9 GB free.
 healthcheck.diskspace.diskrequired=0.10
 healthcheck.diskspace.attempts=2
 healthcheck.diskspace.interval=12h
@@ -361,4 +358,93 @@ func parseLNDBitcoindRPCPassword(content string) (string, error) {
 		return "", fmt.Errorf("lnd.conf has no bitcoind.rpcpass")
 	}
 	return password, nil
+}
+
+// rewriteLNDConfig writes lnd.conf again from this release's template and the
+// node's settings, for the update step lnd-config-v1. LND must be stopped.
+// Running it again gives the same file, so a Retry is safe.
+func rewriteLNDConfig(cfg *config.AppConfig) error {
+	content, err := readLNDConfigRewrite(cfg)
+	if err != nil {
+		return err
+	}
+	return system.WriteFileRootOwned(paths.LNDConf, []byte(content), 0640, "root", lndUser)
+}
+
+// readLNDConfigRewrite returns the new lnd.conf, or why this node's current
+// file cannot be rewritten. It changes nothing.
+func readLNDConfigRewrite(cfg *config.AppConfig) (string, error) {
+	current, err := os.ReadFile(paths.LNDConf)
+	if err != nil {
+		return "", fmt.Errorf("read lnd.conf: %w", err)
+	}
+	restOnion, err := readRequiredLNDRESTOnion()
+	if err != nil {
+		return "", err
+	}
+	return rewrittenLNDConfig(string(current), cfg, restOnion)
+}
+
+// rewrittenLNDConfig returns the new lnd.conf for a node whose current file is
+// current. The network and Hybrid address come from the node configuration,
+// the onion address from Tor and LND's Core password from the current file.
+// A current file that disagrees with any of them is refused, because the
+// update would otherwise change how the node is reached without the owner
+// asking. Other lines, hand edits among them, are not carried over.
+func rewrittenLNDConfig(current string, cfg *config.AppConfig, restOnion string) (string, error) {
+	password, err := parseLNDBitcoindRPCPassword(current)
+	if err != nil {
+		return "", err
+	}
+	if err := lndConfigAgrees(current, cfg, restOnion); err != nil {
+		return "", fmt.Errorf("lnd.conf does not match the node configuration: %w", err)
+	}
+	return BuildLNDConfig(cfg, restOnion, LNDBitcoindRPCUser, password)
+}
+
+// lndConfigAgrees compares the lines that carry the node's settings.
+func lndConfigAgrees(current string, cfg *config.AppConfig, restOnion string) error {
+	node, err := cfg.NetworkConfig()
+	if err != nil {
+		return err
+	}
+	values := map[string][]string{}
+	for _, line := range strings.Split(current, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "[") {
+			continue
+		}
+		if key, value, ok := strings.Cut(line, "="); ok {
+			key = strings.TrimSpace(key)
+			values[key] = append(values[key], strings.TrimSpace(value))
+		}
+	}
+	is := func(key, want string) bool {
+		return len(values[key]) == 1 && values[key][0] == want
+	}
+	// The node's own network is selected once, every other one not at all.
+	selected, _, _ := strings.Cut(node.LNDBitcoinFlag, "=")
+	for _, name := range config.SupportedNetworks() {
+		profile, err := config.NetworkConfigFromName(name)
+		if err != nil {
+			return err
+		}
+		key, _, _ := strings.Cut(profile.LNDBitcoinFlag, "=")
+		if (key == selected && !is(key, "true")) || (key != selected && len(values[key]) > 0) {
+			return fmt.Errorf("it does not select the %s network", cfg.Network)
+		}
+	}
+	if cfg.P2PMode == "hybrid" {
+		if !is("externalhosts", cfg.P2PAddress+":9735") || !is("tlsextraip", cfg.P2PAddress) ||
+			!is("listen", "0.0.0.0:9735") || !is("restlisten", "0.0.0.0:8080") {
+			return fmt.Errorf("it does not announce the Hybrid address %s", cfg.P2PAddress)
+		}
+	} else if len(values["externalhosts"]) > 0 || len(values["tlsextraip"]) > 0 ||
+		!is("listen", paths.LNDP2PBind) || !is("restlisten", paths.LNDRESTEndpoint) {
+		return errors.New("it has Hybrid lines but the node uses Tor only")
+	}
+	if !is("tlsextradomain", restOnion) {
+		return errors.New("its onion address differs from Tor's")
+	}
+	return nil
 }
