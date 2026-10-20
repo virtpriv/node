@@ -26,7 +26,7 @@ The TUI is currently English-only. If you'd like to help translate it into anoth
 
 ### Documentation
 
-Documentation improvements are always welcome. This includes fixing typos, clarifying confusing sections, adding examples, or translating docs. The `README.md`, `docs/syncthing.md`, `docs/reproducing.md`, and `docs/verifying.md` are all fair game.
+Documentation improvements are always welcome. This includes fixing typos, clarifying confusing sections, adding examples, or translating docs. The `README.md` and every guide in `docs/` are fair game.
 
 ### Bug reports and feature requests
 
@@ -35,8 +35,12 @@ Open an issue with as much context as you can. Screenshots help for TUI bugs. Fo
 ## Development and validation
 
 The exact Go version declared in `go.mod` is authoritative. Install the
-official toolchain from [go.dev/dl](https://go.dev/dl/); distribution
+official toolchain from [go.dev/dl](https://go.dev/dl/). Distribution
 packages may contain patches or different defaults.
+
+How the installer, the TUI and the node's files work is described in
+[How vpn Works Inside](docs/developing.md). Building releases and the rules
+for managed updates are in [Releasing](docs/releasing.md).
 
 Run the portable development gate without elevated privileges:
 

@@ -53,10 +53,8 @@ See the [Syncthing Setup Guide](syncthing.md).
 
 Zeus connects to your Node over Tor, through LND's onion address. This works
 from anywhere, also for a Node at home, because Tor needs no open port on your
-router. See Zeus's own documentation for setting it up on your phone, and the
-README under
-[Connecting Zeus Wallet](../README.md#connecting-zeus-wallet) for the pairing
-screen.
+router. See Zeus's own documentation for setting it up on your phone, and
+[Running Your Node](running.md#connecting-zeus) for the pairing screen.
 
 ## Hybrid mode
 
