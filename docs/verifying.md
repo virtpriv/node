@@ -9,7 +9,7 @@ key and checksum rules, before it offers the update. Managed release archives
 also contain `update.json`. Its integrity is covered by the same signed archive
 checksum. The TUI verifies that plan before review and checks each selected
 component against its pinned upstream signature and the plan's exact archive
-hash. See [managed updates](updating.md).
+hash. See [Updating Your Node](updating.md).
 
 Releases published before v0.7.0 were made under the project's previous name
 and ship a program called rlvpn. They are not installed with these steps.

@@ -76,20 +76,17 @@ In the Node dashboard:
 4. Paste your local Device ID
 5. Confirm with the Pair button
 
-The Node adds your device and shares the backup folder. Completion confirms a
-read-back of the Node's configuration. The receiver still needs steps 6 and 7 below. Avoid editing
-the Node's Syncthing configuration in its web UI while pairing or removing a
-device in the TUI.
+The Node adds your device and shares the backup folder. Your device still
+needs steps 6 and 7 below. Avoid editing the Node's Syncthing configuration in
+its web UI while pairing or removing a device in the TUI.
 
-If pairing reports an incomplete or unconfirmed outcome, inspect the device and
-`lnd-backup` share in the Node's web UI before retrying. A device may have been
-added even when sharing was not confirmed. An explicit pairing retry preserves
-that device's settings and completes a missing backup share. It does not
-reinstall Syncthing or roll back earlier changes.
+If pairing reports an incomplete or unconfirmed outcome, check the device and
+the `lnd-backup` share in the Node's web UI before you retry. A retry keeps the
+device's settings and adds a missing share.
 
-Removal identifies the selected device by its complete Device ID. It removes
-that device and its folder shares on the Node. Remote files remain intact.
-An unconfirmed removal requires checking the current device list before retrying.
+Removing a device removes it and its folder shares on the Node. The files on
+your device stay. If a removal is unconfirmed, check the device list before
+you retry.
 
 ### Step 6. Add the Node in Your Local Syncthing
 
@@ -166,8 +163,8 @@ Node's copy:
   itself.
 
 Read both. A copy that is behind LND can still be Up to date on every
-device. Browser changes appear after a successful refresh. The API cannot
-prevent simultaneous edits from overwriting one another.
+device. Changes made in the Node's web UI appear here after the next
+successful refresh.
 
 ### Verify It's Working
 
@@ -189,11 +186,8 @@ running in the System section.
   without your 24-word seed phrase
 - The backup contains static recovery information, not current balances or
   commitment state. Restoring it closes channels and depends on reachable peers.
-- The Node publishes only a completed copy through its own
-  `/var/lib/vpn/exports` boundary. No temporary file is placed in
-  the synchronized folder.
-- Syncthing can read that final export but cannot write it, enter
-  the private staging directory, or read LND's source data
+- Syncthing can read only the Node's finished backup copy. It cannot
+  change that copy or read LND's own files.
 - Discovery and relay servers are disabled. Your device connects
   directly to the Node by IP address.
 - The Syncthing web UI on the Node is only accessible via Tor
@@ -204,10 +198,9 @@ running in the System section.
 **Privacy or API-key check failed:**
 
 The TUI refuses pairing when it cannot verify the Node's privacy settings or
-send-only backup boundary. Ask the host administrator to inspect the existing
-configuration and staged credentials. Reinstalling over retained Syncthing state
-is not a supported repair. During installation, a failed privacy check triggers
-stop and disable. Any failure of those actions is reported separately.
+its send-only backup folder. Inspect the existing Syncthing configuration and
+the staged credentials before you try again. Reinstalling Syncthing over its
+existing state does not repair this.
 
 **Devices not connecting:**
 
