@@ -51,9 +51,9 @@ func StageSyncthingWebPassword(password string) error {
 
 // vpnGID resolves the admin group's numeric gid. The group may
 // legitimately not exist yet during the bake phase of an image
-// build (the admin user is created at first boot); the caller
-// falls back to root-only modes and the first-boot staging step
-// re-applies ownership.
+// build, since the admin user is created at first boot. The
+// caller then falls back to root-only modes and the first-boot
+// staging step re-applies ownership.
 func vpnGID() (int, bool) {
 	g, err := user.LookupGroup(paths.AdminUser)
 	if err != nil {
@@ -68,11 +68,11 @@ func vpnGID() (int, bool) {
 
 // ensureDir creates the board directory with root:vpn
 // 0750 (root:root 0700 before the admin group exists).
-// Idempotent; re-applies ownership and mode so a bake-phase
-// directory is corrected at first boot. As belt and braces on
-// top of the root-owned-ancestors guarantee, it refuses to
-// operate on anything that is not a real directory owned by
-// root.
+// Safe to repeat. It re-applies ownership and mode so a
+// bake-phase directory is corrected at first boot. As belt
+// and braces on top of the root-owned-ancestors guarantee, it
+// refuses to operate on anything that is not a real directory
+// owned by root.
 func (b stagingBoard) ensureDir() error {
 	if err := os.MkdirAll(filepath.Dir(b.dir), 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", filepath.Dir(b.dir), err)
@@ -86,12 +86,12 @@ func (b stagingBoard) ensureDir() error {
 	}
 	if !fi.Mode().IsDir() {
 		return fmt.Errorf(
-			"%s is not a directory; refusing to stage",
+			"%s is not a directory, refusing to stage",
 			b.dir)
 	}
 	if st, ok := fi.Sys().(*syscall.Stat_t); !ok || st.Uid != 0 {
 		return fmt.Errorf(
-			"%s is not owned by root; refusing to stage",
+			"%s is not owned by root, refusing to stage",
 			b.dir)
 	}
 	gid, ok := b.gid, b.haveGroup
@@ -104,10 +104,12 @@ func (b stagingBoard) ensureDir() error {
 	return os.Chmod(b.dir, 0o750)
 }
 
-// write writes one staging-board file atomically: same-dir
-// temp, explicit chmod (the open mode is filtered by umask),
-// chown root:vpn, then rename onto the final path; a reader
-// never sees a partial file or a loose mode. Runs as root only.
+// write replaces one staging-board file atomically: a temporary
+// in the same folder, an explicit chmod (umask filters the open
+// mode), chown root:vpn, a sync, the rename onto the final path,
+// then a sync of the folder so the new name survives a power cut.
+// A reader never sees a partial file or a loose mode. Runs as
+// root only.
 func (b stagingBoard) write(path string, data []byte, rename func(string, string) error) error {
 	if err := b.ensureDir(); err != nil {
 		return err
@@ -134,8 +136,8 @@ func (b stagingBoard) write(path string, data []byte, rename func(string, string
 			return fmt.Errorf("stage %s: chown: %w", path, err)
 		}
 	} else if err := tmp.Chmod(0o600); err != nil {
-		// No admin group yet (bake phase): keep it root-only;
-		// the first-boot staging step re-owns every board file.
+		// No admin group yet (bake phase), so keep it root only.
+		// The first-boot staging step re-owns every board file.
 		tmp.Close()
 		return fmt.Errorf("stage %s: chmod: %w", path, err)
 	}
@@ -148,6 +150,9 @@ func (b stagingBoard) write(path string, data []byte, rename func(string, string
 	}
 	if err := rename(tmpPath, filepath.Join(b.dir, filepath.Base(path))); err != nil {
 		return fmt.Errorf("stage %s: rename: %w", path, err)
+	}
+	if err := syncDir(b.dir); err != nil {
+		return fmt.Errorf("stage %s: %w", path, err)
 	}
 	return nil
 }
@@ -183,7 +188,7 @@ func (b stagingBoard) fixOwnership() error {
 		}
 		p := filepath.Join(b.dir, e.Name())
 		if !e.Type().IsRegular() {
-			return fmt.Errorf("%s is not a regular board file; refusing ownership repair", p)
+			return fmt.Errorf("%s is not a regular board file, refusing ownership repair", p)
 		}
 		if err := os.Chown(p, 0, gid); err != nil {
 			return fmt.Errorf("chown %s: %w", p, err)
