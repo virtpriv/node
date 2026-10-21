@@ -372,7 +372,7 @@ esac
 	t.Setenv("RELEASE_TEST_TRACE", filepath.Join(dir, "trace"))
 	t.Setenv("RELEASE_TEST_FAILURE", "")
 	t.Setenv("RELEASE_TEST_VERSION", version)
-	t.Setenv("RELEASE_TEST_GO_VERSION", "go1.26.9")
+	t.Setenv("RELEASE_TEST_GO_VERSION", "go1.26.10")
 	t.Setenv("RELEASE_TEST_SIGNER", release.SigningFingerprint)
 	return dir
 }
