@@ -67,10 +67,17 @@ func (w *loginEvidenceWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+// A login is a line sshd starts with "Accepted <method> for vpn from ". The
+// wording must open the line: sshd keeps the spaces of a user name a client
+// sends, so a stranger's name can carry it further along.
 func journalShowsAdminLogin(journal string) bool {
-	needle := " for " + paths.AdminUser + " from "
 	for _, line := range strings.Split(journal, "\n") {
-		if strings.Contains(line, "Accepted ") && strings.Contains(line, needle) {
+		rest, ok := strings.CutPrefix(line, "Accepted ")
+		if !ok {
+			continue
+		}
+		method, rest, ok := strings.Cut(rest, " ")
+		if ok && method != "" && strings.HasPrefix(rest, "for "+paths.AdminUser+" from ") {
 			return true
 		}
 	}
