@@ -17,6 +17,10 @@ func TestNew(t *testing.T) {
 		{"empty", "", true},
 		{"one below minimum", strings.Repeat("a", 15), true},
 		{"exactly minimum", long, false},
+		// The minimum counts characters, the unit the owner is told.
+		// Eight two-byte letters are 16 bytes but only 8 characters.
+		{"eight two-byte letters", strings.Repeat("é", 8), true},
+		{"sixteen two-byte letters", strings.Repeat("é", 16), false},
 		{"above minimum", long + "extra", false},
 		{"embedded NUL", long + "\x00suffix", true},
 		{"embedded newline",

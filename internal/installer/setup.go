@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/virtpriv/node/internal/component"
 	"github.com/virtpriv/node/internal/config"
@@ -206,7 +207,6 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 	}
 
 	var res RunResult
-	openConsole := false
 	if opts.Unattended && lifecycle.Disposition != lifecycleCompletionPending {
 		if err := fillUnattendedDecisions(dec); err != nil {
 			return err
@@ -237,7 +237,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 			return runnerErr
 		}
 		session := newInstallSession(runner, dec, persistDbCache, completeInteractive)
-		res, openConsole, err = runInstallInteractive(session, installView(session), frontend)
+		res, err = runInstallInteractive(session, installView(session), frontend)
 	}
 	if err != nil {
 		return err
@@ -316,19 +316,9 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 		}
 	}
 
-	if opts.Unattended {
-		printConnectInstructions()
-		return nil
-	}
-	// The done screen offers a real choice. Enter opens the node TUI here as
-	// the owner, and ctrl+c exits, leaving the connect command behind. The
-	// handoff falls back to printed instructions, never to an error, because
-	// the install is already recorded either way.
-	if openConsole {
-		HandoffToAdminConsole()
-	} else {
-		printConnectInstructions()
-	}
+	// Both paths leave the connect command in the shell. The install terminal
+	// never opens the node TUI: the owner reaches it by logging in over SSH.
+	printConnectInstructions()
 	return nil
 }
 
@@ -366,7 +356,7 @@ func prepareInstallCompletion(
 	cfg.DbCache = *ledger.Context.DbCacheMB
 	dec.DbCacheMB = cfg.DbCache
 	if ledger.done("identity.access") {
-		observed, err := host.AdminLoginObserved()
+		observed, err := host.AdminLoginObserved(time.Time{})
 		if err != nil {
 			logger.Install("SSH login evidence unavailable, leaving verification pending: %v", err)
 		}

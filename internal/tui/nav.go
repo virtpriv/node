@@ -8,7 +8,7 @@ import (
 	"github.com/virtpriv/node/internal/theme"
 )
 
-// Section IDs — 5 parents + theme toggle
+// Section IDs: the five sections and the theme toggle.
 const (
 	secChannels    = 0
 	secWallet      = 1
@@ -18,7 +18,7 @@ const (
 	secThemeToggle = 5
 )
 
-const numSections = 5
+const numSections = len(theme.Sections)
 
 type NavItem struct {
 	Label   string
@@ -35,23 +35,23 @@ type NavSidebar struct {
 }
 
 // Nav styles are accessed directly from theme.NavItem,
-// theme.NavActive, theme.NavCursor — no aliases needed.
+// theme.NavActive and theme.NavCursor, with no aliases.
 // This ensures styles stay current after theme.Toggle().
 
 func NewNavSidebar() NavSidebar {
 	items := []NavItem{
-		{"Channels", secChannels},
-		{"Wallet", secWallet},
-		{"On-Chain", secOnChain},
-		{"Add-On", secAddons},
-		{"System", secSystem},
+		{theme.Sections[secChannels], secChannels},
+		{theme.Sections[secWallet], secWallet},
+		{theme.Sections[secOnChain], secOnChain},
+		{theme.Sections[secAddons], secAddons},
+		{theme.Sections[secSystem], secSystem},
 		{theme.ThemeIcon(), secThemeToggle},
 	}
 	return NavSidebar{
 		Items:      items,
 		Cursor:     0,
 		ActiveItem: 0,
-		Width:      12,
+		Width:      theme.SidebarWidth,
 		Height:     24,
 		Focused:    true,
 	}
@@ -91,8 +91,8 @@ func (n *NavSidebar) MoveDown() {
 
 func (n *NavSidebar) Activate() int {
 	n.clamp()
-	// Theme toggle is not a real section — don't
-	// activate it via this path.
+	// The theme toggle is not a real section. Do not
+	// activate it through this path.
 	if n.Items[n.Cursor].Section == secThemeToggle {
 		return n.Items[n.ActiveItem].Section
 	}
@@ -207,10 +207,10 @@ func (n NavSidebar) BlockRows(
 						cellBase.Render(styled))
 				}
 			} else if r == themeRow && themeIdx >= 0 {
-				// Render theme toggle icon in bottom-
-				// left corner. Highlight when cursor
-				// is on it, dim otherwise. No ▸ marker
-				// — just the icon, enter to toggle.
+				// Render the theme toggle icon in the bottom
+				// left corner. Highlight it when the cursor
+				// is on it, dim otherwise. No ▸ marker, just
+				// the icon, enter to toggle.
 				icon := n.Items[themeIdx].Label
 				isThemeCursor := n.Cursor == themeIdx &&
 					n.Focused

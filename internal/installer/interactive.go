@@ -4,14 +4,17 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
+	"github.com/virtpriv/node/internal/host"
 	"github.com/virtpriv/node/internal/loginpassword"
 	"github.com/virtpriv/node/internal/system"
 )
 
 // InstallFrontend presents one root installation session. Returning requests
 // a graceful stop, and the installer joins admitted work before releasing its lock.
-type InstallFrontend func(InstallView, *InstallSession) (openConsole bool, err error)
+// The frontend never opens the node TUI: the owner reaches it over SSH.
+type InstallFrontend func(InstallView, *InstallSession) error
 
 // InstallView contains observations and presentation data, never ledger access
 // or executable installation steps.
@@ -61,6 +64,8 @@ type InstallSession struct {
 	done          chan struct{}
 	result        RunResult
 	completionErr error
+	// began bounds the SSH log read, so only a login during this run counts.
+	began time.Time
 }
 
 func newInstallSession(r *stepRunner, dec *InstallDecisions,
@@ -74,6 +79,7 @@ func newInstallSession(r *stepRunner, dec *InstallDecisions,
 		// A closed or failed frontend cannot block the installation worker.
 		events: make(chan InstallEvent, 2*len(r.steps)+1), done: make(chan struct{}),
 		result: classifyRun(r.steps, false, false, 0),
+		began:  time.Now(),
 	}
 	if s.needCache {
 		s.cacheMB = recommendedDbCache()
@@ -131,6 +137,12 @@ func (s *InstallSession) Stop() {
 // Events supplies one ordered stream for the frontend's single observer.
 func (s *InstallSession) Events() <-chan InstallEvent { return s.events }
 
+// SSHLoginSeen reports whether SSH's log shows a login as vpn since this run
+// began. A log that cannot be read is an error, never a login.
+func (s *InstallSession) SSHLoginSeen() (bool, error) {
+	return host.AdminLoginObserved(s.began)
+}
+
 func (s *InstallSession) close() (RunResult, error) {
 	s.Stop()
 	<-s.done
@@ -175,16 +187,14 @@ func (s *InstallSession) run() {
 	}
 }
 
-func runInstallInteractive(s *InstallSession, view InstallView, frontend InstallFrontend) (result RunResult, openConsole bool, err error) {
+func runInstallInteractive(s *InstallSession, view InstallView, frontend InstallFrontend) (result RunResult, err error) {
 	// The join also runs on a frontend panic, before the caller releases its lock.
 	defer func() {
 		var completionErr error
 		result, completionErr = s.close()
 		err = errors.Join(err, completionErr)
-		openConsole = openConsole && err == nil && result.Outcome == RunComplete
 	}()
-	openConsole, err = frontend(view, s)
-	return
+	return result, frontend(view, s)
 }
 
 func installView(s *InstallSession) InstallView {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/virtpriv/node/internal/paths"
 )
@@ -105,7 +106,7 @@ func clearKeyVerificationPendingAt(path string, expectedUID int) error {
 }
 
 // SetKeyVerificationPending publishes the installer's first-login requirement.
-// Only the installer arms it; runtime verification can only clear it.
+// Only the installer arms it. Runtime verification can only clear it.
 func SetKeyVerificationPending(pending bool) error {
 	if os.Geteuid() != 0 {
 		return errors.New("SSH login verification requires root")
@@ -130,7 +131,7 @@ func VerifyAdminLogin() (pending, verified bool, err error) {
 	if os.Geteuid() != 0 {
 		return false, false, errors.New("SSH login verification requires root")
 	}
-	return verifyAdminLoginAt(paths.KeyVerificationMarker, 0, AdminLoginObserved)
+	return verifyAdminLoginAt(paths.KeyVerificationMarker, 0, func() (bool, error) { return AdminLoginObserved(time.Time{}) })
 }
 
 func verifyAdminLoginAt(path string, uid int, observe func() (bool, error)) (pending, verified bool, err error) {

@@ -9,7 +9,9 @@ phone wallet and sharing your node. To install, see
 ## Logging in
 
 The installer creates the `vpn` owner account. Choose a login password of at
-least 16 bytes, preferably generated and saved in a password manager.
+least 16 characters, preferably generated and saved in a password manager.
+When the install finishes, it shows the `ssh` command and waits until you log
+in as `vpn` from a new terminal. Your node opens there.
 Unattended installation generates a password and shows it at completion. Save
 it for your first login.
 

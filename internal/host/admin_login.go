@@ -13,23 +13,27 @@ import (
 	"github.com/virtpriv/node/internal/paths"
 )
 
-// AdminLoginObserved checks the existing first-login contract: any accepted SSH
-// authentication for vpn, including password authentication. The in-session su
-// handoff is not evidence, nor does this prove an independent administrator path.
-// Root work has its own bound; a disconnect does not revoke an accepted check.
-func AdminLoginObserved() (bool, error) {
+// AdminLoginObserved checks the first-login contract: any accepted SSH
+// authentication for vpn, including password authentication, since the given
+// time, or in the whole log when it is zero. su is not evidence, nor does this
+// prove an independent administrator path. Root work has its own bound.
+func AdminLoginObserved(since time.Time) (bool, error) {
 	if os.Geteuid() != 0 {
 		return false, errors.New("SSH login evidence requires root")
 	}
-	return observeAdminLogin(10*time.Second, exec.CommandContext)
+	return observeAdminLogin(10*time.Second, since, exec.CommandContext)
 }
 
-func observeAdminLogin(timeout time.Duration, command func(context.Context, string, ...string) *exec.Cmd) (bool, error) {
+func observeAdminLogin(timeout time.Duration, since time.Time, command func(context.Context, string, ...string) *exec.Cmd) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	args := []string{"-u", "ssh"}
+	if !since.IsZero() {
+		args = append(args, fmt.Sprintf("--since=@%d", since.Unix()))
+	}
 	// Do not use --grep: journalctl's no-match exit status is also used for
-	// failures. An empty successful stream means pending; a failed read is unknown.
-	cmd := command(ctx, "/usr/bin/journalctl", "-u", "ssh", "--no-pager", "-o", "cat", "--quiet")
+	// failures. An empty successful stream means pending, a failed read is unknown.
+	cmd := command(ctx, "/usr/bin/journalctl", append(args, "--no-pager", "-o", "cat", "--quiet")...)
 	journal := &loginEvidenceWriter{}
 	cmd.Stdout = journal
 	cmd.WaitDelay = 2 * time.Second

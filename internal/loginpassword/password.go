@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
-// MinLength is the minimum password length in bytes.
+// MinLength is the minimum password length in characters, the unit the owner
+// is told. A character outside ASCII takes more bytes, so this is never weaker
+// than counting bytes.
 const MinLength = 16
 
 // Password contains a validated secret. Its zero value is invalid.
@@ -21,8 +24,8 @@ func New(text string) (Password, error) {
 	if strings.ContainsAny(text, "\n\x00") {
 		return Password{}, errors.New("password contains a newline or NUL")
 	}
-	if len(text) < MinLength {
-		return Password{}, fmt.Errorf("password must be at least %d bytes", MinLength)
+	if utf8.RuneCountInString(text) < MinLength {
+		return Password{}, fmt.Errorf("password must be at least %d characters", MinLength)
 	}
 	return Password{text: text}, nil
 }

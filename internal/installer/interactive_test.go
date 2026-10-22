@@ -44,14 +44,13 @@ func TestInteractiveExitJoinsAdmittedStep(t *testing.T) {
 		returned := make(chan struct{})
 		var result RunResult
 		var err error
-		var open bool
 		go func() {
-			result, open, err = runInstallInteractive(s, InstallView{}, func(_ InstallView, s *InstallSession) (bool, error) {
+			result, err = runInstallInteractive(s, InstallView{}, func(_ InstallView, s *InstallSession) error {
 				if err := s.Start(input); err != nil {
-					return false, err
+					return err
 				}
 				<-entered
-				return true, uiErr
+				return uiErr
 			})
 			close(returned)
 		}()
@@ -70,8 +69,8 @@ func TestInteractiveExitJoinsAdmittedStep(t *testing.T) {
 		}
 		close(release)
 		<-returned
-		if result.Outcome != RunInterrupted || result.StepNum != 2 || open || !errors.Is(err, uiErr) {
-			t.Fatalf("exit result=%+v open=%v err=%v", result, open, err)
+		if result.Outcome != RunInterrupted || result.StepNum != 2 || !errors.Is(err, uiErr) {
+			t.Fatalf("exit result=%+v err=%v", result, err)
 		}
 		if laterCalls != 0 || !mustReadLedger(t, s.runner.ledgerPath).done("binary.install") {
 			t.Fatal("stop lost the admitted step or ran a later step")
@@ -236,9 +235,9 @@ func TestInteractiveStartRecordsRecommendedCache(t *testing.T) {
 func TestInteractiveStopBeforeStartAndLastStepCompletion(t *testing.T) {
 	t.Run("before start", func(t *testing.T) {
 		s, input := interactiveFixture(t, []InstallStep{{Key: "binary.install", Name: "Binary", Fn: func() error { t.Error("stopped step ran"); return nil }}}, func() error { t.Error("stopped run finalized"); return nil })
-		result, open, err := runInstallInteractive(s, InstallView{}, func(InstallView, *InstallSession) (bool, error) { return true, nil })
-		if result.Outcome != RunInterrupted || open || err != nil {
-			t.Fatalf("result=%+v open=%v err=%v", result, open, err)
+		result, err := runInstallInteractive(s, InstallView{}, func(InstallView, *InstallSession) error { return nil })
+		if result.Outcome != RunInterrupted || err != nil {
+			t.Fatalf("result=%+v err=%v", result, err)
 		}
 		if err := s.Start(input); err == nil {
 			t.Fatal("delayed start accepted after frontend exit")
@@ -338,7 +337,7 @@ func TestRootRunInstallExitRetainsRunLock(t *testing.T) {
 		returned := make(chan error, 1)
 		uiErr := errors.New("terminal lost")
 		go func() {
-			returned <- RunInstall(InstallOptions{}, func(_ InstallView, s *InstallSession) (bool, error) {
+			returned <- RunInstall(InstallOptions{}, func(_ InstallView, s *InstallSession) error {
 				// Exercise the production coordinator and lock, replacing only host
 				// mutations and redirecting progress to the temporary lifecycle.
 				s.runner.ledgerPath = f.fs.ledger
@@ -355,10 +354,10 @@ func TestRootRunInstallExitRetainsRunLock(t *testing.T) {
 				}
 				s.runner.steps[0].Fn = func() error { close(entered); <-release; return nil }
 				if err := s.Start(InteractiveInput{Password: password}); err != nil {
-					return false, err
+					return err
 				}
 				<-entered
-				return false, uiErr
+				return uiErr
 			})
 		}()
 		select {

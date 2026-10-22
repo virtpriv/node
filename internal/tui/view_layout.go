@@ -58,25 +58,7 @@ func (m Model) viewMain() string {
 	bodyH := insideH - tabBarRows
 
 	// ── Sidebar block heights ─────────────────────
-	sepRows := numSections - 1
-	sideUsable := bodyH - sepRows
-
-	if sideUsable < numSections {
-		sideUsable = numSections
-	}
-
-	blockBase := sideUsable / numSections
-	blockRem := sideUsable % numSections
-
-	var blockHeights [numSections]int
-	for i := 0; i < numSections; i++ {
-		blockHeights[i] = blockBase
-		if i < blockRem {
-			blockHeights[i]++
-		}
-	}
-
-	blocks := m.nav.BlockRows(sidebarW, blockHeights)
+	blocks := m.nav.BlockRows(sidebarW, theme.SidebarBlocks(bodyH))
 
 	// ── Tab bar (full width) ──────────────────────
 	var tabBar string
@@ -227,8 +209,8 @@ func (m Model) renderNetworkBanner() string {
 	if !profile.TestingOnly {
 		return ""
 	}
-	return theme.Warning.Render("⚠ TESTING NETWORK — "+profile.DisplayName) +
-		theme.Dim.Render(" — coins have no mainnet value")
+	return theme.Warning.Render("⚠ TESTING NETWORK, "+profile.DisplayName+".") +
+		theme.Dim.Render(" Coins have no mainnet value.")
 }
 
 // renderVerifyBanner is the first-run access-verification
@@ -466,7 +448,7 @@ func clampLine(s string, w int) string {
 			w-lipgloss.Width(s))
 	}
 	// Truncation: trim runes from end until visual
-	// width fits. This is ANSI-safe — lipgloss.Width
+	// width fits. This is ANSI-safe, lipgloss.Width
 	// ignores escape sequences.
 	r := []rune(s)
 	for lipgloss.Width(string(r)) > w-1 && len(r) > 0 {

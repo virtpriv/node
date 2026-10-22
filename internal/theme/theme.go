@@ -216,10 +216,31 @@ var (
 
 // ── Layout constants ────────────────────────────────────
 
+// The node TUI's frame. The installer draws the same shape, so both read the
+// measurements here and the two cannot drift apart.
 const (
-	ContentWidth = 76
-	BoxHeight    = 24
+	FrameWidth   = 82
+	FrameHeight  = 34
+	SidebarWidth = 12
 )
+
+// Sections are the sidebar's five sections, top to bottom.
+var Sections = [5]string{"Channels", "Wallet", "On-Chain", "Add-On", "System"}
+
+// SidebarBlocks splits rows of sidebar between the five sections and the four
+// separator lines between them. Upper blocks take any remaining rows.
+func SidebarBlocks(rows int) [5]int {
+	n := len(Sections)
+	usable := max(rows-(n-1), n)
+	var blocks [5]int
+	for i := range blocks {
+		blocks[i] = usable / n
+		if i < usable%n {
+			blocks[i]++
+		}
+	}
+	return blocks
+}
 
 // ── Help bar ────────────────────────────────────────────
 
