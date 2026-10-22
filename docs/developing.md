@@ -188,7 +188,6 @@ changes made in Syncthing's external web UI.
 | /var/lib/vpn/private/layout-version | Root-only supported-layout generation record |
 | /var/lib/vpn/private/install-state.json | Root-only bounded base-install progress and completion ledger |
 | /var/lib/vpn/private/password-pending | Root-only interrupted unattended-password delivery marker, present only while needed |
-| /var/lib/vpn/private/key-verification-pending | Root-only first-login verification marker, present only while needed |
 | /var/lib/vpn/private/updates/ | Root-only managed update jobs and their records |
 | /run/vpn/install.lock | Stable root-only runtime lock for one active base installer |
 | /var/lib/vpn/state/ | Root-written facts and credentials deliberately staged read-only for the TUI, including the Syncthing web password |

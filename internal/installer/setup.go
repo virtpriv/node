@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/virtpriv/node/internal/component"
 	"github.com/virtpriv/node/internal/config"
@@ -355,15 +354,6 @@ func prepareInstallCompletion(
 	}
 	cfg.DbCache = *ledger.Context.DbCacheMB
 	dec.DbCacheMB = cfg.DbCache
-	if ledger.done("identity.access") {
-		observed, err := host.AdminLoginObserved(time.Time{})
-		if err != nil {
-			logger.Install("SSH login evidence unavailable, leaving verification pending: %v", err)
-		}
-		if err := host.SetKeyVerificationPending(!observed || err != nil); err != nil {
-			return fmt.Errorf("prepare SSH login verification: %w", err)
-		}
-	}
 	if err := config.Save(cfg); err != nil {
 		return fmt.Errorf("write %s: %w", config.DefaultPath, err)
 	}

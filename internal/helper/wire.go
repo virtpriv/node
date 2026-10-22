@@ -40,9 +40,6 @@ const (
 	VerbStageLNDCredentials  = "stage-lnd-credentials"
 	VerbStageLNDMacaroon     = "stage-lnd-macaroon"
 	VerbRebuildSSHConfig     = "rebuild-ssh-config"
-	// VerifyAdminLogin checks live journal evidence and may clear the
-	// root-private pending marker. It accepts no caller-chosen state.
-	VerbVerifyAdminLogin = "verify-admin-login"
 
 	// Read-only verbs: no mutation, a typed
 	// result. read-account accepts only a local account identity.
@@ -52,12 +49,11 @@ const (
 	// operation of ours. Keeping a copy of such a fact
 	// would risk rendering it confidently wrong, so no copy
 	// exists and the screens ask here instead.
-	VerbReadAccounts             = "read-accounts"
-	VerbReadAccount              = "read-account"
-	VerbReadNodeAddresses        = "read-node-addresses"
-	VerbReadSSHAuth              = "read-ssh-auth"
-	VerbReadWalletState          = "read-wallet-state"
-	VerbReadKeyVerificationState = "read-key-verification-state"
+	VerbReadAccounts      = "read-accounts"
+	VerbReadAccount       = "read-account"
+	VerbReadNodeAddresses = "read-node-addresses"
+	VerbReadSSHAuth       = "read-ssh-auth"
+	VerbReadWalletState   = "read-wallet-state"
 
 	// Streaming verbs: step progress events precede the
 	// terminator, and feed the TUI's step renderer.
@@ -204,19 +200,6 @@ type SSHAuthResult struct {
 // an otherwise readable wallet appear unknown.
 type WalletStateResult struct {
 	WalletExists bool `json:"wallet_exists"`
-}
-
-// KeyVerificationStateResult is the independent root-private workflow-marker
-// observation. Wallet availability never depends on this read succeeding.
-type KeyVerificationStateResult struct {
-	Pending bool `json:"pending"`
-}
-
-// VerifyAdminLoginResult reports the private marker state after the helper
-// checked current sshd journal evidence and, when verified, cleared it.
-type VerifyAdminLoginResult struct {
-	Pending  bool `json:"pending"`
-	Verified bool `json:"verified"`
 }
 
 // ── Streaming step lists ─────────────────────────────────

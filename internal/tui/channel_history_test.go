@@ -121,7 +121,7 @@ func TestMountedChannelViewsFollowTimersFailureAndRecovery(t *testing.T) {
 		refresh := func(status app.StatusSnapshot, closed app.Observation[[]lndrpc.ClosedChannel]) {
 			t.Helper()
 			reader.next.Closed = closed
-			// Keep a status read pending; leave the independent SSH trigger unhandled.
+			// Keep a status read pending.
 			// Complete its real request, then hold the coalesced successor.
 			batch := statusUpdate(&m, tick)().(tea.BatchMsg)
 			tick = nil
@@ -135,7 +135,6 @@ func TestMountedChannelViewsFollowTimersFailureAndRecovery(t *testing.T) {
 					statusUpdate(&m, read())
 				case refreshStatusMsg:
 					statusUpdate(&m, msg)
-				case refreshSSHVerificationMsg:
 				case tickMsg:
 					tick = msg
 				default:

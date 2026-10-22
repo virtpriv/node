@@ -8,7 +8,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/theme"
 )
 
@@ -185,14 +184,6 @@ func (m Model) viewMain() string {
 	if banner := m.renderNetworkBanner(); banner != "" {
 		fullContent = centerInWidth(banner, totalW) + "\n" + fullContent
 	}
-	// First-run verification banner (ruling xvi): shown until
-	// the journal proves a real sshd login for the admin user.
-	if !m.state.KeyVerificationKnown ||
-		m.state.KeyVerificationPending {
-		fullContent = centerInWidth(
-			m.renderVerifyBanner(), totalW) +
-			"\n" + fullContent
-	}
 
 	return lipgloss.Place(
 		m.width, m.height,
@@ -211,23 +202,6 @@ func (m Model) renderNetworkBanner() string {
 	}
 	return theme.Warning.Render("⚠ TESTING NETWORK, "+profile.DisplayName+".") +
 		theme.Dim.Render(" Coins have no mainnet value.")
-}
-
-// renderVerifyBanner is the first-run access-verification
-// banner line. Copy is deliberately imperative and small: it
-// nags, it never blocks.
-func (m Model) renderVerifyBanner() string {
-	if !m.state.KeyVerificationKnown {
-		return theme.Warning.Render("⚠ Key verification status unavailable") +
-			theme.Dim.Render(" — check: journalctl -u vpn-helperd")
-	}
-	target := "ssh " + paths.AdminUser + "@<server-ip>"
-	if ip := m.state.KeyVerificationAddress; ip != "" {
-		target = "ssh " + paths.AdminUser + "@" + ip
-	}
-	return theme.Warning.Render("⚠ Key verification pending") +
-		theme.Dim.Render(
-			" — connect from a second terminal: "+target)
 }
 
 func (m Model) hasDetailTabs() bool {

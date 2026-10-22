@@ -152,7 +152,6 @@ var liveReadFacts = map[string]string{
 	"syncthing-device-id":  helper.VerbReadNodeAddresses,
 	"ssh-password-auth":    helper.VerbReadSSHAuth,
 	"wallet-existence":     helper.VerbReadWalletState,
-	"key-verification":     helper.VerbReadKeyVerificationState,
 }
 
 // restage refreshes every fact the given verb invalidates.
