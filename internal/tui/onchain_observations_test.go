@@ -41,7 +41,6 @@ func onChainModel(t *testing.T) (Model, *OnChainHomeScreen, *onChainTestReader) 
 	oc := &OnChainContext{reader: r, scope: m.screenCtx.walletObservationScope()}
 	m.screenCtx.OnChain = oc
 	m.screenCtx.Status = &app.StatusSnapshot{Balance: freshStatus(lndrpc.WalletBalance{TotalBalance: "20000"}), Node: freshStatus(lndrpc.NodeInfo{})}
-	m.state.KeyVerificationKnown = true
 	s := NewOnChainHomeScreen(m.screenCtx, oc)
 	m.sectionScreens[secOnChain] = s
 	return m, s, r

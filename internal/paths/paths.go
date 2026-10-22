@@ -60,7 +60,6 @@ const (
 	LayoutVersion         = PrivateDir + "/layout-version"
 	InstallStateFile      = PrivateDir + "/install-state.json"
 	PasswordPendingMarker = PrivateDir + "/password-pending"
-	KeyVerificationMarker = PrivateDir + "/key-verification-pending"
 
 	// InstallBootstrap* are short-lived, root-owned indications that
 	// lifecycle authority is being published. The immutable initial install

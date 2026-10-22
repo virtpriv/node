@@ -86,7 +86,7 @@ func TestOpenDetailsFollowAutomaticListObservations(t *testing.T) {
 					statusUpdate(&m, read())
 				case tickMsg:
 					tick = msg
-				case refreshStatusMsg, refreshSSHVerificationMsg:
+				case refreshStatusMsg:
 				default:
 					t.Fatalf("unexpected timer result %T", msg)
 				}

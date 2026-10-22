@@ -56,7 +56,7 @@ func guardHelperOperation(verb string) (func(), error) {
 	switch verb {
 	case helper.VerbReadAccounts, helper.VerbReadAccount, helper.VerbDirSize,
 		helper.VerbReadNodeAddresses, helper.VerbReadSSHAuth, helper.VerbReadWalletState,
-		helper.VerbReadKeyVerificationState, helper.VerbUpdateStatus,
+		helper.VerbUpdateStatus,
 		helper.VerbPrepareUpdate, helper.VerbStartUpdate, helper.VerbResumeUpdate, helper.VerbCancelUpdate:
 		return func() {}, nil
 	case helper.VerbSelfUpdate:

@@ -114,17 +114,6 @@ func TestAdminLoginCommandEvidenceFailureAndBound(t *testing.T) {
 	}
 }
 
-// Without a start time the whole SSH log is read, as the end of the install
-// does today when it records whether a login was seen.
-func TestAdminLoginCommandReadsWholeLogWithoutStart(t *testing.T) {
-	_, _ = observeAdminLogin(time.Second, time.Time{}, func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		if !slices.Equal(args, []string{"-u", "ssh", "--no-pager", "-o", "cat", "--quiet"}) {
-			t.Fatalf("unexpected journal command: %v", args)
-		}
-		return exec.CommandContext(ctx, "/bin/true")
-	})
-}
-
 func TestAdminLoginProcess(t *testing.T) {
 	mode := os.Getenv("VPN_LOGIN_EVIDENCE_TEST")
 	if mode == "" {

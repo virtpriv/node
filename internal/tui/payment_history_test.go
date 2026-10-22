@@ -34,7 +34,6 @@ func historyModel(t *testing.T) (Model, *WalletHomeScreen, *historyTestReader) {
 	r := &historyTestReader{}
 	m.screenCtx.PaymentHistory = &paymentHistoryContext{reader: r, scope: m.screenCtx.walletObservationScope()}
 	m.screenCtx.Status = &app.StatusSnapshot{Channels: freshStatus(app.ChannelStatus{}), Node: freshStatus(lndrpc.NodeInfo{})}
-	m.state.KeyVerificationKnown = true
 	s := NewWalletHomeScreen(m.screenCtx)
 	m.sectionScreens[secWallet] = s
 	return m, s, r
@@ -124,7 +123,7 @@ func TestHistoryTimerUpdatesMountedDetailAndCaption(t *testing.T) {
 					statusUpdate(&m, read())
 				case tickMsg:
 					tick = msg
-				case refreshStatusMsg, refreshSSHVerificationMsg:
+				case refreshStatusMsg:
 				default:
 					t.Fatalf("unexpected timer command %T", msg)
 				}

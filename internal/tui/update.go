@@ -88,8 +88,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(
 			requestStatusCmd,
 			m.visibleWalletListsCmd(),
-			fetchWalletStateCmd(m.screenCtx),
-			requestSSHVerificationCmd)
+			fetchWalletStateCmd(m.screenCtx))
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case tea.PasteMsg:
@@ -444,12 +443,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.completeWalletState(msg)
 	case walletClientMsg:
 		return m.completeWalletClient(msg)
-	case refreshSSHVerificationMsg:
-		cmd := m.admitSSHVerification()
-		return m, cmd
-	case sshVerificationResultMsg:
-		cmd := m.completeSSHVerification(msg)
-		return m, cmd
 	case syncthingPairedMsg:
 		if msg.owner == nil || msg.owner.attempt != msg.attempt || msg.owner.step != syncPairStepPairing {
 			return m, nil
@@ -707,13 +700,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.continueWalletCreation(msg.owner)
 	case tickMsg:
 		if m.statusActive != nil {
-			return m, tea.Batch(requestStatusCmd, requestSSHVerificationCmd, m.visibleWalletListsCmd(), tickEveryCmd(m.pollInterval()))
+			return m, tea.Batch(requestStatusCmd, m.visibleWalletListsCmd(), tickEveryCmd(m.pollInterval()))
 		}
 		cmds := []tea.Cmd{
 			m.visibleWalletListsCmd(),
 			requestStatusCmd,
 			fetchWalletStateCmd(m.screenCtx),
-			requestSSHVerificationCmd,
 			tickEveryCmd(m.pollInterval()),
 		}
 		return m, tea.Batch(cmds...)

@@ -294,7 +294,7 @@ func TestSkippedReleaseIsReviewedThroughItsBridge(t *testing.T) {
 func drawNodeUpdates(t *testing.T, ctx *ScreenContext, s *NodeUpdateScreen) (string, []string) {
 	t.Helper()
 	m := Model{
-		cfg: ctx.Cfg, state: &RuntimeState{KeyVerificationKnown: true}, screenCtx: ctx, nav: NewNavSidebar(),
+		cfg: ctx.Cfg, state: &RuntimeState{}, screenCtx: ctx, nav: NewNavSidebar(),
 		width: tuiWidth, height: tuiHeight + 1, contentFocused: true, activeTab: 1,
 		tabs: []openTab{{Kind: tabNodeUpdates, Section: secSystem, Screen: s}},
 	}

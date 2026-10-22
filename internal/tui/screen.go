@@ -57,7 +57,6 @@ type ScreenContext struct {
 	ServiceControls     serviceControls
 	PackageUpdates      packageUpdates
 	Reboots             reboots
-	SSHVerification     sshLoginVerifier
 	ConnectionInfo      connectionInfoReader
 	Fees                feeReader
 	Syncthing           *app.Syncthing
@@ -119,9 +118,6 @@ func (c *ScreenContext) walletCreation() *app.WalletCreation {
 type RuntimeState struct {
 	WalletExists            bool
 	WalletKnown             bool
-	KeyVerificationPending  bool
-	KeyVerificationKnown    bool
-	KeyVerificationAddress  string
 	SSHPasswordAuthDisabled bool
 	SSHPasswordAuthKnown    bool
 	SyncthingDevices        []syncthing.Device

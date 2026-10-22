@@ -205,14 +205,12 @@ type Model struct {
 	// section home screens (nil = legacy path)
 	sectionScreens [numSections]Screen
 
-	latestVersion       string
-	statusCollector     statusReader
-	statusActive        *statusRequest
-	statusPending       bool
-	statusScope         statusScope
-	statusRevision      uint64
-	verificationActive  *sshVerificationRequest
-	verificationPending bool
+	latestVersion   string
+	statusCollector statusReader
+	statusActive    *statusRequest
+	statusPending   bool
+	statusScope     statusScope
+	statusRevision  uint64
 
 	// QR/Copy displays (Model-owned overlays and terminal handoff)
 	urlTarget         string
@@ -290,7 +288,7 @@ func (m Model) pollInterval() time.Duration {
 	if m.screenCtx.Status == nil {
 		return 3 * time.Second
 	}
-	if !m.state.WalletKnown || !m.state.KeyVerificationKnown {
+	if !m.state.WalletKnown {
 		return 5 * time.Second
 	}
 	if !m.screenCtx.Status.Node.Fresh() && m.cfg.HasLND() &&
@@ -329,9 +327,6 @@ func Show(
 		}
 		if m.screenCtx.AccountAccess != nil {
 			m.screenCtx.AccountAccess.Close()
-		}
-		if m.screenCtx.SSHVerification != nil {
-			m.screenCtx.SSHVerification.Close()
 		}
 		if m.screenCtx.ConnectionInfo != nil {
 			m.screenCtx.ConnectionInfo.Close()
@@ -392,7 +387,6 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		requestStatusCmd,
 		fetchWalletStateCmd(m.screenCtx),
-		requestSSHVerificationCmd,
 		fetchLatestVersionCmd(),
 		tickEveryCmd(m.pollInterval()))
 }

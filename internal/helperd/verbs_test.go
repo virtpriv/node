@@ -76,16 +76,13 @@ func TestVerbMenuIsExactlyTheRuledSet(t *testing.T) {
 		helper.VerbCancelUpdate,
 		helper.VerbUpgradeP2PToHybrid,
 		helper.VerbSyncthingInstall,
-		// Live-read verbs have no mutation. Account detail accepts an identity. The verification
-		// verb also has no parameters but may clear its private marker. They
-		// serve the live-read display facts (onion addresses,
+		// Live-read verbs have no mutation. Account detail accepts an identity.
+		// They serve the live-read display facts (onion addresses,
 		// the Syncthing device ID, the SSH password-auth
-		// answer), which keep no board copy.
+		// answer, the wallet), which keep no board copy.
 		helper.VerbReadNodeAddresses,
 		helper.VerbReadSSHAuth,
 		helper.VerbReadWalletState,
-		helper.VerbReadKeyVerificationState,
-		helper.VerbVerifyAdminLogin,
 	}
 	if len(verbs) != len(want) {
 		t.Errorf("verb menu has %d entries, want %d",
@@ -104,16 +101,12 @@ func withConfigVerbTestDeps(t *testing.T) {
 	oldSetup := setupAutoUnlock
 	oldDisable := disableAutoUnlock
 	oldWallet := walletExists
-	oldKeyPending := keyVerificationPending
-	oldVerifyLogin := verifyAdminLogin
 	oldRestage := restageFacts
 	t.Cleanup(func() {
 		loadSystemConfig = oldLoad
 		setupAutoUnlock = oldSetup
 		disableAutoUnlock = oldDisable
 		walletExists = oldWallet
-		keyVerificationPending = oldKeyPending
-		verifyAdminLogin = oldVerifyLogin
 		restageFacts = oldRestage
 	})
 }
@@ -160,7 +153,7 @@ func TestWalletPasswordRefusedBeforeHostDispatch(t *testing.T) {
 	}
 }
 
-func TestWalletAndVerificationReadsFailIndependently(t *testing.T) {
+func TestWalletStateReadKeepsUnknown(t *testing.T) {
 	withConfigVerbTestDeps(t)
 	cfg := config.Default()
 	cfg.Network = "testnet4"
@@ -170,9 +163,6 @@ func TestWalletAndVerificationReadsFailIndependently(t *testing.T) {
 			t.Fatalf("wallet observed for %q", network)
 		}
 		return true, nil
-	}
-	keyVerificationPending = func() (bool, error) {
-		return false, errors.New("marker unreadable")
 	}
 	result, err := verbReadWalletState(&verbCtx{}, nil)
 	if err != nil {
@@ -188,41 +178,6 @@ func TestWalletAndVerificationReadsFailIndependently(t *testing.T) {
 	}
 	if _, err := verbReadWalletState(&verbCtx{}, nil); !errors.Is(err, walletErr) {
 		t.Fatalf("unknown wallet fact was not preserved: %v", err)
-	}
-	if _, err := verbReadKeyVerificationState(
-		&verbCtx{}, nil); err == nil {
-		t.Fatal("unreadable verification marker reported a state")
-	}
-
-	keyVerificationPending = func() (bool, error) { return true, nil }
-	result, err = verbReadKeyVerificationState(&verbCtx{}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	verification := result.(helper.KeyVerificationStateResult)
-	if !verification.Pending {
-		t.Fatalf("verification state = %+v", verification)
-	}
-
-}
-
-func TestVerificationRejectsParametersAndPropagatesEvidenceFailure(t *testing.T) {
-	withConfigVerbTestDeps(t)
-	calls := 0
-	failure := errors.New("journal unavailable")
-	verifyAdminLogin = func() (bool, bool, error) { calls++; return true, false, failure }
-	keyVerificationPending = func() (bool, error) { calls++; return true, nil }
-	for _, invoke := range []func(*verbCtx, json.RawMessage) (any, error){verbReadKeyVerificationState, verbVerifyAdminLogin} {
-		if _, err := invoke(&verbCtx{}, json.RawMessage(`{"user":"root","path":"/tmp/other"}`)); err == nil {
-			t.Fatal("caller-directed verification accepted")
-		}
-	}
-	if calls != 0 {
-		t.Fatal("invalid parameters reached root operation")
-	}
-	result, err := verbVerifyAdminLogin(&verbCtx{}, nil)
-	if !errors.Is(err, failure) || result != nil || calls != 1 {
-		t.Fatalf("failed evidence became success: %v %v", result, err)
 	}
 }
 
@@ -313,7 +268,7 @@ func TestServiceActionStagesCredentialsOnlyAfterLNDStarts(t *testing.T) {
 		} else if result != nil {
 			t.Fatal("failed operation returned success evidence")
 		}
-		if tc.stageErr != nil && !strings.Contains(err.Error(), "lnd is active; credential refresh failed") {
+		if tc.stageErr != nil && !strings.Contains(err.Error(), "lnd is active, credential refresh failed") {
 			t.Fatalf("partial success hidden: %v", err)
 		}
 	}

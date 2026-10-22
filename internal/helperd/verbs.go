@@ -29,16 +29,16 @@ import (
 // validation against closed sets, the operation itself, a
 // postcondition where the outcome is checkable, and re-staging
 // of every board fact the operation invalidated (the freshness
-// matrix in matrix.go drives that last part — handlers call
+// matrix in matrix.go drives that last part, and handlers call
 // restage(verb) rather than remembering individual files).
 //
 // Deadlines bound the connection's socket I/O for one verb.
-// They are sized to the operation's legitimate worst case —
-// bitcoind alone is allowed 10 minutes to stop, a package
-// upgrade can take most of half an hour over Tor. A deadline
-// alone cannot cut short a wedged SUBPROCESS (nothing does
-// socket I/O while one runs); the bounds there live with the
-// subprocesses themselves — download timeouts and retry caps
+// They are sized to the operation's legitimate worst case.
+// For example, bitcoind alone is allowed 10 minutes to stop, and
+// a package upgrade can take most of half an hour over Tor. A
+// deadline alone cannot cut short a wedged SUBPROCESS (nothing
+// does socket I/O while one runs). The bounds there live with
+// the subprocesses themselves: download timeouts and retry caps
 // (system.doDownload), apt's Acquire timeout configuration,
 // and systemd's per-unit stop timeouts.
 
@@ -76,28 +76,22 @@ var verbs = map[string]verbDef{
 	helper.VerbReadNodeAddresses:    {1 * time.Minute, verbReadNodeAddresses},
 	helper.VerbReadSSHAuth:          {1 * time.Minute, verbReadSSHAuth},
 	helper.VerbReadWalletState:      {1 * time.Minute, verbReadWalletState},
-	helper.VerbReadKeyVerificationState: {
-		1 * time.Minute, verbReadKeyVerificationState,
-	},
-	helper.VerbVerifyAdminLogin: {1 * time.Minute, verbVerifyAdminLogin},
 }
 
 var (
-	readLocalAccounts      = host.ReadLocalAccounts
-	readLocalAccount       = host.ReadLocalAccount
-	loadSystemConfig       = config.Load
-	setupAutoUnlock        = host.SetupAutoUnlock
-	disableAutoUnlock      = host.DisableAutoUnlock
-	upgradeP2P             = host.UpgradeP2PToHybrid
-	installSyncthing       = host.InstallSyncthing
-	walletExists           = host.WalletExists
-	keyVerificationPending = host.KeyVerificationPending
-	verifyAdminLogin       = host.VerifyAdminLogin
-	restageFacts           = restage
-	controlNodeService     = host.ControlService
-	updatePackages         = host.UpdatePackages
-	updateSelf             = update.Self
-	requestReboot          = host.RequestReboot
+	readLocalAccounts  = host.ReadLocalAccounts
+	readLocalAccount   = host.ReadLocalAccount
+	loadSystemConfig   = config.Load
+	setupAutoUnlock    = host.SetupAutoUnlock
+	disableAutoUnlock  = host.DisableAutoUnlock
+	upgradeP2P         = host.UpgradeP2PToHybrid
+	installSyncthing   = host.InstallSyncthing
+	walletExists       = host.WalletExists
+	restageFacts       = restage
+	controlNodeService = host.ControlService
+	updatePackages     = host.UpdatePackages
+	updateSelf         = update.Self
+	requestReboot      = host.RequestReboot
 )
 
 // decode unmarshals params strictly: unknown fields are an
@@ -127,7 +121,7 @@ func loadConfig() (*config.AppConfig, error) {
 	cfg, err := loadSystemConfig()
 	if err != nil {
 		return nil, fmt.Errorf(
-			"read node config: %v — the node may not be "+
+			"read node config: %v, the node may not be "+
 				"installed", err)
 	}
 	return cfg, nil
@@ -153,7 +147,7 @@ func verbServiceAction(_ *verbCtx, params json.RawMessage) (any, error) {
 	// staged copy before reporting completion to the terminal.
 	if request.Service() == "lnd" && request.Action() != "stop" {
 		if err := restageFacts(helper.VerbServiceAction); err != nil {
-			return nil, fmt.Errorf("lnd is active; credential refresh failed: %w", err)
+			return nil, fmt.Errorf("lnd is active, credential refresh failed: %w", err)
 		}
 	}
 	return completion, nil
@@ -213,8 +207,8 @@ func verbStageLNDCredentials(_ *verbCtx, _ json.RawMessage) (any, error) {
 	return nil, restageFacts(helper.VerbStageLNDCredentials)
 }
 
-// Wallet creation mints only the admin macaroon. Keep that transition narrow;
-// the broader credentials verb remains the repair path for an LND client that
+// Wallet creation mints only the admin macaroon. Keep that transition narrow.
+// The broader credentials verb remains the repair path for an LND client that
 // cannot know whether its certificate, macaroon, or both became stale.
 func verbStageLNDMacaroon(_ *verbCtx, _ json.RawMessage) (any, error) {
 	return nil, restageFacts(helper.VerbStageLNDMacaroon)
@@ -224,16 +218,16 @@ func verbStageLNDMacaroon(_ *verbCtx, _ json.RawMessage) (any, error) {
 //
 // Live reads for display facts the TUI needs at human
 // cadence (screen entry). These facts can change with no
-// operation of ours involved — a root login can destroy and
-// recreate hidden-service directories, an sshd drop-in can be
-// edited by hand or by provider tooling — and a fact with no
+// operation of ours involved. A root login can destroy and
+// recreate hidden-service directories, and an sshd drop-in can
+// be edited by hand or by provider tooling. A fact with no
 // failure moment cannot be repaired at one. So no copy is
 // kept anywhere: the answer is read from its source at the
 // moment of the question, and what the screen shows is what
 // is true right now. Cost per read: one socket round-trip, a
-// handful of times per session. Both verbs take no parameters
-// and change nothing; they get the same peer-credential check
-// and journal record as every other verb.
+// handful of times per session. They change nothing, and they
+// get the same peer-credential check and journal record as
+// every other verb.
 
 func verbReadNodeAddresses(_ *verbCtx, _ json.RawMessage) (any, error) {
 	onions := host.ReadOnionAddresses()
@@ -248,8 +242,8 @@ func verbReadNodeAddresses(_ *verbCtx, _ json.RawMessage) (any, error) {
 }
 
 func verbReadSSHAuth(_ *verbCtx, _ json.RawMessage) (any, error) {
-	// Sample the operator configuration at localhost. Errors remain unknown;
-	// source-specific Match rules may differ on a real connection.
+	// Sample the operator configuration at localhost. Errors remain unknown,
+	// and source-specific Match rules may differ on a real connection.
 	enabled, err := host.EffectiveSSHPasswordAuth()
 	if err != nil {
 		return nil, err
@@ -269,33 +263,6 @@ func verbReadWalletState(_ *verbCtx, _ json.RawMessage) (any, error) {
 	return helper.WalletStateResult{WalletExists: wallet}, nil
 }
 
-func verbReadKeyVerificationState(
-	_ *verbCtx, params json.RawMessage,
-) (any, error) {
-	if err := rejectParams(params); err != nil {
-		return nil, err
-	}
-	pending, err := keyVerificationPending()
-	if err != nil {
-		return nil, err
-	}
-	return helper.KeyVerificationStateResult{Pending: pending}, nil
-}
-
-// This is a closed security-workflow mutation, not a caller-directed config
-// write: current sshd journal evidence is the only authority allowed to clear
-// the root-private marker.
-func verbVerifyAdminLogin(_ *verbCtx, params json.RawMessage) (any, error) {
-	if err := rejectParams(params); err != nil {
-		return nil, err
-	}
-	pending, verified, err := verifyAdminLogin()
-	if err != nil {
-		return nil, err
-	}
-	return helper.VerifyAdminLoginResult{Pending: pending, Verified: verified}, nil
-}
-
 // ── Config writers (templates live on this side) ─────────
 
 func verbRebuildSSHConfig(_ *verbCtx, params json.RawMessage) (any, error) {
@@ -310,7 +277,7 @@ func verbRebuildSSHConfig(_ *verbCtx, params json.RawMessage) (any, error) {
 		return nil, err
 	}
 	// Nothing to re-stage: the effective password-auth answer
-	// is not copied anywhere — readers ask the read-ssh-auth
+	// is not copied anywhere. Readers ask the read-ssh-auth
 	// verb, which queries sshd live.
 	return nil, nil
 }
@@ -344,8 +311,8 @@ func verbSelfUpdate(ctx *verbCtx, params json.RawMessage) (any, error) {
 	}
 	if !same {
 		return nil, fmt.Errorf(
-			"v%s is a major release — it is not installed "+
-				"through self-update; see its release notes",
+			"v%s is a major release, it is not installed "+
+				"through self-update. See its release notes",
 			p.Version)
 	}
 	// The root operation owns downloads and verification. It never consumes
