@@ -11,7 +11,8 @@ The installer takes a transient whole-run lock, checks the environment, and
 refuses with a full report before starting durable installation work if the
 machine is not one it can trust. It then asks for the owner account's password,
 installs Bitcoin Core and LND with every download after Tor routed through Tor
-and verified before install, and hands over to the TUI.
+and verified before install, and then shows how to log in as `vpn` over SSH,
+where the TUI opens.
 
 During interactive installation, Ctrl+C requests a stop after the active step
 and its progress record finish. Keep the terminal open while it stops. The
@@ -30,10 +31,10 @@ During installation, password paste preserves spaces and accepts one trailing
 newline. Input that would be altered or exceed the field's 128-character limit
 is rejected and cleared, rather than silently changing the password.
 
-The installation handoff opens the TUI through a separate pseudo-terminal. It
-does not change the identity of the original SSH connection or prove a new
-`vpn` SSH login. Ctrl+Z is ignored during this handoff, and Ctrl+C exits to the
-original shell.
+The installer never opens the TUI. When installation finishes, it shows the
+`ssh` command and reads SSH's log every few seconds for a `vpn` login made
+after the installer started. Enter or Ctrl+C leaves it, and the command is
+printed again.
 
 ## Bitcoin network profiles
 

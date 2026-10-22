@@ -89,8 +89,10 @@ func TestAdminLoginCommandEvidenceFailureAndBound(t *testing.T) {
 				timeout = 200 * time.Millisecond
 			}
 			var child *exec.Cmd
-			observed, err := observeAdminLogin(timeout, func(ctx context.Context, name string, args ...string) *exec.Cmd {
-				if name != "/usr/bin/journalctl" || !slices.Equal(args, []string{"-u", "ssh", "--no-pager", "-o", "cat", "--quiet"}) {
+			// The install's connect dialog only counts logins since its run began.
+			since := time.Unix(1760000000, 0)
+			observed, err := observeAdminLogin(timeout, since, func(ctx context.Context, name string, args ...string) *exec.Cmd {
+				if name != "/usr/bin/journalctl" || !slices.Equal(args, []string{"-u", "ssh", "--since=@1760000000", "--no-pager", "-o", "cat", "--quiet"}) {
 					t.Fatalf("unexpected journal command: %s %v", name, args)
 				}
 				child = exec.CommandContext(ctx, os.Args[0], "-test.run=^TestAdminLoginProcess$")
@@ -110,6 +112,17 @@ func TestAdminLoginCommandEvidenceFailureAndBound(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Without a start time the whole SSH log is read, as the end of the install
+// does today when it records whether a login was seen.
+func TestAdminLoginCommandReadsWholeLogWithoutStart(t *testing.T) {
+	_, _ = observeAdminLogin(time.Second, time.Time{}, func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		if !slices.Equal(args, []string{"-u", "ssh", "--no-pager", "-o", "cat", "--quiet"}) {
+			t.Fatalf("unexpected journal command: %v", args)
+		}
+		return exec.CommandContext(ctx, "/bin/true")
+	})
 }
 
 func TestAdminLoginProcess(t *testing.T) {

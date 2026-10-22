@@ -24,11 +24,27 @@ func (s *fakeSession) Start(in installer.InteractiveInput) error {
 }
 func (s *fakeSession) Stop()                                 { s.stops++ }
 func (s *fakeSession) Events() <-chan installer.InstallEvent { return s.events }
+
+// loginStub stands in for the SSH log reader of the connect dialog.
+type loginStub struct {
+	calls int
+	seen  bool
+	err   error
+}
+
+func (l *loginStub) check() (bool, error) { l.calls++; return l.seen, l.err }
+
 func wizardFixture() (wizardModel, *fakeSession) {
+	m, session, _ := wizardFixtureWithLogin()
+	return m, session
+}
+
+func wizardFixtureWithLogin() (wizardModel, *fakeSession, *loginStub) {
 	session := &fakeSession{events: make(chan installer.InstallEvent, 10)}
 	info := installer.InstallView{NeedIdentity: true,
 		Steps: []installer.InstallStepView{{Name: "First"}, {Name: "Second"}}}
-	return newWizardModel(info, session), session
+	login := &loginStub{}
+	return newWizardModel(info, session, login.check), session, login
 }
 func updateWizard(t *testing.T, m wizardModel, msg tea.Msg) (wizardModel, tea.Cmd) {
 	t.Helper()
@@ -46,7 +62,7 @@ func TestWizardPasswordPastePreservesOrRejects(t *testing.T) {
 		{"padding", "  abcdefghijklmnop  ", "  abcdefghijklmnop  "},
 		{"one trailing LF", "abcdefghijklmnop\n", "abcdefghijklmnop"},
 		{"limit", strings.Repeat("x", 128), strings.Repeat("x", 128)},
-		{"unicode byte minimum", strings.Repeat("é", 8), strings.Repeat("é", 8)},
+		{"unicode characters", strings.Repeat("é", 16), strings.Repeat("é", 16)},
 		{"over limit", strings.Repeat("x", 129), ""},
 		{"second line", "abcdefghijklmnop\nsecond", ""},
 		{"two trailing LF", "abcdefghijklmnop\n\n", ""},
@@ -189,49 +205,108 @@ func TestWizardDecisionRetryAndCompletionFailure(t *testing.T) {
 		t.Fatal("finalization failure lost")
 	}
 	m, cmd = updateWizard(t, m, enter())
-	if cmd != nil || m.openConsole {
-		t.Fatal("failed finalization opened console")
+	if cmd != nil {
+		t.Fatal("enter acted on a failed finalization")
 	}
 }
 
-func TestWizardCompletionChoiceAndEarlyExit(t *testing.T) {
-	for _, open := range []bool{false, true} {
-		t.Run(map[bool]string{false: "exit", true: "console"}[open], func(t *testing.T) {
-			m, _ := wizardFixture()
-			m.phase = wzSteps
-			m, cmd := updateWizard(t, m, wizardProgressMsg{ok: true, event: installer.InstallEvent{Final: true, Result: installer.RunResult{Outcome: installer.RunComplete}}})
-			if cmd != nil || m.phase != wzDone {
-				t.Fatal("completion did not wait for operator choice")
+// After a complete install the screen moves to the connect dialog by itself:
+// no key is needed and the install terminal never opens the node TUI.
+func reachConnect(t *testing.T, m wizardModel) wizardModel {
+	t.Helper()
+	m.phase = wzSteps
+	m, _ = updateWizard(t, m, wizardProgressMsg{ok: true, event: installer.InstallEvent{Final: true, Result: installer.RunResult{Outcome: installer.RunComplete}}})
+	for range 1000 {
+		if m.phase == wzConnect {
+			return m
+		}
+		m, _ = updateWizard(t, m, frameTick{})
+	}
+	t.Fatal("a complete install never reached the connect dialog")
+	return m
+}
+
+func TestWizardCompletionWaitsForSSHLogin(t *testing.T) {
+	m, _, login := wizardFixtureWithLogin()
+	m = reachConnect(t, m)
+	if login.calls != 0 {
+		t.Fatal("login checked before the connect dialog asked")
+	}
+	check := func(seen bool, err error) {
+		t.Helper()
+		login.seen, login.err = seen, err
+		var cmd tea.Cmd
+		m, cmd = updateWizard(t, m, loginTick{})
+		if cmd == nil {
+			t.Fatal("connect dialog did not check the login")
+		}
+		var next tea.Cmd
+		m, next = updateWizard(t, m, cmd())
+		if !seen && next == nil {
+			t.Fatal("connect dialog stopped asking before a login was seen")
+		}
+	}
+	check(false, nil)
+	if m.loggedIn || m.loginUnreadable {
+		t.Fatal("no login claimed one or claimed a read failure")
+	}
+	check(false, errors.New("journal unavailable"))
+	if m.loggedIn || !m.loginUnreadable {
+		t.Fatal("an unreadable log claimed a login or hid the failure")
+	}
+	check(true, errors.New("journal unavailable"))
+	if m.loggedIn {
+		t.Fatal("a failed read claimed a login")
+	}
+	check(false, nil)
+	if m.loginUnreadable {
+		t.Fatal("a later good read kept the failure")
+	}
+	check(true, nil)
+	if !m.loggedIn {
+		t.Fatal("a seen login was not shown")
+	}
+}
+
+func TestWizardExitWorksWhileWaitingAndAfterLogin(t *testing.T) {
+	for _, loggedIn := range []bool{false, true} {
+		for _, key := range []tea.KeyPressMsg{enter(), ctrlC()} {
+			m, _, login := wizardFixtureWithLogin()
+			m = reachConnect(t, m)
+			if loggedIn {
+				login.seen = true
+				_, cmd := updateWizard(t, m, loginTick{})
+				m, _ = updateWizard(t, m, cmd())
 			}
-			key := ctrlC()
-			if open {
-				key = enter()
-			}
-			m, cmd = updateWizard(t, m, key)
+			_, cmd := updateWizard(t, m, key)
 			assertQuit(t, cmd)
-			if m.openConsole != open {
-				t.Fatal("completion choice lost")
-			}
-		})
+		}
+	}
+}
+
+func TestWizardFailuresNeverReachConnect(t *testing.T) {
+	failed := wizardProgressMsg{ok: true, event: installer.InstallEvent{Final: true, Result: installer.RunResult{Outcome: installer.RunFailed}}}
+	unfinished := wizardProgressMsg{ok: true, event: installer.InstallEvent{Final: true, Result: installer.RunResult{Outcome: installer.RunComplete}, CompletionErr: errors.New("terminal ledger publication failed")}}
+	closed := wizardProgressMsg{ok: false}
+	for _, end := range []wizardProgressMsg{failed, unfinished, closed} {
+		m, _, login := wizardFixtureWithLogin()
+		m.phase = wzSteps
+		m, _ = updateWizard(t, m, end)
+		for range 1000 {
+			m, _ = updateWizard(t, m, frameTick{})
+			m, _ = updateWizard(t, m, loginTick{})
+		}
+		if m.phase == wzConnect || login.calls != 0 {
+			t.Fatal("an install that did not finish reached the connect dialog")
+		}
+		_, cmd := updateWizard(t, m, ctrlC())
+		assertQuit(t, cmd)
 	}
 	m, session := wizardFixture()
-	m, cmd := updateWizard(t, m, ctrlC())
+	_, cmd := updateWizard(t, m, ctrlC())
 	assertQuit(t, cmd)
-	if session.starts != 0 || m.openConsole {
+	if session.starts != 0 {
 		t.Fatal("pre-install exit started work")
-	}
-}
-
-func TestWizardObservationFailureRefusesHandoff(t *testing.T) {
-	m, _ := wizardFixture()
-	m.phase = wzSteps
-	m, cmd := updateWizard(t, m, wizardProgressMsg{ok: false})
-	if m.phase != wzDone || m.completeErr == "" || cmd != nil {
-		t.Fatal("closed stream claimed success")
-	}
-	m, cmd = updateWizard(t, m, enter())
-	if cmd != nil || m.openConsole {
-		t.Fatal("missing completion permitted console handoff")
 	}
 }
 

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"os"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -18,11 +17,11 @@ import (
 type wSubview int
 
 // ── TUI layout constants ────────────────────────────────
-// Change these to resize the entire TUI frame. All widths
-// and heights derive from these values.
+// The frame's size lives in theme, shared with the installer, which draws
+// the same shape. All widths and heights derive from these values.
 const (
-	tuiWidth  = 82
-	tuiHeight = 34
+	tuiWidth  = theme.FrameWidth
+	tuiHeight = theme.FrameHeight
 )
 
 const (
@@ -196,10 +195,9 @@ type Model struct {
 	lndClient *lndrpc.Client
 	version   string
 
-	disableSuspend bool
-	subview        wSubview
-	width          int
-	height         int
+	subview wSubview
+	width   int
+	height  int
 
 	// shared context for screen components
 	screenCtx *ScreenContext
@@ -320,8 +318,6 @@ func Show(
 ) {
 	state := observeRuntimeState(cfg)
 	m := NewModel(cfg, prefs, state, version)
-	// The installer handoff has no job-control shell to resume a suspended TUI.
-	m.disableSuspend = os.Getenv("VPN_TUI_NO_SUSPEND") == "1"
 	// Bubble Tea does not cancel or join commands on exit. The workflow owner
 	// releases helper readers even when Run fails or provides no final model.
 	defer func() {

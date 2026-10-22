@@ -325,9 +325,9 @@ func TestBaseInstallStepsMatchLedgerSchema(t *testing.T) {
 
 func unexpectedInstallFrontend(t *testing.T) InstallFrontend {
 	t.Helper()
-	return func(InstallView, *InstallSession) (bool, error) {
+	return func(InstallView, *InstallSession) error {
 		t.Error("early exit reached interactive frontend")
-		return false, nil
+		return nil
 	}
 }
 

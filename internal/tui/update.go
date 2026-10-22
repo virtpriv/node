@@ -119,7 +119,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	// ── L16 screen-to-Model messages ────────────────
+	// ── Screen-to-Model messages ────────────────────
 	case closeSSHScreenMsg:
 		if msg.screen == nil || sshAccessBusy(msg.screen) {
 			return m, nil
@@ -740,9 +740,6 @@ func (m Model) handleKey(
 	key := msg.String()
 
 	if key == "ctrl+z" {
-		if m.disableSuspend {
-			return m, nil
-		}
 		return m, tea.Suspend
 	}
 
@@ -1116,7 +1113,7 @@ func (m Model) handleGenericSubviewKey(
 	return m, nil
 }
 
-// ── L16 screen dispatch helpers ──────────────────────────
+// ── Screen dispatch helpers ──────────────────────────────
 
 // setTabScreen updates the Screen on the active tab.
 // Works on the underlying m.tabs slice (effectiveTabs is

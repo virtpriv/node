@@ -83,7 +83,8 @@ Install on a fresh Debian 13 amd64 server by following
 [Release Verification](docs/verifying.md). It installs Tor first, downloads the
 release and its signing key through Tor, and checks the signature and the
 checksum before you run anything. The installer then asks for the `vpn`
-account's password, sets up the node and opens the TUI.
+account's password, sets up the node and shows the command to log in as
+`vpn`, where the TUI opens.
 
 ### Bitcoin network profiles
 
