@@ -24,6 +24,9 @@ func TestJournalShowsAdminLogin(t *testing.T) {
 		{"password",
 			"Accepted password for vpn from 203.0.113.7 " +
 				"port 51234 ssh2\n"},
+		{"method with a submethod",
+			"Accepted keyboard-interactive/pam for vpn from 203.0.113.7 " +
+				"port 51234 ssh2\n"},
 		{"buried among noise",
 			"Connection closed by 198.51.100.9\n" +
 				"Failed password for vpn from 198.51.100.9 port 1\n" +
@@ -50,6 +53,17 @@ func TestJournalShowsAdminLogin(t *testing.T) {
 				"port 2 ssh2\n"},
 		{"invalid user probe",
 			"Invalid user vpn from 198.51.100.9 port 1\n"},
+		// sshd logs the user name a client sends with its spaces kept, so a
+		// stranger can put the accepted wording inside a name.
+		{"name carrying the accepted wording",
+			"Invalid user Accepted password for vpn from 203.0.113.7 " +
+				"from 198.51.100.9 port 4444\n"},
+		{"failed attempt naming the accepted wording",
+			"Failed password for invalid user Accepted publickey for vpn " +
+				"from 203.0.113.7 from 198.51.100.9 port 4444 ssh2\n"},
+		{"closed connection naming the accepted wording",
+			"Connection closed by invalid user Accepted password for vpn " +
+				"from 203.0.113.7 198.51.100.9 port 4444 [preauth]\n"},
 	}
 	for _, tt := range rejected {
 		if journalShowsAdminLogin(tt.journal) {
