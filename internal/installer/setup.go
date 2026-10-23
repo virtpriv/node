@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/virtpriv/node/internal/component"
 	"github.com/virtpriv/node/internal/config"
@@ -82,7 +83,7 @@ func productionInstallStartupDependencies() installStartupDependencies {
 var newInstallStartupDependencies = productionInstallStartupDependencies
 
 // RunInstall is the `sudo vpn install` entry point.
-func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
+func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	if os.Geteuid() != 0 {
 		return errors.New(
 			"the installer must run as root, run: sudo vpn install")
@@ -167,6 +168,9 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 			"base installation is awaiting finalization, resume without --until=bake")
 	}
 
+	// Once root's SSH login is off, every error also says how to get back in.
+	defer func() { retErr = withRootLoginOff(retErr, ledger) }()
+
 	// General configuration is reconstructed from immutable lifecycle context
 	// and fresh observations. It is not installation-completion authority.
 	cfg := config.Default()
@@ -250,18 +254,15 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 	case RunFailed:
 		// The runner already logged the failure line. main prints the
 		// error to stderr.
-		return fmt.Errorf("%s: %w", res.StepName, res.Err)
+		return &StopError{StepName: res.StepName, StepNum: res.StepNum, Total: res.Total, Err: res.Err}
 	case RunInterrupted:
 		// The log must not just stop. Record how far the run got and that
 		// running again resumes.
 		logger.Install(
-			"install INTERRUPTED at step %d/%d: %s, "+
-				"run again to resume", res.StepNum, res.Total,
+			"install PAUSED at step %d of %d (%s), "+
+				"run sudo vpn install to continue", res.StepNum, res.Total,
 			res.StepName)
-		return fmt.Errorf(
-			"install interrupted at step %d/%d (%s), "+
-				"run again to resume", res.StepNum, res.Total,
-			res.StepName)
+		return &StopError{Paused: true, StepName: res.StepName, StepNum: res.StepNum, Total: res.Total}
 	}
 
 	if opts.UntilBake {
@@ -319,6 +320,20 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 	// never opens the node TUI: the owner reaches it by logging in over SSH.
 	printConnectInstructions()
 	return nil
+}
+
+// withRootLoginOff adds the way back in to an install error once the install
+// record shows root's SSH login turned off.
+func withRootLoginOff(err error, ledger *installLedger) error {
+	if err == nil || ledger == nil || !ledger.done(rootLoginOffStep) {
+		return err
+	}
+	var stop *StopError
+	if errors.As(err, &stop) {
+		stop.RootLoginOff = true
+		return err
+	}
+	return &StopError{Err: err, RootLoginOff: true}
 }
 
 func validateBaseInstallSteps(steps []InstallStep) error {
@@ -447,30 +462,29 @@ func buildInstallSteps(
 
 	return []InstallStep{
 		{Key: "binary.install",
-			Name: "Installing the vpn binary",
+			Name: "Installing the vpn program",
 			Fn:   host.InstallInitialBinary},
 		{Key: "apt.base",
-			Name: "Installing base packages",
+			Name: "Installing Tor, the firewall, and base tools",
 			Fn:   host.InstallBasePackages},
-		{Key: "firewall", Name: "Configuring firewall",
+		{Key: "firewall", Name: "Closing every port except SSH",
 			Fn: host.ConfigureInitialFirewall},
 		{Key: "host.prep",
-			Name: "Configuring hostname and clock sync",
+			Name: "Checking the host name and clock sync",
 			Fn:   host.PrepareBaseHost},
 		{Key: "identity.access", Phase: PhaseFirstBoot,
-			Name: "Creating the owner account (" +
-				paths.AdminUser + ")",
+			Name: "Creating your " + paths.AdminUser + " user account",
 			Fn: func() error {
 				return applyIdentityAccess(dec)
 			}},
 		{Key: "service-identities.v1",
-			Name: "Creating dedicated service identities",
+			Name: "Creating separate users for Bitcoin Core and LND",
 			Fn: func() error {
 				return createBaseServiceIdentities()
 			}},
-		{Key: "ipv6.disable", Name: "Disabling IPv6",
+		{Key: "ipv6.disable", Name: "Turning off IPv6",
 			Fn: host.DisableIPv6},
-		{Key: "tor.configure", Name: "Configuring Tor",
+		{Key: "tor.configure", Name: "Setting up Tor and your onion addresses",
 			Fn: func() error {
 				if err := host.WriteTorConfig(cfg); err != nil {
 					return err
@@ -485,9 +499,9 @@ func buildInstallSteps(
 		// check that torsocks is present moved here from preflight and
 		// runs inside this step, after Tor is installed and before the
 		// first download.
-		{Key: "tor.gate", Name: "Verifying Tor routing",
+		{Key: "tor.gate", Name: "Verifying the Tor connection",
 			Kind: StepGate, Fn: verifyTorRouting},
-		{Key: "apt.torproxy", Name: "Configuring apt for Tor",
+		{Key: "apt.torproxy", Name: "Sending apt package downloads through Tor",
 			Fn: func() error {
 				if err := host.ConfigureAptTor(); err != nil {
 					return err
@@ -501,7 +515,7 @@ func buildInstallSteps(
 		// example with a library Tor uses, so the step reports done only
 		// once Tor is ready again. The next step downloads through it.
 		{Key: "base.upgrade",
-			Name: "Upgrading base packages",
+			Name: "Updating Debian packages through Tor",
 			Fn: func() error {
 				if err := refreshPackageLists(); err != nil {
 					return err
@@ -516,7 +530,7 @@ func buildInstallSteps(
 		{Key: "swap.zram", Name: "Setting up compressed swap",
 			Fn: host.SetUpCompressedSwap},
 		{Key: "btc.download", Group: "btc",
-			Name: "Downloading Bitcoin Core " + component.BitcoinCoreVersion,
+			Name: "Downloading Bitcoin Core " + component.BitcoinCoreVersion + " through Tor",
 			Fn: func() error {
 				var err error
 				btcWork, err = os.MkdirTemp("", "vpn-btc-")
@@ -526,12 +540,12 @@ func buildInstallSteps(
 				return host.DownloadBitcoinCore(component.BitcoinCoreVersion, btcWork)
 			}},
 		{Key: "btc.verify", Group: "btc",
-			Name: "Verifying Bitcoin Core",
+			Name: "Verifying Bitcoin Core software and signatures",
 			Fn: func() error {
 				return host.VerifyBitcoinCore(btcWork)
 			}},
 		{Key: "btc.install", Group: "btc",
-			Name: "Installing Bitcoin Core",
+			Name: "Installing and configuring Bitcoin Core",
 			Fn: func() error {
 				if err := host.InstallBitcoinCoreBinaries(
 					component.BitcoinCoreVersion, btcWork); err != nil {
@@ -545,7 +559,7 @@ func buildInstallSteps(
 			}},
 		{Key: "btc.start", Name: "Starting Bitcoin Core",
 			Fn: func() error { return host.EnableAndRestartBitcoind(cfg) }},
-		{Key: "security", Name: "Configuring security",
+		{Key: "security", Name: "Turning on Debian security updates and login protection",
 			Fn: func() error {
 				if err := host.InstallUnattendedUpgrades(); err != nil {
 					return err
@@ -561,7 +575,7 @@ func buildInstallSteps(
 
 		// ── LND (Tor-only, non-interactive) ─────────
 		{Key: "lnd.download", Group: "lnd",
-			Name: "Downloading LND",
+			Name: "Downloading LND " + strings.TrimSuffix(component.LNDVersion, "-beta") + " through Tor",
 			Fn: func() error {
 				var err error
 				lndWork, err = os.MkdirTemp("", "vpn-lnd-")
@@ -571,7 +585,7 @@ func buildInstallSteps(
 				return host.DownloadLND(component.LNDVersion, lndWork)
 			}},
 		{Key: "lnd.verify", Group: "lnd",
-			Name: "Verifying LND",
+			Name: "Verifying LND software and signature",
 			Fn: func() error {
 				return host.VerifyLND(component.LNDVersion, lndWork)
 			}},
@@ -585,7 +599,7 @@ func buildInstallSteps(
 				os.RemoveAll(lndWork)
 				return host.WriteLNDServiceFromConfig(cfg)
 			}},
-		{Key: "tor.lnd", Name: "Configuring Tor for LND",
+		{Key: "tor.lnd", Name: "Restarting Tor",
 			Fn: func() error {
 				if err := host.WriteTorConfig(cfg); err != nil {
 					return err
@@ -593,7 +607,7 @@ func buildInstallSteps(
 				return host.EnableAndRestartTor()
 			}},
 		{Key: "lnd.configure",
-			Name: "Finalizing LND onion configuration",
+			Name: "Configuring LND",
 			Fn: func() error {
 				// Re-read the onion after the dedicated LND Tor
 				// restart and rewrite lnd.conf with the preserved,
@@ -603,7 +617,7 @@ func buildInstallSteps(
 			}},
 		{Key: "lnd.start", Name: "Starting LND", Fn: host.EnableAndRestartLND},
 		{Key: "lnd.tls-san", Kind: StepGate,
-			Name: "Verifying LND TLS onion certificate",
+			Name: "Checking LND's certificate",
 			Fn:   host.VerifyLNDTLSOnionSAN},
 		// LND owns its TLS certificate lifecycle. At startup it
 		// replaces an expired certificate, and tlsautorefresh
@@ -613,30 +627,31 @@ func buildInstallSteps(
 		// rewrite. After lnd.start so an installation or resume arms it
 		// on the certificate LND is actually serving.
 		{Key: "lnd.certwatch",
-			Name: "Watching the LND TLS certificate",
+			Name: "Watching LND's certificate for changes",
 			Fn:   host.InstallLNDCertWatch},
-		// Harden SSH after the access prerequisites are installed. Old
-		// project drop-ins are lifecycle conflicts, not migration inputs.
-		{Key: "ssh.harden", Phase: PhaseFirstBoot,
-			Name: "Hardening SSH",
+		// Checks the owner's sudo first, then turns root's SSH login off and
+		// the owner's password login on. The root session running the
+		// install stays open, so the later steps run in it.
+		{Key: rootLoginOffStep, Phase: PhaseFirstBoot,
+			Name: "Turning off root login over SSH",
 			Fn: func() error {
 				return installSSHHardening()
 			}},
 		// The unprivileged TUI uses fixed helper operations. The owner can
 		// separately authenticate with sudo for general host maintenance.
 		{Key: "journal.access", Phase: PhaseFirstBoot,
-			Name: "Granting journal read access",
+			Name: "Giving your " + paths.AdminUser + " user access to system logs",
 			Fn:   host.SetupJournalAccess},
 		{Key: "helper.enable", Phase: PhaseFirstBoot,
-			Name: "Enabling the root helper socket",
+			Name: "Starting the node's root helper",
 			Fn:   host.InstallHelperUnits},
 		{Key: "state.stage", Phase: PhaseFirstBoot,
-			Name: "Staging node facts for the TUI",
+			Name: "Staging files for the TUI",
 			Fn:   StageBoardAll},
 		// Once a special case after the TUI that warned but completed
 		// anyway. As a real step it gets the ledger, the completion gate,
 		// failure logging and resume, and the special case is gone.
-		{Key: "shellenv", Name: "Configuring shell environment",
+		{Key: "shellenv", Name: "Adding bitcoin-cli and lncli shortcuts",
 			Fn: func() error {
 				return host.SetupNodeCLI(cfg)
 			}},

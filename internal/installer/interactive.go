@@ -29,6 +29,9 @@ type InstallStepView struct {
 	Name   string
 	Status StepStatus
 	Err    error
+	// TurnsRootLoginOff marks the step after which root can no longer log
+	// in over SSH.
+	TurnsRootLoginOff bool
 }
 
 // InteractiveInput holds the owner's password, the one choice the interactive
@@ -203,7 +206,7 @@ func installView(s *InstallSession) InstallView {
 		Address:      system.PublicIPv4(),
 	}
 	for _, step := range s.runner.steps {
-		view.Steps = append(view.Steps, InstallStepView{Name: step.Name})
+		view.Steps = append(view.Steps, InstallStepView{Name: step.Name, TurnsRootLoginOff: step.Key == rootLoginOffStep})
 	}
 	return view
 }

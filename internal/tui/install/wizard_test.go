@@ -300,19 +300,55 @@ func TestWizardCompletionWaitsForSSHLogin(t *testing.T) {
 	}
 }
 
-func TestWizardExitWorksWhileWaitingAndAfterLogin(t *testing.T) {
-	for _, loggedIn := range []bool{false, true} {
-		for _, key := range []tea.KeyPressMsg{enter(), ctrlC()} {
-			m, _, login := wizardFixtureWithLogin()
+// Root can no longer log in over SSH once the install is done, so leaving
+// before a login with an untried password can lock the owner out. Before a
+// login, Exit and ctrl+c ask once, after a login they leave at once.
+func TestWizardExitAsksOnceBeforeLoginOnly(t *testing.T) {
+	right := tea.KeyPressMsg{Code: tea.KeyRight}
+	for _, key := range []tea.KeyPressMsg{enter(), ctrlC()} {
+		// asked reaches the connect dialog and presses key once, which asks.
+		asked := func() wizardModel {
+			m, _, _ := wizardFixtureWithLogin()
 			m = reachConnect(t, m)
-			if loggedIn {
-				login.seen = true
-				_, cmd := updateWizard(t, m, loginTick{})
-				m, _ = updateWizard(t, m, cmd())
-			}
-			_, cmd := updateWizard(t, m, key)
-			assertQuit(t, cmd)
+			m, cmd := updateWizard(t, m, key)
+			assertStays(t, cmd)
+			return m
 		}
+
+		// Wait is selected first and goes back to the dialog, where right
+		// selects nothing and the key asks again. A second ctrl+c then leaves.
+		m, cmd := updateWizard(t, asked(), enter())
+		assertStays(t, cmd)
+		m, _ = updateWizard(t, m, right)
+		m, cmd = updateWizard(t, m, key)
+		assertStays(t, cmd)
+		_, cmd = updateWizard(t, m, ctrlC())
+		assertQuit(t, cmd)
+
+		// Exit leaves.
+		m, _ = updateWizard(t, asked(), right)
+		_, cmd = updateWizard(t, m, enter())
+		assertQuit(t, cmd)
+
+		// A second ctrl+c leaves.
+		_, cmd = updateWizard(t, asked(), ctrlC())
+		assertQuit(t, cmd)
+
+		// A login while asking closes the question, and the key then leaves.
+		m, _ = updateWizard(t, asked(), loginResultMsg{seen: true})
+		_, cmd = updateWizard(t, m, key)
+		assertQuit(t, cmd)
+	}
+}
+
+// assertStays fails if cmd ends the program.
+func assertStays(t *testing.T, cmd tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		return
+	}
+	if _, ok := cmd().(tea.QuitMsg); ok {
+		t.Fatal("left without asking")
 	}
 }
 
