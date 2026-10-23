@@ -19,10 +19,7 @@ type wSubview int
 // ── TUI layout constants ────────────────────────────────
 // The frame's size lives in theme, shared with the installer, which draws
 // the same shape. All widths and heights derive from these values.
-const (
-	tuiWidth  = theme.FrameWidth
-	tuiHeight = theme.FrameHeight
-)
+const tuiWidth = theme.FrameWidth
 
 const (
 	svNone wSubview = iota

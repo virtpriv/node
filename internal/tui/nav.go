@@ -29,7 +29,6 @@ type NavSidebar struct {
 	Items      []NavItem
 	Cursor     int
 	ActiveItem int
-	Width      int
 	Height     int
 	Focused    bool
 }
@@ -51,7 +50,6 @@ func NewNavSidebar() NavSidebar {
 		Items:      items,
 		Cursor:     0,
 		ActiveItem: 0,
-		Width:      theme.SidebarWidth,
 		Height:     24,
 		Focused:    true,
 	}

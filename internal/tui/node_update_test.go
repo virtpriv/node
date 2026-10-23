@@ -296,14 +296,14 @@ func drawNodeUpdates(t *testing.T, ctx *ScreenContext, s *NodeUpdateScreen) (str
 	t.Helper()
 	m := Model{
 		cfg: ctx.Cfg, state: &RuntimeState{}, screenCtx: ctx, nav: NewNavSidebar(),
-		width: tuiWidth, height: tuiHeight + 1, contentFocused: true, activeTab: 1,
+		width: tuiWidth, height: theme.FrameHeight + 1, contentFocused: true, activeTab: 1,
 		tabs: []openTab{{Kind: tabNodeUpdates, Section: secSystem, Screen: s}},
 	}
 	m.nav.ActiveItem, m.nav.Cursor = secSystem, secSystem
 	raw := m.viewMain()
 	rows := strings.Split(ansi.Strip(raw), "\n")
-	if len(rows) != tuiHeight+1 || !strings.HasPrefix(rows[0], "╭") || !strings.HasPrefix(rows[tuiHeight-1], "╰") {
-		t.Fatalf("frame is not %d rows:\n%s", tuiHeight, strings.Join(rows, "\n"))
+	if len(rows) != theme.FrameHeight+1 || !strings.HasPrefix(rows[0], "╭") || !strings.HasPrefix(rows[theme.FrameHeight-1], "╰") {
+		t.Fatalf("frame is not %d rows:\n%s", theme.FrameHeight, strings.Join(rows, "\n"))
 	}
 	// The top border, the two rows of the top bar and the line under them
 	// come before the content rows.
@@ -313,7 +313,7 @@ func drawNodeUpdates(t *testing.T, ctx *ScreenContext, s *NodeUpdateScreen) (str
 			t.Fatalf("frame row is not %d columns: %q", tuiWidth, row)
 		}
 		cells := []rune(row)
-		content = append(content, string(cells[m.nav.Width+2:len(cells)-1]))
+		content = append(content, string(cells[theme.SidebarWidth+2:len(cells)-1]))
 	}
 	return raw, content
 }

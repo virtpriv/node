@@ -28,7 +28,7 @@ const (
 	// wzDone ends an install that did not complete: a failed step, a
 	// finalization error or a lost progress stream.
 	wzDone
-	// wzFinish folds the status band back after a complete install.
+	// wzFinish shows the last title after a complete install.
 	wzFinish
 	wzConnect
 )
@@ -274,6 +274,10 @@ func (m wizardModel) Update(
 		return m.updateSteps(msg)
 
 	case tea.PasteMsg:
+		// Nothing reaches a field the owner cannot see yet.
+		if m.phase == wzPassword && !m.dialogShown() {
+			return m, nil
+		}
 		return m.handlePaste(msg)
 
 	case tea.KeyPressMsg:
@@ -287,6 +291,9 @@ func (m wizardModel) Update(
 		}
 		switch m.phase {
 		case wzPassword:
+			if !m.dialogShown() {
+				return m, nil
+			}
 			return m.updatePassword(msg)
 		case wzConnect:
 			if msg.String() == "enter" {
