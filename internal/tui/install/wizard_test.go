@@ -334,11 +334,45 @@ func TestWizardExitAsksOnceBeforeLoginOnly(t *testing.T) {
 		_, cmd = updateWizard(t, asked(), ctrlC())
 		assertQuit(t, cmd)
 
-		// A login while asking closes the question, and the key then leaves.
+		// After a login seen while asking, the same key leaves at once.
 		m, _ = updateWizard(t, asked(), loginResultMsg{seen: true})
 		_, cmd = updateWizard(t, m, key)
 		assertQuit(t, cmd)
 	}
+}
+
+// Once every step is done, no way out skips the question before a login:
+// ctrl+c while the last title shows, or a pause asked for during the last
+// step, which then has nothing left to pause.
+func TestWizardCompleteInstallAsksBeforeLeaving(t *testing.T) {
+	complete := wizardProgressMsg{ok: true, event: installer.InstallEvent{Final: true, Result: installer.RunResult{Outcome: installer.RunComplete}}}
+
+	m, _, login := wizardFixtureWithLogin()
+	m.phase = wzSteps
+	m, _ = updateWizard(t, m, complete)
+	m, check := updateWizard(t, m, ctrlC())
+	if check == nil {
+		t.Fatal("ctrl+c after the last step started no login check")
+	}
+	_, cmd := updateWizard(t, m, ctrlC())
+	assertQuit(t, cmd)
+	// The login check started there: its result, a login, lets the key
+	// leave at once.
+	login.seen = true
+	m, _ = updateWizard(t, m, check())
+	_, cmd = updateWizard(t, m, enter())
+	assertQuit(t, cmd)
+
+	m, _, _ = wizardFixtureWithLogin()
+	m.phase = wzSteps
+	m, _ = updateWizard(t, m, ctrlC())
+	m, cmd = updateWizard(t, m, complete)
+	assertStays(t, cmd)
+	for range 1000 {
+		m, _ = updateWizard(t, m, frameTick{})
+	}
+	_, cmd = updateWizard(t, m, enter())
+	assertStays(t, cmd)
 }
 
 // assertStays fails if cmd ends the program.

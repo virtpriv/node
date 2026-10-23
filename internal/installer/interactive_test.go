@@ -387,3 +387,120 @@ func TestRootRunInstallExitRetainsRunLock(t *testing.T) {
 		other.Close()
 	})
 }
+
+// An install that ends early tells main what happened by its kind: paused
+// between steps, or a step failed. Once the install record shows root's SSH
+// login turned off, every error says so, and the install screen learns it from
+// the record before the run and again in the final event.
+func TestRootRunInstallReportsPauseFailureAndRootLoginOff(t *testing.T) {
+	requireRootTestEnvironment(t)
+	rootOffAt := -1
+	for i, key := range baseInstallStepKeys {
+		if key == rootLoginOffStep {
+			rootOffAt = i
+		}
+	}
+	if rootOffAt < 0 {
+		t.Fatal("no step turns root's SSH login off")
+	}
+	setup := func(t *testing.T, done int, preflightErr error) string {
+		t.Helper()
+		f := newLifecycleFixture(t)
+		ledger := f.initialize(t)
+		if err := ledger.setDbCache(512); err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range baseInstallStepKeys[:done] {
+			if err := ledger.markDone(key, "test"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := ledger.save(f.fs.ledger); err != nil {
+			t.Fatal(err)
+		}
+		installStartupFixture(t, f, func(bool) (host.SSHObservation, error) {
+			return host.SSHObservation{PasswordAuth: true}, preflightErr
+		})
+		return f.fs.ledger
+	}
+	// run drives the real session, with the host steps replaced by fn.
+	run := func(t *testing.T, ledgerPath string, fn func(s *InstallSession, i int) error) (InstallView, InstallEvent, error) {
+		t.Helper()
+		var view InstallView
+		var final InstallEvent
+		err := RunInstall(InstallOptions{}, func(v InstallView, s *InstallSession) error {
+			view = v
+			s.runner.ledgerPath = ledgerPath
+			s.complete = func() error { return errors.New("unexpected finalization") }
+			for i := range s.runner.steps {
+				s.runner.steps[i].Fn = func() error { return fn(s, i) }
+			}
+			password, err := loginpassword.New("exact-test-password")
+			if err != nil {
+				return err
+			}
+			if err := s.Start(InteractiveInput{Password: password}); err != nil {
+				return err
+			}
+			for e := range s.Events() {
+				if e.Final {
+					final = e
+				}
+			}
+			return nil
+		})
+		return view, final, err
+	}
+
+	t.Run("pause before root login is off", func(t *testing.T) {
+		path := setup(t, 0, nil)
+		view, final, err := run(t, path, func(s *InstallSession, i int) error {
+			if i != 0 {
+				t.Error("stop admitted a later step")
+			}
+			s.Stop()
+			return nil
+		})
+		var stop *StopError
+		if !errors.As(err, &stop) || !stop.Paused || stop.StepNum != 2 || stop.RootLoginOff {
+			t.Fatalf("got %#v, want a pause at step 2 with root login on", err)
+		}
+		if view.RootLoginOff || final.RootLoginOff {
+			t.Fatal("the screen was told root login is off")
+		}
+	})
+
+	t.Run("failure after root login is off", func(t *testing.T) {
+		path := setup(t, rootOffAt+1, nil)
+		stepErr := errors.New("step broke")
+		view, final, err := run(t, path, func(_ *InstallSession, i int) error {
+			if i == rootOffAt+1 {
+				return stepErr
+			}
+			return nil
+		})
+		var stop *StopError
+		if !errors.As(err, &stop) || stop.Paused || stop.StepNum != rootOffAt+2 || !stop.RootLoginOff || !errors.Is(err, stepErr) {
+			t.Fatalf("got %#v, want the failed step with root login off", err)
+		}
+		if !view.RootLoginOff || !final.RootLoginOff {
+			t.Fatal("the screen was not told root login is off")
+		}
+	})
+
+	t.Run("check before any step, root login off or not", func(t *testing.T) {
+		for _, done := range []int{rootOffAt, rootOffAt + 1} {
+			checkErr := errors.New("machine check failed")
+			path := setup(t, done, checkErr)
+			_, _, err := run(t, path, func(*InstallSession, int) error {
+				t.Error("a step ran after the machine check failed")
+				return nil
+			})
+			var stop *StopError
+			rootOff := errors.As(err, &stop) && stop.RootLoginOff
+			if !errors.Is(err, checkErr) || rootOff != (done > rootOffAt) {
+				t.Fatalf("with %d steps done got %#v", done, err)
+			}
+		}
+	})
+}

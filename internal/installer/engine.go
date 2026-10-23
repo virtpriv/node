@@ -46,9 +46,9 @@ const (
 	StepGate
 )
 
-// StepPhase classifies a step for the image pipeline (ruling
-// iv): bake steps run at image-build time, first-boot steps
-// must run on the deployed box (identity, hardware, SSH, and
+// StepPhase classifies a step for the image pipeline. Bake
+// steps run at image-build time, first-boot steps must run on
+// the deployed box (identity, hardware, SSH, and
 // machine-specific staging).
 type StepPhase int
 
@@ -153,9 +153,7 @@ func planRun(steps []InstallStep, led *installLedger) []stepPlan {
 }
 
 // FilterPhase returns the steps whose Phase is at or before
-// until. That is the image pipeline's `--until=bake` slice,
-// ruling iv plumbing. The CLI that passes a phase arrives with
-// the commit-6 dispatch.
+// until, the image pipeline's `--until=bake` slice.
 func FilterPhase(steps []InstallStep, until StepPhase) []InstallStep {
 	var out []InstallStep
 	for _, s := range steps {
@@ -209,8 +207,7 @@ func newStepRunner(
 
 // runIndex executes one step per the plan. Every path leaves a
 // log line (start, skip, complete, FAILED), so a run's trail
-// in vpn.log never just stops (the commit-5 addendum fix,
-// once, in the core). The ledger entry is written only after Fn returns nil.
+// in vpn.log never just stops. The ledger entry is written only after Fn returns nil.
 // A publication failure stops the run immediately: later steps must not
 // advance past a mutation whose completion is not durable for the next pass.
 func (r *stepRunner) runIndex(i int) (skipped bool, err error) {
@@ -342,7 +339,7 @@ func classifyRun(
 	}
 }
 
-// ── Unattended front-end (ruling iv plumbing) ────────────
+// ── Unattended front-end ─────────────────────────────────
 
 // RunInstallUnattended executes steps with no TUI: one plain
 // line per step to stdout, same runner, same ledger, same log

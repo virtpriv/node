@@ -115,6 +115,10 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	if err != nil {
 		return err
 	}
+	// From here the install record is known. Once it shows root's SSH login
+	// turned off, every error also says how to get back in.
+	ledger := lifecycle.Ledger
+	defer func() { retErr = withRootLoginOff(retErr, ledger) }()
 	if lifecycle.Disposition == lifecycleCompleted {
 		fmt.Println("\n  Virtual Private Node is already installed. No changes were made.")
 		return nil
@@ -135,7 +139,6 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 		return err
 	}
 
-	ledger := lifecycle.Ledger
 	if lifecycle.Disposition == lifecyclePristine {
 		network := opts.Network
 		if network == "" {
@@ -167,9 +170,6 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 		return errors.New(
 			"base installation is awaiting finalization, resume without --until=bake")
 	}
-
-	// Once root's SSH login is off, every error also says how to get back in.
-	defer func() { retErr = withRootLoginOff(retErr, ledger) }()
 
 	// General configuration is reconstructed from immutable lifecycle context
 	// and fresh observations. It is not installation-completion authority.

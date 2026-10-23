@@ -22,6 +22,9 @@ type InstallView struct {
 	NeedIdentity bool
 	Steps        []InstallStepView
 	Address      string
+	// RootLoginOff is set when the install record already shows root's SSH
+	// login turned off.
+	RootLoginOff bool
 }
 
 // InstallStepView describes a step without granting execution authority.
@@ -29,9 +32,6 @@ type InstallStepView struct {
 	Name   string
 	Status StepStatus
 	Err    error
-	// TurnsRootLoginOff marks the step after which root can no longer log
-	// in over SSH.
-	TurnsRootLoginOff bool
 }
 
 // InteractiveInput holds the owner's password, the one choice the interactive
@@ -48,6 +48,9 @@ type InstallEvent struct {
 	Final         bool
 	Result        RunResult
 	CompletionErr error
+	// RootLoginOff, on the final event, is set when the install record
+	// shows root's SSH login turned off.
+	RootLoginOff bool
 }
 
 // InstallSession owns one execution, independently of progress consumption.
@@ -131,10 +134,17 @@ func (s *InstallSession) Stop() {
 	}
 	s.stopped = true
 	if !s.started {
-		s.events <- InstallEvent{Final: true, Result: s.result}
+		s.events <- s.finalEvent()
 		close(s.events)
 		close(s.done)
 	}
+}
+
+// finalEvent reports the outcome, and whether the install record now shows
+// root's SSH login turned off.
+func (s *InstallSession) finalEvent() InstallEvent {
+	return InstallEvent{Final: true, Result: s.result, CompletionErr: s.completionErr,
+		RootLoginOff: s.runner.ledger.done(rootLoginOffStep)}
 }
 
 // Events supplies one ordered stream for the frontend's single observer.
@@ -156,7 +166,7 @@ func (s *InstallSession) run() {
 	defer close(s.done)
 	defer close(s.events)
 	defer func() { s.dec.Password = loginpassword.Password{} }()
-	defer func() { s.events <- InstallEvent{Final: true, Result: s.result, CompletionErr: s.completionErr} }()
+	defer func() { s.events <- s.finalEvent() }()
 	for i := range s.runner.steps {
 		s.mu.Lock()
 		if s.stopped {
@@ -204,9 +214,10 @@ func installView(s *InstallSession) InstallView {
 	view := InstallView{
 		NeedIdentity: s.needIdentity,
 		Address:      system.PublicIPv4(),
+		RootLoginOff: s.runner.ledger.done(rootLoginOffStep),
 	}
 	for _, step := range s.runner.steps {
-		view.Steps = append(view.Steps, InstallStepView{Name: step.Name, TurnsRootLoginOff: step.Key == rootLoginOffStep})
+		view.Steps = append(view.Steps, InstallStepView{Name: step.Name})
 	}
 	return view
 }

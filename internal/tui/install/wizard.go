@@ -116,10 +116,13 @@ type wizardModel struct {
 	// asking is the question shown before leaving without a login, and
 	// askExit whether its Exit button is selected.
 	asking, askExit bool
+	// rootLoginOff follows the install record: before the run, then from
+	// the final event.
+	rootLoginOff bool
 }
 
 func newWizardModel(info installer.InstallView, session installSession, login func() (bool, error)) wizardModel {
-	m := wizardModel{info: info, session: session, steps: info.Steps, login: login,
+	m := wizardModel{info: info, session: session, steps: info.Steps, login: login, rootLoginOff: info.RootLoginOff,
 		stepFrom: make([]time.Time, len(info.Steps)), stepTook: make([]time.Duration, len(info.Steps))}
 	m.pwInput = newWizardPasswordInput("Password")
 	m.pwConfirm = newWizardPasswordInput("Confirm password")
@@ -285,6 +288,13 @@ func (m wizardModel) Update(
 		return m.handlePaste(msg)
 
 	case tea.KeyPressMsg:
+		if m.phase == wzFinish && !m.loggedIn && msg.String() == "ctrl+c" {
+			// Every step is done, so root can no longer log in over SSH.
+			// Leaving goes through the question, as on the connect dialog.
+			m.phase = wzConnect
+			m.asking, m.askExit = true, false
+			return m, m.checkLogin()
+		}
 		if m.phase == wzConnect && !m.loggedIn {
 			return m.updateConnect(msg)
 		}
@@ -474,11 +484,15 @@ func (m wizardModel) updateSteps(msg wizardProgressMsg) (tea.Model, tea.Cmd) {
 	}
 	e := msg.event
 	if e.Final {
+		m.rootLoginOff = e.RootLoginOff
 		m.failed = e.Result.Outcome == installer.RunFailed
 		if e.CompletionErr != nil {
 			m.completeErr = e.CompletionErr.Error()
 		}
-		if m.stopping || e.Result.Outcome == installer.RunInterrupted {
+		// A pause asked for during the last step has nothing left to
+		// pause, so a complete install still goes on to the connect dialog.
+		complete := e.Result.Outcome == installer.RunComplete && m.completeErr == ""
+		if e.Result.Outcome == installer.RunInterrupted || (m.stopping && !complete) {
 			return m, tea.Quit
 		}
 		m.finished = time.Now()
@@ -726,7 +740,7 @@ func (m wizardModel) endNotice() []string {
 	if m.failed {
 		text = "Installation stopped after a step failed. Inspect the reported problem before running 'sudo vpn install' again. It resumes from the first incomplete step."
 	}
-	if m.rootLoginOff() {
+	if m.rootLoginOff {
 		text += " " + installer.RootLoginOffNotice
 	}
 	var out []string
@@ -735,17 +749,6 @@ func (m wizardModel) endNotice() []string {
 		out = append(out, "")
 	}
 	return append(out, wrap(text, contentW-4, theme.Warning)...)
-}
-
-// rootLoginOff reports whether the step that turns root's SSH login off is
-// done, in this run or an earlier one.
-func (m wizardModel) rootLoginOff() bool {
-	for _, s := range m.steps {
-		if s.TurnsRootLoginOff && (s.Status == installer.StepDone || s.Status == installer.StepSkipped) {
-			return true
-		}
-	}
-	return false
 }
 
 // helpLine names the keys that work on the screen, in the TUI's help style.
