@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/theme"
 	"github.com/virtpriv/node/internal/update/protocol"
 )
 
@@ -304,9 +305,10 @@ func drawNodeUpdates(t *testing.T, ctx *ScreenContext, s *NodeUpdateScreen) (str
 	if len(rows) != tuiHeight+1 || !strings.HasPrefix(rows[0], "╭") || !strings.HasPrefix(rows[tuiHeight-1], "╰") {
 		t.Fatalf("frame is not %d rows:\n%s", tuiHeight, strings.Join(rows, "\n"))
 	}
-	// Top border, tab bar and separator come before the content rows.
+	// The top border, the two rows of the top bar and the line under them
+	// come before the content rows.
 	var content []string
-	for _, row := range rows[3 : tuiHeight-1] {
+	for _, row := range rows[2+theme.TopBarRows : 2+theme.TopBarRows+theme.ContentRows] {
 		if lipgloss.Width(row) != tuiWidth {
 			t.Fatalf("frame row is not %d columns: %q", tuiWidth, row)
 		}

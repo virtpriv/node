@@ -42,7 +42,7 @@ type connectionInfoResultMsg struct {
 }
 
 // These two displays refresh at entry/reactivation. One pending follow-up
-// replaces overlapping triggers; a retired screen cannot publish to its successor.
+// replaces overlapping triggers, and a retired screen cannot publish to its successor.
 type connectionInfoState struct {
 	request       *connectionInfoRequest
 	info          app.ConnectionInfo
@@ -180,9 +180,9 @@ func (m *Model) showConnectionInfo(msg connectionActionMsg) tea.Cmd {
 	if msg.action == connectionWebURL {
 		m.subview = svFullURL
 	} else {
-		m.qrLabel = "LND Connect - Tor"
+		m.qrLabel = "Connect LND over Tor"
 		if msg.action == connectionClearnetQR {
-			m.qrLabel = "LND Connect - Clearnet"
+			m.qrLabel = "Connect LND over clearnet"
 		}
 		m.subview = svQR
 	}

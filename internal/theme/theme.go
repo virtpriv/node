@@ -1,6 +1,10 @@
 package theme
 
-import "charm.land/lipgloss/v2"
+import (
+	"strings"
+
+	"charm.land/lipgloss/v2"
+)
 
 // ── Theme state ────────────────────────────────────────
 //
@@ -79,6 +83,10 @@ var (
 
 	ColorCheck  = lipgloss.Color("34")
 	ColorUpdate = lipgloss.Color("34")
+
+	// ColorBackground fills the whole window, so the node looks the same in
+	// any terminal theme.
+	ColorBackground = lipgloss.Color("234")
 )
 
 func applyColors() {
@@ -108,6 +116,7 @@ func applyColors() {
 		ColorChanRemoteDim = lipgloss.Color("240")
 		ColorCheck = lipgloss.Color("34")
 		ColorUpdate = lipgloss.Color("34")
+		ColorBackground = lipgloss.Color("234")
 	} else {
 		ColorPrimary = lipgloss.Color("232")
 		ColorLabel = lipgloss.Color("234")
@@ -134,6 +143,7 @@ func applyColors() {
 		ColorChanRemoteDim = lipgloss.Color("245")
 		ColorCheck = lipgloss.Color("28")
 		ColorUpdate = lipgloss.Color("28")
+		ColorBackground = lipgloss.Color("255")
 	}
 }
 
@@ -218,29 +228,22 @@ var (
 
 // The node TUI's frame. The installer draws the same shape, so both read the
 // measurements here and the two cannot drift apart.
+//
+// From the top: the frame's border, the top bar, a line, then the sidebar
+// beside the content, a bottom row under the sidebar for the theme icon, and
+// the border. The sidebar holds the five sections, each SectionRows tall and
+// closed by a line, so its rows match the content's.
 const (
 	FrameWidth   = 82
-	FrameHeight  = 34
 	SidebarWidth = 12
+	TopBarRows   = 2
+	SectionRows  = 5
+	ContentRows  = len(Sections) * (SectionRows + 1)
+	FrameHeight  = 1 + TopBarRows + 1 + ContentRows + 1 + 1
 )
 
 // Sections are the sidebar's five sections, top to bottom.
 var Sections = [5]string{"Channels", "Wallet", "On-Chain", "Add-On", "System"}
-
-// SidebarBlocks splits rows of sidebar between the five sections and the four
-// separator lines between them. Upper blocks take any remaining rows.
-func SidebarBlocks(rows int) [5]int {
-	n := len(Sections)
-	usable := max(rows-(n-1), n)
-	var blocks [5]int
-	for i := range blocks {
-		blocks[i] = usable / n
-		if i < usable%n {
-			blocks[i]++
-		}
-	}
-	return blocks
-}
 
 // ── Help bar ────────────────────────────────────────────
 
@@ -261,6 +264,7 @@ var (
 	TableDim    lipgloss.Style
 
 	FrameBorder lipgloss.Style
+	QRCode      lipgloss.Style
 
 	AddonBorderNormal lipgloss.Style
 	AddonTitleNormal  lipgloss.Style
@@ -376,6 +380,9 @@ func applyStyles() {
 	// Frame
 	FrameBorder = lipgloss.NewStyle().Foreground(ColorBorder)
 
+	// QR codes are black on white in both themes, for scanners.
+	QRCode = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Background(lipgloss.Color("16"))
+
 	// Addon cards
 	AddonBorderNormal = lipgloss.NewStyle().Foreground(ColorGrayed)
 	AddonTitleNormal = lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true)
@@ -389,4 +396,37 @@ func applyStyles() {
 func init() {
 	applyColors()
 	applyStyles()
+}
+
+// Paint gives every cell of block that has no background of its own the
+// theme's background. Fields, buttons and tabs keep their own shades.
+func Paint(block string) string {
+	w, h := lipgloss.Width(block), lipgloss.Height(block)
+	canvas := lipgloss.NewCanvas(w, h)
+	canvas.Compose(lipgloss.NewLayer(block))
+	for y := range h {
+		for x := range w {
+			if cell := canvas.CellAt(x, y); cell != nil && cell.Style.Bg == nil {
+				cell.Style.Bg = ColorBackground
+			}
+		}
+	}
+	return canvas.Render()
+}
+
+// Fill places block in the middle of a w by h window, every cell of the
+// window in the theme's background.
+func Fill(w, h int, block string) string {
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, Paint(block),
+		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(ColorBackground)))
+}
+
+// Hints draws a help line from key and description pairs: the key bright,
+// its description dim, thin bars between them.
+func Hints(pairs ...string) string {
+	var parts []string
+	for i := 0; i+1 < len(pairs); i += 2 {
+		parts = append(parts, HelpKey.Render(pairs[i])+" "+HelpDesc.Render(pairs[i+1]))
+	}
+	return strings.Join(parts, HelpSep.Render(" │ "))
 }

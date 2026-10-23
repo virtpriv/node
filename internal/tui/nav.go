@@ -133,39 +133,13 @@ func (n *NavSidebar) SetActive(section int) {
 	}
 }
 
-// BlockRows returns styled rows for each section block.
-// Active section label is yellow (always visible).
-// Cursor position shows ▸ when sidebar is focused.
-// Cursor-only (not active) shows bright white.
-// The theme toggle icon is rendered inside the System
-// block, one row below the System label.
-func (n NavSidebar) BlockRows(
-	w int, blockHeights [numSections]int,
-) [numSections][]string {
+// BlockRows returns the styled rows of each section's box, theme.SectionRows
+// tall, with the label in the middle. The active section is shown inverted,
+// and the cursor shows ▸ while the sidebar has focus.
+func (n NavSidebar) BlockRows(w int) [numSections][]string {
 	var blocks [numSections][]string
-
-	// Find the theme toggle item (last in Items).
-	themeIdx := -1
-	for i, it := range n.Items {
-		if it.Section == secThemeToggle {
-			themeIdx = i
-			break
-		}
-	}
-
-	// Lipgloss cell style for centering labels.
-	// Width(w) + Align(Center) handles ANSI-aware
-	// centering correctly for all label lengths.
-	cellBase := lipgloss.NewStyle().
-		Width(w).
-		Align(lipgloss.Center)
-
-	for si := 0; si < numSections; si++ {
-		bh := blockHeights[si]
-		if bh < 1 {
-			bh = 1
-		}
-
+	cell := lipgloss.NewStyle().Width(w).Align(lipgloss.Center)
+	for si := range numSections {
 		item := n.Items[si]
 		isActive := n.ActiveItem == si
 		isCursor := n.Cursor == si && n.Focused
@@ -176,69 +150,31 @@ func (n NavSidebar) BlockRows(
 		} else if isCursor {
 			style = theme.NavCursor
 		}
-
-		label := item.Label
-
-		titleRow := bh / 2
-
-		// Theme icon goes in the last row of the
-		// System block, left-aligned.
-		isSystemBlock := si == secSystem
-		themeRow := -1
-		if isSystemBlock && themeIdx >= 0 && bh >= 2 {
-			themeRow = bh - 1
+		label := style.Render(item.Label)
+		if isCursor {
+			// Centre "▸ Label" as one unit so the label stays where it is
+			// on rows without the cursor.
+			label = theme.NavActive.Render("▸") + " " + label
 		}
 
-		var rows []string
-		for r := 0; r < bh; r++ {
-			if r == titleRow {
-				styled := style.Render(label)
-				if isCursor {
-					// Center "▸ Label" as a single unit
-					// so the cursor doesn't push the
-					// label off-center relative to
-					// non-cursor rows.
-					combined := theme.NavActive.Render("▸") +
-						" " + styled
-					rows = append(rows,
-						cellBase.Render(combined))
-				} else {
-					rows = append(rows,
-						cellBase.Render(styled))
-				}
-			} else if r == themeRow && themeIdx >= 0 {
-				// Render the theme toggle icon in the bottom
-				// left corner. Highlight it when the cursor
-				// is on it, dim otherwise. No ▸ marker, just
-				// the icon, enter to toggle.
-				icon := n.Items[themeIdx].Label
-				isThemeCursor := n.Cursor == themeIdx &&
-					n.Focused
-
-				iconStyle := theme.Dim
-				if isThemeCursor {
-					iconStyle = theme.NavActive
-				}
-
-				styledIcon := iconStyle.Render(icon)
-				iconVis := lipgloss.Width(styledIcon)
-				iconPad := w - 1 - iconVis
-				if iconPad < 0 {
-					iconPad = 0
-				}
-				rows = append(rows,
-					" "+styledIcon+
-						strings.Repeat(" ", iconPad))
-			} else {
-				rows = append(rows,
-					strings.Repeat(" ", w))
-			}
+		rows := make([]string, theme.SectionRows)
+		for r := range rows {
+			rows[r] = strings.Repeat(" ", w)
 		}
-
+		rows[theme.SectionRows/2] = cell.Render(label)
 		blocks[si] = rows
 	}
-
 	return blocks
+}
+
+// ThemeIconCell draws the theme toggle in its own row under the sections,
+// bright while the cursor is on it.
+func (n NavSidebar) ThemeIconCell(w int) string {
+	style := theme.Dim
+	if n.Focused && n.Cursor >= 0 && n.Cursor < len(n.Items) && n.Items[n.Cursor].Section == secThemeToggle {
+		style = theme.NavActive
+	}
+	return lipgloss.NewStyle().Width(w).Align(lipgloss.Center).Render(style.Render(theme.ThemeIcon()))
 }
 
 // ── String helpers ───────────────────────────────────────

@@ -41,7 +41,7 @@ const (
 	focusExit
 )
 
-// One clock drives every animation: the opening, the status band, the
+// One clock drives every animation: the opening, the typed titles, the
 // spinner and the bar. It starts with the first window size and runs while
 // the screen is open. Bubble Tea only sends the cells that changed, so a
 // still picture costs nothing on the link.
@@ -51,6 +51,8 @@ const (
 	spinEvery = 3
 	// finishHold keeps the finished install in view before the connect dialog.
 	finishHold = 24
+	// typeEvery is how many frames each letter of a title takes to appear.
+	typeEvery = 2
 	// loginEvery is how often the connect dialog reads SSH's log.
 	loginEvery = 3 * time.Second
 )
@@ -91,10 +93,12 @@ type wizardModel struct {
 	pwErr     string
 
 	// The animations: whether the clock runs, the frame count, the opening's
-	// progress, the status band's rows now and where it is going, and the
-	// frames held after a complete install.
-	clock                                 bool
-	frames, drawn, band, bandTarget, held int
+	// progress and the frames held after a complete install. typed is the
+	// title being typed out, from frame typedFrom.
+	clock               bool
+	frames, drawn, held int
+	typed               string
+	typedFrom           int
 
 	spinFrames []string
 	bar        progress.Model
@@ -113,7 +117,6 @@ type wizardModel struct {
 
 func newWizardModel(info installer.InstallView, session installSession, login func() (bool, error)) wizardModel {
 	m := wizardModel{info: info, session: session, steps: info.Steps, login: login,
-		band: 1, bandTarget: 1,
 		stepFrom: make([]time.Time, len(info.Steps)), stepTook: make([]time.Duration, len(info.Steps))}
 	m.pwInput = newWizardPasswordInput("Password")
 	m.pwConfirm = newWizardPasswordInput("Confirm password")
@@ -126,7 +129,6 @@ func newWizardModel(info installer.InstallView, session installSession, login fu
 		m.enterPasswordScreen()
 	} else {
 		m.phase = wzSteps
-		m.bandTarget = 3
 	}
 	return m
 }
@@ -260,7 +262,6 @@ func (m wizardModel) Update(
 				return m, nil
 			}
 			m.phase = wzPassword
-			m.bandTarget = 1
 			m.pwErr = "Could not start the install: " + msg.err.Error()
 			return m, nil
 		}
@@ -302,15 +303,13 @@ func (m wizardModel) advanceFrame() (tea.Model, tea.Cmd) {
 	if m.drawn < namesShown {
 		m.drawn++
 	}
-	if m.frames%3 == 0 && m.band != m.bandTarget {
-		if m.band < m.bandTarget {
-			m.band++
-		} else {
-			m.band--
-		}
+	// A title types itself out once the frame is drawn, and again whenever
+	// the title changes.
+	if m.drawn >= namesShown && m.typed != m.title() {
+		m.typed, m.typedFrom = m.title(), m.frames
 	}
 	m.barAt, m.barSpeed = m.spring.Update(m.barAt, m.barSpeed, m.barTarget)
-	if m.phase == wzFinish && m.band == m.bandTarget {
+	if m.phase == wzFinish && m.titleDone() {
 		m.held++
 		if m.held >= finishHold {
 			m.phase = wzConnect
@@ -398,7 +397,6 @@ func (m wizardModel) updatePassword(
 		m.input.Password = pw
 		m.pwErr = ""
 		m.phase = wzSteps
-		m.bandTarget = 3
 		return m, m.startSteps()
 	}
 	if m.pwFocus < focusStart {
@@ -448,10 +446,9 @@ func (m wizardModel) updateSteps(msg wizardProgressMsg) (tea.Model, tea.Cmd) {
 			m.phase = wzDone
 			return m, nil
 		}
-		// A complete install folds the band back and moves on to the
+		// A complete install shows its last title, then moves on to the
 		// connect dialog by itself. The install terminal never opens the TUI.
 		m.phase = wzFinish
-		m.bandTarget = 1
 		m.barTarget = 1
 		return m, nil
 	}
@@ -503,47 +500,75 @@ func count(n int, unit string) string {
 
 // ── Drawing ─────────────────────────────────────────────
 
-// statusBar draws the top bar: the title on the password screen, a status
-// band of up to three rows during and after the install, and nothing once
-// the frame is the TUI's again.
+// statusBar draws the top bar's two rows: empty on the password screen and
+// with the connect dialog, otherwise the running step and the time above the
+// bar.
 func (m wizardModel) statusBar() []string {
-	bold := lipgloss.NewStyle().Bold(true).Foreground(theme.ColorPrimary)
-	switch m.phase {
-	case wzPassword:
-		return []string{" " + bold.Render("Install Virtual Private Node")}
-	case wzConnect:
-		return []string{""}
+	if m.phase == wzPassword || m.phase == wzConnect {
+		return []string{"", ""}
 	}
-	title, took, last := "Installing Virtual Private Node", "", ""
+	now, took := "", ""
 	if !m.started.IsZero() {
 		took = clock(time.Since(m.started))
 	}
+	if !m.finished.IsZero() {
+		took = clock(m.finished.Sub(m.started))
+	}
 	for _, s := range m.steps {
-		if s.Status == installer.StepRunning {
-			last = " " + m.spinnerView() + " " + theme.Label.Render(s.Name)
+		switch s.Status {
+		case installer.StepRunning:
+			now = m.spinnerView() + " " + theme.Label.Render(s.Name)
+		case installer.StepFailed:
+			now = theme.Warning.Render("✗ " + s.Name)
 		}
 	}
-	switch {
-	case m.phase == wzFinish:
-		title, took = "Virtual Private Node is installed", "in "+clock(m.finished.Sub(m.started))
-		last = " " + lipgloss.NewStyle().Foreground(theme.ColorSuccess).Render("✓") + " " + theme.Label.Render("All steps finished")
-	case m.failed:
-		title = "Install failed"
-	case m.phase == wzDone:
-		title = "Installation needs attention"
-	}
-	if !m.finished.IsZero() && m.phase != wzFinish {
-		took = clock(m.finished.Sub(m.started))
+	if m.phase == wzFinish {
+		now = lipgloss.NewStyle().Foreground(theme.ColorSuccess).Render("✓") + " " + theme.Label.Render("All steps finished")
+		took = "in " + took
 	}
 	of := fmt.Sprintf(" %d of %d ", m.stepsDone(), len(m.steps))
 	bar := m.bar
 	bar.SetWidth(frameInside - 2 - len(of))
-	rows := []string{
-		spread(" "+bold.Render(title), theme.Dim.Render(took)+" ", frameInside),
+	return []string{
+		spread(" "+now, theme.Dim.Render(took)+" ", frameInside),
 		" " + bar.ViewAs(min(1, max(0, m.barAt))) + theme.Dim.Render(of),
-		last,
 	}
-	return rows[:min(m.band, len(rows))]
+}
+
+// title is the heading centred above the content.
+func (m wizardModel) title() string {
+	switch {
+	case m.phase == wzPassword:
+		return "Install Virtual Private Node"
+	case m.phase == wzFinish:
+		return "Virtual Private Node is installed"
+	case m.failed:
+		return "Install failed"
+	case m.phase == wzDone:
+		return "Installation needs attention"
+	}
+	return "Installing Virtual Private Node"
+}
+
+// titleDone reports whether the current title has been typed out.
+func (m wizardModel) titleDone() bool {
+	return m.typed == m.title() && (m.frames-m.typedFrom)/typeEvery >= utf8.RuneCountInString(m.typed)
+}
+
+// titleRows types the title out letter by letter, with a thin cursor while
+// it types. Its place is fixed by the whole title, so it does not move.
+func (m wizardModel) titleRows() []string {
+	full := m.title()
+	shown := ""
+	if m.typed == full {
+		r := []rune(full)
+		shown = string(r[:min(len(r), (m.frames-m.typedFrom)/typeEvery)])
+	}
+	t := lipgloss.NewStyle().Bold(true).Foreground(theme.ColorPrimary).Render(shown)
+	if m.typed == full && !m.titleDone() {
+		t += theme.Dim.Render("▏")
+	}
+	return []string{"", strings.Repeat(" ", (contentW-lipgloss.Width(full))/2) + t}
 }
 
 // stepRows lists every step: a mark, the name and, once it ran, its time.
@@ -564,13 +589,16 @@ func (m wizardModel) stepRows(w int) []string {
 		case installer.StepFailed:
 			mark, name = theme.Warning.Render("✗"), theme.Warning.Render(s.Name)
 		case installer.StepSkipped:
-			mark, name = theme.Dim.Render("↷"), theme.Dim.Render(s.Name)
+			// Done in an earlier run: a gray check and no time.
+			mark, name = theme.Grayed.Render("✓"), theme.Dim.Render(s.Name)
 		default:
 			mark, name = faint.Render("·"), faint.Render(s.Name)
 		}
 		rows = append(rows, spread(" "+mark+" "+name, took, w))
 		if s.Status == installer.StepFailed && s.Err != nil {
-			rows = append(rows, wrap("Error: "+s.Err.Error(), w-6, theme.Warning)...)
+			for _, l := range wrap("Error: "+s.Err.Error(), w-6, theme.Warning) {
+				rows = append(rows, "   "+l)
+			}
 		}
 	}
 	return rows
@@ -579,7 +607,7 @@ func (m wizardModel) stepRows(w int) []string {
 // stepWindow shows as many steps as fit in h rows and keeps the running or
 // failed step in view, with a few of the steps after it.
 func (m wizardModel) stepWindow(h int) []string {
-	const colW = 58
+	const colW = 65
 	rows := m.stepRows(colW)
 	at := 0
 	for i, s := range m.steps {
@@ -661,21 +689,31 @@ func (m wizardModel) endNotice() []string {
 	return append(out, wrap(text, contentW-4, theme.Warning)...)
 }
 
+// helpLine names the keys that work on the screen, in the TUI's help style.
 func (m wizardModel) helpLine() string {
 	switch m.phase {
 	case wzPassword:
-		return "up/down: move   left/right: buttons   enter: select   ctrl+c: exit"
+		if !m.dialogShown() {
+			return ""
+		}
+		return theme.Hints("↑↓", "fields", "←→", "buttons", "↩", "select", "⌃C", "quit")
 	case wzSteps:
 		if m.stopping {
-			return "Stopping after the current step is recorded. Keep this terminal open."
+			return theme.HelpDesc.Render("Pausing after this step. Keep this terminal open.")
 		}
-		return "ctrl+c: stop after the current step, a later install command resumes"
+		return theme.Hints("⌃C", "pause install")
 	case wzDone:
-		return "ctrl+c: exit"
+		return theme.Hints("⌃C", "quit")
 	case wzConnect:
-		return "enter: exit"
+		return theme.Hints("↩", "exit")
 	}
 	return ""
+}
+
+// dialogShown reports whether the password dialog is drawn: after the
+// opening and once its title is typed out.
+func (m wizardModel) dialogShown() bool {
+	return m.drawn >= namesShown && m.titleDone()
 }
 
 func (m wizardModel) View() tea.View {
@@ -684,27 +722,31 @@ func (m wizardModel) View() tea.View {
 		v.AltScreen = true
 		return v
 	}
-	bar := m.statusBar()
-	h := bodyRows(len(bar))
+	h := theme.ContentRows
 	var content []string
+	head := m.titleRows()
 	switch m.phase {
 	case wzPassword:
 		if m.drawn >= namesShown {
-			content = center(m.passwordDialog(), contentW, h)
+			content = head
+		}
+		if m.dialogShown() {
+			content = append(head, center(m.passwordDialog(), contentW, h-len(head))...)
 		}
 	case wzSteps, wzFinish:
-		content = m.stepWindow(h)
+		content = append(head, m.stepWindow(h-len(head))...)
 	case wzDone:
 		notice := m.endNotice()
-		content = append(m.stepWindow(h-len(notice)-1), "")
+		content = append(head, m.stepWindow(h-len(head)-len(notice)-1)...)
+		content = append(content, "")
 		for _, l := range notice {
 			content = append(content, "  "+l)
 		}
 	case wzConnect:
 		content = center(m.connectDialog(), contentW, h)
 	}
-	full := frame(bar, m.drawn, m.loggedIn, content, m.helpLine())
-	v := tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, full))
+	full := frame(m.statusBar(), m.drawn, m.loggedIn, content, m.helpLine())
+	v := tea.NewView(theme.Fill(m.width, m.height, full))
 	v.AltScreen = true
 	v.WindowTitle = "Virtual Private Node"
 	return v

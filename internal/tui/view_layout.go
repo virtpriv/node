@@ -27,6 +27,9 @@ func (m Model) View() tea.View {
 		}
 	}
 
+	if m.width > 0 {
+		content = theme.Fill(m.width, m.height, content)
+	}
 	v := tea.NewView(content)
 	v.AltScreen = true
 	v.WindowTitle = "Virtual Private Node"
@@ -34,162 +37,59 @@ func (m Model) View() tea.View {
 	return v
 }
 
+// viewMain draws the frame: the top bar with the open tabs, the sidebar
+// beside the active screen, the theme toggle under the sidebar, and the help
+// line below. View centres it in the window.
 func (m Model) viewMain() string {
-	totalW := tuiWidth
-	totalH := tuiHeight
-
-	insideW := totalW - 2
-	insideH := totalH - 2
-
-	sidebarW := m.nav.Width
-	if sidebarW < 10 {
-		sidebarW = 10
-	}
-
+	insideW := tuiWidth - 2
+	sidebarW := theme.SidebarWidth
 	contentW := insideW - sidebarW - 1
-	if contentW < 30 {
-		contentW = 30
-		sidebarW = insideW - 1 - contentW
-	}
-
-	tabBarRows := 2
-	hasTabContent := m.hasDetailTabs()
-	bodyH := insideH - tabBarRows
-
-	// ── Sidebar block heights ─────────────────────
-	blocks := m.nav.BlockRows(sidebarW, theme.SidebarBlocks(bodyH))
-
-	// ── Tab bar (full width) ──────────────────────
-	var tabBar string
-	if hasTabContent {
-		tabBar = m.renderTabBar(insideW)
-		tabBarVW := lipgloss.Width(tabBar)
-		if tabBarVW < insideW {
-			tabBar += strings.Repeat(" ",
-				insideW-tabBarVW)
-		} else if tabBarVW > insideW {
-			tabBar = tabBar[:insideW]
-		}
-	} else {
-		tabBar = strings.Repeat(" ", insideW)
-	}
-
-	// ── Content body ──────────────────────────────
-	contentBodyH := bodyH
-
-	rawContent := m.renderActiveTabContent(
-		contentW, contentBodyH)
-
-	contentLines := strings.Split(rawContent, "\n")
-	for len(contentLines) < contentBodyH {
-		contentLines = append(contentLines,
-			strings.Repeat(" ", contentW))
-	}
-	if len(contentLines) > contentBodyH {
-		contentLines = contentLines[:contentBodyH]
-	}
-
 	border := theme.FrameBorder
 
-	// ── Build frame ───────────────────────────────
-	var output []string
+	marks, names := "", ""
+	if m.hasDetailTabs() {
+		marks, names = m.renderTabBar(insideW)
+	}
 
-	output = append(output, border.Render(
-		"╭"+strings.Repeat("─", insideW)+"╮"))
+	contentLines := strings.Split(m.renderActiveTabContent(contentW, theme.ContentRows), "\n")
 
-	output = append(output,
-		border.Render("│")+
-			tabBar+
-			border.Render("│"))
-
-	output = append(output, border.Render(
-		"├"+strings.Repeat("─", sidebarW)+
-			"┬"+strings.Repeat("─", contentW)+
-			"┤"))
-
-	// Build sidebar rows (blocks + separators)
+	// The sidebar: each section's box, closed by a line.
 	var sideRows []string
-	var sideSeps []bool
-	for si := 0; si < numSections; si++ {
-		for _, row := range blocks[si] {
+	var sideLines []bool
+	for _, block := range m.nav.BlockRows(sidebarW) {
+		for _, row := range block {
 			sideRows = append(sideRows, row)
-			sideSeps = append(sideSeps, false)
+			sideLines = append(sideLines, false)
 		}
-		if si < numSections-1 {
-			sep := strings.Repeat("─", sidebarW)
-			sideRows = append(sideRows, sep)
-			sideSeps = append(sideSeps, true)
+		sideRows = append(sideRows, strings.Repeat("─", sidebarW))
+		sideLines = append(sideLines, true)
+	}
+
+	output := []string{
+		border.Render("╭" + strings.Repeat("─", insideW) + "╮"),
+		border.Render("│") + clampLine(marks, insideW) + border.Render("│"),
+		border.Render("│") + clampLine(names, insideW) + border.Render("│"),
+		border.Render("├" + strings.Repeat("─", sidebarW) + "┬" + strings.Repeat("─", contentW) + "┤"),
+	}
+	for r := range theme.ContentRows {
+		content := ""
+		if r < len(contentLines) {
+			content = contentLines[r]
 		}
-	}
-
-	// Build content rows
-	var contentRows []string
-	for _, line := range contentLines {
-		contentRows = append(contentRows,
-			clampLine(line, contentW))
-	}
-
-	for len(sideRows) < bodyH {
-		sideRows = append(sideRows,
-			strings.Repeat(" ", sidebarW))
-		sideSeps = append(sideSeps, false)
-	}
-	for len(contentRows) < bodyH {
-		contentRows = append(contentRows,
-			strings.Repeat(" ", contentW))
-	}
-
-	for r := 0; r < bodyH; r++ {
-		isSideSep := r < len(sideSeps) && sideSeps[r]
-
-		leftEdge := "│"
-		middle := "│"
-		rightEdge := "│"
-
-		if isSideSep {
-			leftEdge = "├"
-			middle = "┤"
+		left, side, middle := border.Render("│"), sideRows[r], border.Render("│")
+		if sideLines[r] {
+			left, side, middle = border.Render("├"), border.Render(side), border.Render("┤")
 		}
-
-		sideCell := sideRows[r]
-		contentCell := contentRows[r]
-
-		if isSideSep {
-			output = append(output,
-				border.Render(leftEdge)+
-					border.Render(sideCell)+
-					border.Render(middle)+
-					contentCell+
-					border.Render(rightEdge))
-		} else {
-			output = append(output,
-				border.Render(leftEdge)+
-					sideCell+
-					border.Render(middle)+
-					contentCell+
-					border.Render(rightEdge))
-		}
+		output = append(output, left+side+middle+clampLine(content, contentW)+border.Render("│"))
 	}
-
-	output = append(output, border.Render(
-		"╰"+strings.Repeat("─", sidebarW)+
-			"┴"+strings.Repeat("─", contentW)+"╯"))
-
-	frame := strings.Join(output, "\n")
-
-	helpStr := m.renderHelpBar(totalW)
-	helpLine := centerInWidth(helpStr, totalW)
-
-	fullContent := frame + "\n" + helpLine
+	output = append(output,
+		border.Render("│")+m.nav.ThemeIconCell(sidebarW)+border.Render("│")+strings.Repeat(" ", contentW)+border.Render("│"),
+		border.Render("╰"+strings.Repeat("─", sidebarW)+"┴"+strings.Repeat("─", contentW)+"╯"),
+		centerInWidth(m.renderHelpBar(tuiWidth), tuiWidth))
 	if banner := m.renderNetworkBanner(); banner != "" {
-		fullContent = centerInWidth(banner, totalW) + "\n" + fullContent
+		output = append([]string{centerInWidth(banner, tuiWidth)}, output...)
 	}
-
-	return lipgloss.Place(
-		m.width, m.height,
-		lipgloss.Center, lipgloss.Center,
-		fullContent,
-	)
+	return strings.Join(output, "\n")
 }
 
 func (m Model) renderNetworkBanner() string {
@@ -214,143 +114,104 @@ func (m Model) hasDetailTabs() bool {
 	return false
 }
 
-func (m Model) renderTabBar(maxW int) string {
+// renderTabBar draws the open tabs' names on the lower row of the top bar
+// and, on the upper row, a ✕ above the current tab. Left and right move
+// between names, up reaches the ✕. Arrows show when tabs are off screen.
+func (m Model) renderTabBar(maxW int) (marks, names string) {
 	tabs := m.effectiveTabs()
-
 	if len(tabs) <= 1 {
-		return ""
+		return "", ""
 	}
+	dim := lipgloss.NewStyle().Foreground(theme.ColorBorder)
 
 	type tabRender struct {
 		str   string
 		width int
 	}
 	var allTabs []tabRender
-
 	for i := 1; i < len(tabs); i++ {
-		tab := tabs[i]
-		isCursor := m.tabFocused && m.activeTab == i
-
-		label := tab.Label
+		label := tabs[i].Label
 		if len(label) > 14 {
 			label = label[:12] + ".."
 		}
-
-		var s string
-		if isCursor && m.tabCursorX == 1 {
-			s = theme.NavItem.Render(" "+label+" ") +
-				theme.NavActive.Render("✕") + " "
-		} else if isCursor && m.tabCursorX == 0 {
-			s = theme.NavActive.Render(" "+label+" ") +
-				"✕ "
-		} else {
-			s = lipgloss.NewStyle().
-				Foreground(theme.ColorBorder).
-				Render(" " + label + " ✕ ")
+		style := dim
+		if m.tabFocused && m.activeTab == i && m.tabCursorX == 0 {
+			style = theme.NavActive
 		}
-
-		allTabs = append(allTabs, tabRender{
-			str: s, width: lipgloss.Width(s),
-		})
+		s := style.Render(" "+label+" ") + " "
+		allTabs = append(allTabs, tabRender{str: s, width: lipgloss.Width(s)})
 	}
 
 	arrowW := 2
 	availW := maxW
 
-	offset := m.tabScrollOffset
-	if offset < 0 {
-		offset = 0
-	}
-	if offset >= len(allTabs) {
-		offset = len(allTabs) - 1
-	}
-	if offset < 0 {
-		offset = 0
-	}
-
-	activeIdx := m.activeTab - 1
-	if activeIdx < 0 {
-		activeIdx = 0
-	}
+	offset := min(max(m.tabScrollOffset, 0), len(allTabs)-1)
+	activeIdx := max(m.activeTab-1, 0)
 	if activeIdx < offset {
 		offset = activeIdx
 	}
 
-	needLeftArrow := offset > 0
-	usedW := 0
-	if needLeftArrow {
-		usedW = arrowW
-	}
-
-	endIdx := offset
-	for endIdx < len(allTabs) {
-		w := allTabs[endIdx].width
-		rightArrowW := 0
-		if endIdx+1 < len(allTabs) {
-			rightArrowW = arrowW
+	// fit returns the end of the tabs that fit from offset.
+	fit := func(offset int) int {
+		used := 0
+		if offset > 0 {
+			used = arrowW
 		}
-		if usedW+w+rightArrowW > availW {
-			break
+		end := offset
+		for end < len(allTabs) {
+			right := 0
+			if end+1 < len(allTabs) {
+				right = arrowW
+			}
+			if used+allTabs[end].width+right > availW {
+				break
+			}
+			used += allTabs[end].width
+			end++
 		}
-		usedW += w
-		endIdx++
+		return end
 	}
-
+	endIdx := fit(offset)
 	if activeIdx >= endIdx {
 		endIdx = activeIdx + 1
-		usedW = 0
+		used := 0
 		offset = endIdx - 1
 		for offset > 0 {
-			w := allTabs[offset-1].width
-			if usedW+w+allTabs[offset].width >
-				availW-arrowW*2 {
+			if used+allTabs[offset-1].width+allTabs[offset].width > availW-arrowW*2 {
 				break
 			}
-			usedW += allTabs[offset].width
+			used += allTabs[offset].width
 			offset--
 		}
-		needLeftArrow = offset > 0
-		usedW = 0
-		if needLeftArrow {
-			usedW = arrowW
-		}
-		endIdx = offset
-		for endIdx < len(allTabs) {
-			w := allTabs[endIdx].width
-			rightArrowW := 0
-			if endIdx+1 < len(allTabs) {
-				rightArrowW = arrowW
-			}
-			if usedW+w+rightArrowW > availW {
-				break
-			}
-			usedW += w
-			endIdx++
-		}
+		endIdx = fit(offset)
 	}
 
-	needRightArrow := endIdx < len(allTabs)
-
-	var parts []string
-	if needLeftArrow {
-		parts = append(parts,
-			lipgloss.NewStyle().
-				Foreground(theme.ColorBorder).
-				Render("◀ "))
+	var top, bottom strings.Builder
+	col := 0
+	if offset > 0 {
+		bottom.WriteString(dim.Render("◀ "))
+		top.WriteString(strings.Repeat(" ", arrowW))
+		col = arrowW
 	}
-
 	for i := offset; i < endIdx; i++ {
-		parts = append(parts, allTabs[i].str)
+		bottom.WriteString(allTabs[i].str)
+		if i == activeIdx && m.activeTab > 0 {
+			// The ✕ sits above the middle of the name, which is the tab's
+			// width less the space after it.
+			labelW := allTabs[i].width - 1
+			at := col + (labelW-1)/2
+			xStyle := dim
+			if m.tabFocused && m.tabCursorX == 1 {
+				xStyle = theme.NavActive
+			}
+			top.WriteString(strings.Repeat(" ", at-lipgloss.Width(top.String())) + xStyle.Render("✕"))
+		}
+		col += allTabs[i].width
 	}
-
-	if needRightArrow {
-		parts = append(parts,
-			lipgloss.NewStyle().
-				Foreground(theme.ColorBorder).
-				Render(" ▶"))
+	if endIdx < len(allTabs) {
+		bottom.WriteString(dim.Render(" ▶"))
 	}
-
-	return strings.Join(parts, "")
+	return top.String(), bottom.String()
 }
 
 func (m Model) effectiveTabs() []openTab {

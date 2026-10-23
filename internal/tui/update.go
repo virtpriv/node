@@ -866,7 +866,19 @@ func (m Model) handleTabBarKey(
 	case "ctrl+c":
 		return m, tea.Quit
 
+	case "up":
+		// Up reaches the ✕ above a tab that can be closed.
+		if m.activeTab > 0 {
+			m.tabCursorX = 1
+		}
+		return m, nil
+
 	case "down", "tab":
+		if key == "down" && m.tabCursorX == 1 {
+			m.tabCursorX = 0
+			return m, nil
+		}
+		m.tabCursorX = 0
 		m.focusContent()
 		if m.activeTab == 0 {
 			m.subview = svNone
@@ -898,14 +910,9 @@ func (m Model) handleTabBarKey(
 		return m, nil
 
 	case "right":
-		if m.activeTab > 0 &&
-			m.activeTab < len(tabs) {
-			tab := tabs[m.activeTab]
-			if tab.Kind != tabMain &&
-				m.tabCursorX == 0 {
-				m.tabCursorX = 1
-				return m, nil
-			}
+		if m.tabCursorX == 1 {
+			m.tabCursorX = 0
+			return m, nil
 		}
 		if m.activeTab < len(tabs)-1 {
 			m.activeTab++
