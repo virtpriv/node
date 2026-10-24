@@ -542,7 +542,7 @@ func (m wizardModel) statusBar() []string {
 	}
 }
 
-// title is the heading centred above the content.
+// title is the heading centered above the content.
 func (m wizardModel) title() string {
 	switch {
 	case m.phase == wzPassword:

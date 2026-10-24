@@ -84,8 +84,8 @@ var (
 	ColorCheck  = lipgloss.Color("34")
 	ColorUpdate = lipgloss.Color("34")
 
-	// ColorBackground and ColorText are the window's own colours while the
-	// program runs: the terminal's background and its default text colour,
+	// ColorBackground and ColorText are the window's own colors while the
+	// program runs: the terminal's background and its default text color,
 	// which text with no role of its own takes. Bubble Tea sets them through
 	// the view and gives the terminal its own back on exit and around every
 	// hand over.

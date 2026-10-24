@@ -105,7 +105,7 @@ func dialog(title, desc string, body []string, buttons string) []string {
 
 // sidebar draws the TUI's sidebar for h rows at opening frame f: the five
 // sections, each closed by a line, then an empty row. lit shows the
-// section names in full colour, otherwise they are faint. It returns the
+// section names in full color, otherwise they are faint. It returns the
 // sidebar cells, the divider column beside them and the rows of the section
 // lines, where the frame's left border joins them.
 func sidebar(h, f int, lit bool) (cells, divider []string, sections map[int]bool) {

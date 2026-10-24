@@ -14,7 +14,7 @@ import (
 // ── Fullscreen overlays ────────────────────────────────
 // These are Model-owned views that take over the entire
 // screen (not section content). Triggered by setting
-// m.subview to svQR or svFullURL. View centres them.
+// m.subview to svQR or svFullURL. View centers them.
 
 func (m Model) viewQR() string {
 	if m.connectionDisplayUnavailable() {
@@ -83,7 +83,7 @@ func renderQRCode(data string) string {
 		QuietZone:      2,
 	}
 	qrterminal.GenerateWithConfig(data, config)
-	// The half blocks draw light modules in the foreground colour and dark
+	// The half blocks draw light modules in the foreground color and dark
 	// ones in the background. Both are set, so the code reads the same on
 	// the theme's background and in any terminal.
 	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")

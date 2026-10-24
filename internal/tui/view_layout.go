@@ -40,7 +40,7 @@ func (m Model) View() tea.View {
 
 // viewMain draws the frame: the top bar with the open tabs, the sidebar
 // beside the active screen, the theme toggle under the sidebar, and the help
-// line below. View centres it in the window.
+// line below. View centers it in the window.
 func (m Model) viewMain() string {
 	insideW := tuiWidth - 2
 	sidebarW := theme.SidebarWidth

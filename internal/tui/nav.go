@@ -150,7 +150,7 @@ func (n NavSidebar) BlockRows(w int) [numSections][]string {
 		}
 		label := style.Render(item.Label)
 		if isCursor {
-			// Centre "▸ Label" as one unit so the label stays where it is
+			// Center "▸ Label" as one unit so the label stays where it is
 			// on rows without the cursor.
 			label = theme.NavActive.Render("▸") + " " + label
 		}
