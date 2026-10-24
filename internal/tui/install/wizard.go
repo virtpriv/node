@@ -726,6 +726,7 @@ func (m wizardModel) dialogShown() bool {
 func (m wizardModel) View() tea.View {
 	if m.width == 0 {
 		v := tea.NewView("Loading...")
+		v.BackgroundColor, v.ForegroundColor = theme.ColorBackground, theme.ColorText
 		v.AltScreen = true
 		return v
 	}
@@ -753,7 +754,8 @@ func (m wizardModel) View() tea.View {
 		content = center(m.connectDialog(), contentW, h)
 	}
 	full := frame(m.statusBar(), m.drawn, m.loggedIn, content, m.helpLine())
-	v := tea.NewView(theme.Fill(m.width, m.height, full))
+	v := tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, full))
+	v.BackgroundColor, v.ForegroundColor = theme.ColorBackground, theme.ColorText
 	v.AltScreen = true
 	v.WindowTitle = "Virtual Private Node"
 	return v

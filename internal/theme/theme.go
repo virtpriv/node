@@ -84,9 +84,13 @@ var (
 	ColorCheck  = lipgloss.Color("34")
 	ColorUpdate = lipgloss.Color("34")
 
-	// ColorBackground fills the whole window, so the node looks the same in
-	// any terminal theme.
+	// ColorBackground and ColorText are the window's own colours while the
+	// program runs: the terminal's background and its default text colour,
+	// which text with no role of its own takes. Bubble Tea sets them through
+	// the view and gives the terminal its own back on exit and around every
+	// hand over.
 	ColorBackground = lipgloss.Color("234")
+	ColorText       = lipgloss.Color("253")
 )
 
 func applyColors() {
@@ -117,6 +121,7 @@ func applyColors() {
 		ColorCheck = lipgloss.Color("34")
 		ColorUpdate = lipgloss.Color("34")
 		ColorBackground = lipgloss.Color("234")
+		ColorText = lipgloss.Color("253")
 	} else {
 		ColorPrimary = lipgloss.Color("232")
 		ColorLabel = lipgloss.Color("234")
@@ -144,6 +149,7 @@ func applyColors() {
 		ColorCheck = lipgloss.Color("28")
 		ColorUpdate = lipgloss.Color("28")
 		ColorBackground = lipgloss.Color("255")
+		ColorText = lipgloss.Color("234")
 	}
 }
 
@@ -396,29 +402,6 @@ func applyStyles() {
 func init() {
 	applyColors()
 	applyStyles()
-}
-
-// Paint gives every cell of block that has no background of its own the
-// theme's background. Fields, buttons and tabs keep their own shades.
-func Paint(block string) string {
-	w, h := lipgloss.Width(block), lipgloss.Height(block)
-	canvas := lipgloss.NewCanvas(w, h)
-	canvas.Compose(lipgloss.NewLayer(block))
-	for y := range h {
-		for x := range w {
-			if cell := canvas.CellAt(x, y); cell != nil && cell.Style.Bg == nil {
-				cell.Style.Bg = ColorBackground
-			}
-		}
-	}
-	return canvas.Render()
-}
-
-// Fill places block in the middle of a w by h window, every cell of the
-// window in the theme's background.
-func Fill(w, h int, block string) string {
-	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, Paint(block),
-		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(ColorBackground)))
 }
 
 // Hints draws a help line from key and description pairs: the key bright,

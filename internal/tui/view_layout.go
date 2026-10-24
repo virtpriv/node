@@ -28,9 +28,10 @@ func (m Model) View() tea.View {
 	}
 
 	if m.width > 0 {
-		content = theme.Fill(m.width, m.height, content)
+		content = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 	}
 	v := tea.NewView(content)
+	v.BackgroundColor, v.ForegroundColor = theme.ColorBackground, theme.ColorText
 	v.AltScreen = true
 	v.WindowTitle = "Virtual Private Node"
 	v.ReportFocus = true
