@@ -17,6 +17,10 @@ const (
 	frameInside = theme.FrameWidth - 2
 	contentW    = frameInside - theme.SidebarWidth - 1
 	dialogW     = 54
+	// sideRows is the sidebar's height: the content's rows beside the five
+	// sections, then the row under them that the TUI uses for its theme
+	// toggle and the install leaves empty.
+	sideRows = theme.ContentRows + 1
 )
 
 // The opening animation, in frames of frameRate: the top bar's line runs
@@ -28,9 +32,6 @@ const (
 	sectionsDrawn = 32
 	namesShown    = sectionsDrawn + 3*len(theme.Sections)
 )
-
-// bodyRows is the height below the top bar when the bar is band rows tall.
-func bodyRows(band int) int { return theme.FrameHeight - 3 - band }
 
 func padTo(s string, w int) string {
 	if lipgloss.Width(s) > w {
@@ -77,47 +78,44 @@ func button(label string, focused bool) string {
 	return theme.BtnNormal.Render(" " + label + " ")
 }
 
-// dialog draws a small window in the style of a desktop dialog: a header with
-// the title and one or two lines of description, the body, and the buttons
-// at the bottom right.
+// dialog draws a small window in the style of a desktop dialog: the title,
+// a line or two of description, the body, and the buttons at the bottom
+// right, with space around each.
 func dialog(title, desc string, body []string, buttons string) []string {
 	border := theme.FrameBorder
 	inner := dialogW - 2
+	const margin = "  "
 	row := func(s string) string {
-		return border.Render("│") + padTo(" "+s, inner) + border.Render("│")
+		return border.Render("│") + padTo(margin+s, inner) + border.Render("│")
 	}
-	rule := func(l, r string) string { return border.Render(l + strings.Repeat("─", inner) + r) }
-	out := []string{rule("╭", "╮"), row("")}
-	out = append(out, row(lipgloss.NewStyle().Bold(true).Foreground(theme.ColorPrimary).Render(title)))
-	for _, l := range wrap(desc, inner-3, theme.Dim) {
+	edge := func(l, r string) string { return border.Render(l + strings.Repeat("─", inner) + r) }
+	bold := lipgloss.NewStyle().Bold(true).Foreground(theme.ColorPrimary)
+	out := []string{edge("╭", "╮"), row(""), row(bold.Render(title)), row("")}
+	for _, l := range wrap(desc, inner-2*len(margin)-1, theme.Dim) {
 		out = append(out, row(l))
 	}
-	out = append(out, row(""), rule("├", "┤"), row(""))
+	out = append(out, row(""))
 	for _, l := range body {
 		out = append(out, row(l))
 	}
-	out = append(out, row(""), rule("├", "┤"))
-	out = append(out, border.Render("│")+padTo(strings.Repeat(" ", max(0, inner-2-lipgloss.Width(buttons)))+buttons, inner)+border.Render("│"))
-	return append(out, rule("╰", "╯"))
+	out = append(out, row(""))
+	out = append(out, border.Render("│")+padTo(strings.Repeat(" ", max(0, inner-len(margin)-lipgloss.Width(buttons)))+buttons, inner)+border.Render("│"))
+	return append(out, row(""), edge("╰", "╯"))
 }
 
-// sidebar draws the TUI's sidebar for h rows at opening frame f. lit shows the
-// section names in full colour, otherwise they are faint. It returns the
+// sidebar draws the TUI's sidebar for h rows at opening frame f: the five
+// sections, each closed by a line, then an empty row. lit shows the
+// section names in full color, otherwise they are faint. It returns the
 // sidebar cells, the divider column beside them and the rows of the section
 // lines, where the frame's left border joins them.
 func sidebar(h, f int, lit bool) (cells, divider []string, sections map[int]bool) {
 	border := theme.FrameBorder
-	blocks := theme.SidebarBlocks(h)
 	sections = map[int]bool{}
 	var starts []int
-	row := 0
-	for i, b := range blocks {
-		starts = append(starts, row)
-		row += b
-		if i < len(blocks)-1 {
-			sections[row] = true
-			row++
-		}
+	for i := range theme.Sections {
+		start := i * (theme.SectionRows + 1)
+		starts = append(starts, start)
+		sections[start+theme.SectionRows] = true
 	}
 	down := min(h, max(0, f-lineAcross)*h/(dividerDown-lineAcross))
 	across := min(theme.SidebarWidth, max(0, f-dividerDown)*theme.SidebarWidth/(sectionsDrawn-dividerDown))
@@ -145,16 +143,16 @@ func sidebar(h, f int, lit bool) (cells, divider []string, sections map[int]bool
 		if f < sectionsDrawn+3*(i+1) {
 			break
 		}
-		cells[starts[i]+blocks[i]/2] = cell.Render(name.Render(label))
+		cells[starts[i]+theme.SectionRows/2] = cell.Render(name.Render(label))
 	}
 	return cells, divider, sections
 }
 
 // frame joins the top bar's rows, the sidebar at opening frame f and the
-// content into the TUI's shape, with the help line below it.
+// content into the TUI's shape, with the help line, already styled, below.
 func frame(bar []string, f int, lit bool, content []string, help string) string {
 	border := theme.FrameBorder
-	h := bodyRows(len(bar))
+	h := sideRows
 	cells, divider, sections := sidebar(h, f, lit)
 	out := []string{border.Render("╭" + strings.Repeat("─", frameInside) + "╮")}
 	for _, b := range bar {
@@ -190,7 +188,9 @@ func frame(bar []string, f int, lit bool, content []string, help string) string 
 		bottom = strings.Repeat("─", theme.SidebarWidth) + "┴" + strings.Repeat("─", contentW)
 	}
 	out = append(out, border.Render("╰"+bottom+"╯"))
-	help = theme.Grayed.Render(help)
-	out = append(out, strings.Repeat(" ", max(0, (theme.FrameWidth-lipgloss.Width(help))/2))+help)
+	// The help line is padded on both sides to the frame's width, so
+	// centring the whole screen leaves it where it is.
+	pad := max(0, (theme.FrameWidth-lipgloss.Width(help))/2)
+	out = append(out, strings.Repeat(" ", pad)+help+strings.Repeat(" ", max(0, theme.FrameWidth-pad-lipgloss.Width(help))))
 	return strings.Join(out, "\n")
 }

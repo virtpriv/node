@@ -14,25 +14,20 @@ import (
 // ── Fullscreen overlays ────────────────────────────────
 // These are Model-owned views that take over the entire
 // screen (not section content). Triggered by setting
-// m.subview to svQR or svFullURL.
+// m.subview to svQR or svFullURL. View centers them.
 
 func (m Model) viewQR() string {
 	if m.connectionDisplayUnavailable() {
 		return m.viewConnectionUnavailable()
 	}
 	if m.qrCopyOverlay != nil && !m.qrCopyDisplayCurrent(m.qrCopyOverlay) {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			theme.Warn.Render("QR information changed or is unavailable.\nPress enter to return."))
+		return theme.Warn.Render("QR information changed or is unavailable.\nPress enter to return.")
 	}
 	uri := m.urlTarget
 	label := m.qrLabel
 
 	if uri == "" {
-		return lipgloss.Place(
-			m.width, m.height,
-			lipgloss.Center, lipgloss.Center,
-			theme.Warn.Render(
-				"QR not available."))
+		return theme.Warn.Render("QR not available.")
 	}
 
 	code := renderQRCode(uri)
@@ -48,10 +43,7 @@ func (m Model) viewQR() string {
 	lines = append(lines, "")
 	lines = append(lines, theme.Footer.Render(
 		"enter back"))
-	return lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center,
-		lipgloss.JoinVertical(
-			lipgloss.Left, lines...))
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
 func (m Model) viewFullURL() string {
@@ -59,18 +51,16 @@ func (m Model) viewFullURL() string {
 		return m.viewConnectionUnavailable()
 	}
 	title := theme.Header.Render(
-		"Full URL - Copy and paste into Tor Browser")
+		"Full URL, copy and paste into Tor Browser")
 	hint := theme.Dim.Render(
 		"Select and copy. Press enter to go back.")
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		"", title, "", hint, "", m.urlTarget, "")
-	return lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center, content)
+	return content
 }
 
 func (m Model) viewConnectionUnavailable() string {
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-		theme.Warn.Render("Connection information changed or is unavailable.\nPress enter to return."))
+	return theme.Warn.Render("Connection information changed or is unavailable.\nPress enter to return.")
 }
 
 // ── QR and encoding utilities ──────────────────────────
@@ -93,5 +83,19 @@ func renderQRCode(data string) string {
 		QuietZone:      2,
 	}
 	qrterminal.GenerateWithConfig(data, config)
-	return strings.TrimRight(buf.String(), "\n")
+	// The half blocks draw light modules in the foreground color and dark
+	// ones in the background. Both are set, so the code reads the same on
+	// the theme's background and in any terminal.
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	for i, l := range lines {
+		style := theme.QRCode
+		// Two module rows share a line, and a code has an odd count, so the
+		// last line's lower half lies below the code. It keeps the screen's
+		// background instead of a black strip.
+		if i == len(lines)-1 && strings.Trim(l, qrterminal.WHITE_BLACK) == "" {
+			style = style.UnsetBackground()
+		}
+		lines[i] = style.Render(l)
+	}
+	return strings.Join(lines, "\n")
 }

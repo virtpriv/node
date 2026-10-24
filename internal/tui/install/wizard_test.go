@@ -44,7 +44,20 @@ func wizardFixtureWithLogin() (wizardModel, *fakeSession, *loginStub) {
 	info := installer.InstallView{NeedIdentity: true,
 		Steps: []installer.InstallStepView{{Name: "First"}, {Name: "Second"}}}
 	login := &loginStub{}
-	return newWizardModel(info, session, login.check), session, login
+	return showDialog(newWizardModel(info, session, login.check)), session, login
+}
+
+// showDialog runs the opening until the password dialog is on screen, as the
+// owner sees it before typing.
+func showDialog(m wizardModel) wizardModel {
+	for range 1000 {
+		if m.dialogShown() {
+			return m
+		}
+		next, _ := m.Update(frameTick{})
+		m = next.(wizardModel)
+	}
+	panic("the password dialog never showed")
 }
 func updateWizard(t *testing.T, m wizardModel, msg tea.Msg) (wizardModel, tea.Cmd) {
 	t.Helper()
@@ -112,6 +125,25 @@ func TestWizardPasswordPastePreservesOrRejects(t *testing.T) {
 				t.Fatal("invalid input reached installation")
 			}
 		})
+	}
+}
+
+// Keys and paste during the opening must not reach a field the owner cannot
+// see yet.
+func TestWizardPasswordIgnoresInputBeforeDialog(t *testing.T) {
+	session := &fakeSession{events: make(chan installer.InstallEvent, 10)}
+	m := newWizardModel(installer.InstallView{NeedIdentity: true,
+		Steps: []installer.InstallStepView{{Name: "First"}}}, session, (&loginStub{}).check)
+	for _, msg := range []tea.Msg{tea.KeyPressMsg{Code: 'x', Text: "x"}, tea.PasteMsg{Content: "abcdefghijklmnop"}, enter(), enter()} {
+		m, _ = updateWizard(t, m, msg)
+	}
+	if m.pwInput.Value() != "" || m.pwConfirm.Value() != "" || m.pwFocus != focusPassword || m.pwErr != "" || session.starts != 0 {
+		t.Fatal("input reached the password dialog before it showed")
+	}
+	m = showDialog(m)
+	m, _ = updateWizard(t, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if m.pwInput.Value() != "x" {
+		t.Fatal("input did not reach the shown dialog")
 	}
 }
 

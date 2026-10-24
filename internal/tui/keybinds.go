@@ -254,6 +254,7 @@ func tabBarBindings(viewOnly, onTab bool) []key.Binding {
 	}
 	if onTab {
 		binds = append(binds,
+			bind("↑", "close", "up"),
 			bind("⌫", "close tab", "backspace"))
 	}
 	binds = append(binds, kQuit)
