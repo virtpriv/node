@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/virtpriv/node/internal/logger"
+	"github.com/virtpriv/node/internal/paths"
 )
 
 // ── Install engine core ──────────────────────────────────
@@ -18,18 +19,18 @@ import (
 //
 //   - MUTATION steps trust the ledger: a recorded completion
 //     is skipped. The ledger records completion, not present
-//     correctness — see the ledger.go header for the residual.
+//     correctness, see the ledger.go header for the residual.
 //   - GATE steps assert a property of the world RIGHT NOW
 //     (Tor routing) and are ALWAYS re-executed, never
 //     ledger-skipped. No download step can run in a pass whose
-//     Tor routing was not verified in that same pass — by step
+//     Tor routing was not verified in that same pass, by step
 //     type, not by ordering luck.
 //   - GROUP steps pass ephemeral material hand-to-hand (a
 //     MkdirTemp workdir captured in closures: download →
 //     verify → install). The workdir does not survive the
 //     process, so a group is ATOMIC for resume: it counts as
 //     complete only if its TERMINAL step (last member in list
-//     order) is recorded; otherwise every member re-runs.
+//     order) is recorded. Otherwise every member re-runs.
 //     Re-running a download pipeline is self-verifying by
 //     construction (fresh GPG + checksum).
 
@@ -37,17 +38,17 @@ import (
 type StepKind int
 
 const (
-	// StepMutation changes the box; its recorded completion is
+	// StepMutation changes the box. Its recorded completion is
 	// trusted for skipping on resume.
 	StepMutation StepKind = iota
-	// StepGate asserts the world now; it re-runs on every pass
+	// StepGate asserts the world now. It re-runs on every pass
 	// regardless of the ledger.
 	StepGate
 )
 
-// StepPhase classifies a step for the image pipeline (ruling
-// iv): bake steps run at image-build time, first-boot steps
-// must run on the deployed box (identity, hardware, SSH, and
+// StepPhase classifies a step for the image pipeline. Bake
+// steps run at image-build time, first-boot steps must run on
+// the deployed box (identity, hardware, SSH, and
 // machine-specific staging).
 type StepPhase int
 
@@ -70,14 +71,14 @@ const (
 
 type InstallStep struct {
 	// Key is the stable, versionless ledger key ("tor.install",
-	// "btc.download"). Names carry versions and copy edits; keys
+	// "btc.download"). Names carry versions and copy edits. Keys
 	// identify the step across binary versions.
 	Key string
 	// Name is display-only.
 	Name  string
 	Fn    func() error
 	Kind  StepKind
-	Group string // resume-atomic pipeline; "" = self-contained
+	Group string // resume-atomic pipeline, "" for self-contained
 	Phase StepPhase
 
 	Status StepStatus
@@ -86,7 +87,7 @@ type InstallStep struct {
 
 // validateSteps asserts the invariants the planner relies on:
 // every key non-empty and unique. Programmer error, not
-// environment — so it is checked once at engine start and
+// environment, so it is checked once at engine start and
 // returned as an error rather than silently misplanned.
 func validateSteps(steps []InstallStep) error {
 	seen := make(map[string]bool, len(steps))
@@ -110,9 +111,9 @@ type stepPlan struct {
 	Reason string // human-readable cause, logged verbatim
 }
 
-// planRun decides, for every step, run vs skip — the whole
-// resume ruling as one pure function (unit-tested per
-// scenario; no I/O, no clock).
+// planRun decides, for every step, run or skip. It is the
+// whole resume ruling as one pure function, unit-tested per
+// scenario, with no I/O and no clock.
 func planRun(steps []InstallStep, led *installLedger) []stepPlan {
 	// Terminal member of each group = last in list order.
 	terminal := map[string]string{} // group → terminal key
@@ -152,9 +153,7 @@ func planRun(steps []InstallStep, led *installLedger) []stepPlan {
 }
 
 // FilterPhase returns the steps whose Phase is at or before
-// until — the image pipeline's `--until=bake` slice (ruling
-// iv plumbing; the CLI that passes a phase arrives with the
-// commit-6 dispatch).
+// until, the image pipeline's `--until=bake` slice.
 func FilterPhase(steps []InstallStep, until StepPhase) []InstallStep {
 	var out []InstallStep
 	for _, s := range steps {
@@ -207,9 +206,8 @@ func newStepRunner(
 }
 
 // runIndex executes one step per the plan. Every path leaves a
-// log line — start, skip, complete, FAILED — so a run's trail
-// in vpn.log never just stops (the commit-5 addendum fix,
-// once, in the core). The ledger entry is written only after Fn returns nil.
+// log line (start, skip, complete, FAILED), so a run's trail
+// in vpn.log never just stops. The ledger entry is written only after Fn returns nil.
 // A publication failure stops the run immediately: later steps must not
 // advance past a mutation whose completion is not durable for the next pass.
 func (r *stepRunner) runIndex(i int) (skipped bool, err error) {
@@ -257,8 +255,53 @@ type RunResult struct {
 	Err      error // the failed step's error
 }
 
+// rootLoginOffStep is the step after which root can no longer log in over SSH.
+const rootLoginOffStep = "ssh.harden"
+
+// RootLoginOffNotice tells the owner how to get back in once root's SSH login
+// is off.
+const RootLoginOffNotice = "Root can no longer log in over SSH, so if you close this terminal, log in as " +
+	paths.AdminUser + " first."
+
+// StopError reports an install that did not finish. Paused means it stopped
+// between steps with no step failed. Otherwise the step named failed with Err,
+// or, with no step named, finishing the install failed. RootLoginOff is set
+// once root's SSH login is off.
+type StopError struct {
+	Paused         bool
+	StepName       string
+	StepNum, Total int
+	Err            error
+	RootLoginOff   bool
+}
+
+func (e *StopError) Error() string {
+	if e.Paused {
+		return fmt.Sprintf("install paused at step %d of %d (%s)", e.StepNum, e.Total, e.StepName)
+	}
+	if e.StepName == "" {
+		return e.Err.Error()
+	}
+	return fmt.Sprintf("%s: %v", e.StepName, e.Err)
+}
+
+func (e *StopError) Unwrap() error { return e.Err }
+
+// Lines are what the shell shows after the install screen closes.
+func (e *StopError) Lines() []string {
+	out := []string{"Failed: " + e.Error()}
+	if e.Paused {
+		out = []string{fmt.Sprintf("Install paused at step %d of %d (%s).", e.StepNum, e.Total, e.StepName),
+			"Run sudo vpn install to continue."}
+	}
+	if e.RootLoginOff {
+		out = append(out, RootLoginOffNotice)
+	}
+	return out
+}
+
 // classifyRun describes execution progress. RunComplete means every step
-// finished; terminal lifecycle publication remains a separate requirement.
+// finished. Terminal lifecycle publication remains a separate requirement.
 func classifyRun(
 	steps []InstallStep, done, failed bool, current int,
 ) RunResult {
@@ -275,9 +318,9 @@ func classifyRun(
 				}
 			}
 		}
-		// Marked failed with no failed step recorded —
-		// impossible by construction; refuse to call it
-		// complete (fail-safe direction).
+		// Marked failed with no failed step recorded. Impossible
+		// by construction, so refuse to call it complete
+		// (fail-safe direction).
 		return RunResult{Outcome: RunFailed, Total: total,
 			Err: fmt.Errorf("install failed (step unknown)")}
 	}
@@ -296,7 +339,7 @@ func classifyRun(
 	}
 }
 
-// ── Unattended front-end (ruling iv plumbing) ────────────
+// ── Unattended front-end ─────────────────────────────────
 
 // RunInstallUnattended executes steps with no TUI: one plain
 // line per step to stdout, same runner, same ledger, same log

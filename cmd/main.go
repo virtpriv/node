@@ -48,7 +48,17 @@ func main() {
 		}
 	case cmdInstall:
 		if err := installer.RunInstall(opts, installui.Run); err != nil {
-			fmt.Fprintf(os.Stderr, "\n  Failed: %v\n", err)
+			// A paused install is not a failure, but it is not finished
+			// either, so the exit status stays 1.
+			var stop *installer.StopError
+			if errors.As(err, &stop) {
+				fmt.Fprintln(os.Stderr)
+				for _, line := range stop.Lines() {
+					fmt.Fprintf(os.Stderr, "  %s\n", line)
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "\n  Failed: %v\n", err)
+			}
 			os.Exit(1)
 		}
 	case cmdHelperd:

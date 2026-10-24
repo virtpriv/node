@@ -113,10 +113,16 @@ type wizardModel struct {
 	login           func() (bool, error)
 	loggedIn        bool
 	loginUnreadable bool
+	// asking is the question shown before leaving without a login, and
+	// askExit whether its Exit button is selected.
+	asking, askExit bool
+	// rootLoginOff follows the install record: before the run, then from
+	// the final event.
+	rootLoginOff bool
 }
 
 func newWizardModel(info installer.InstallView, session installSession, login func() (bool, error)) wizardModel {
-	m := wizardModel{info: info, session: session, steps: info.Steps, login: login,
+	m := wizardModel{info: info, session: session, steps: info.Steps, login: login, rootLoginOff: info.RootLoginOff,
 		stepFrom: make([]time.Time, len(info.Steps)), stepTook: make([]time.Duration, len(info.Steps))}
 	m.pwInput = newWizardPasswordInput("Password")
 	m.pwConfirm = newWizardPasswordInput("Confirm password")
@@ -242,6 +248,7 @@ func (m wizardModel) Update(
 		m.loginUnreadable = msg.err != nil
 		if msg.err == nil && msg.seen {
 			m.loggedIn = true
+			m.asking = false
 			return m, nil
 		}
 		return m, tea.Tick(loginEvery, func(time.Time) tea.Msg { return loginTick{} })
@@ -281,6 +288,16 @@ func (m wizardModel) Update(
 		return m.handlePaste(msg)
 
 	case tea.KeyPressMsg:
+		if m.phase == wzFinish && !m.loggedIn && msg.String() == "ctrl+c" {
+			// Every step is done, so root can no longer log in over SSH.
+			// Leaving goes through the question, as on the connect dialog.
+			m.phase = wzConnect
+			m.asking, m.askExit = true, false
+			return m, m.checkLogin()
+		}
+		if m.phase == wzConnect && !m.loggedIn {
+			return m.updateConnect(msg)
+		}
 		if msg.String() == "ctrl+c" {
 			if m.phase == wzSteps {
 				m.stopping = true
@@ -300,6 +317,32 @@ func (m wizardModel) Update(
 				return m, tea.Quit
 			}
 		}
+	}
+	return m, nil
+}
+
+// updateConnect asks once before leaving the connect dialog without a login,
+// because root can no longer log in over SSH.
+func (m wizardModel) updateConnect(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+	if !m.asking {
+		if key == "enter" || key == "ctrl+c" {
+			m.asking, m.askExit = true, false
+		}
+		return m, nil
+	}
+	switch key {
+	case "left":
+		m.askExit = false
+	case "right":
+		m.askExit = true
+	case "ctrl+c":
+		return m, tea.Quit
+	case "enter":
+		if m.askExit {
+			return m, tea.Quit
+		}
+		m.asking = false
 	}
 	return m, nil
 }
@@ -441,11 +484,15 @@ func (m wizardModel) updateSteps(msg wizardProgressMsg) (tea.Model, tea.Cmd) {
 	}
 	e := msg.event
 	if e.Final {
+		m.rootLoginOff = e.RootLoginOff
 		m.failed = e.Result.Outcome == installer.RunFailed
 		if e.CompletionErr != nil {
 			m.completeErr = e.CompletionErr.Error()
 		}
-		if m.stopping || e.Result.Outcome == installer.RunInterrupted {
+		// A pause asked for during the last step has nothing left to
+		// pause, so a complete install still goes on to the connect dialog.
+		complete := e.Result.Outcome == installer.RunComplete && m.completeErr == ""
+		if e.Result.Outcome == installer.RunInterrupted || (m.stopping && !complete) {
 			return m, tea.Quit
 		}
 		m.finished = time.Now()
@@ -658,15 +705,15 @@ func (m wizardModel) passwordDialog() []string {
 	} else {
 		body = append(body, indent+hint)
 	}
-	return dialog("Set the password for your node",
-		"Your owner account '"+paths.AdminUser+"' uses it to log in over SSH and for sudo. Use a password manager.",
+	return dialog("Choose a password",
+		"You use it to log in to your node. Keep it in a password manager.",
 		body, button("Exit", m.pwFocus == focusExit)+"  "+button("Start install", m.pwFocus == focusStart))
 }
 
 func (m wizardModel) connectDialog() []string {
 	ok := lipgloss.NewStyle().Foreground(theme.ColorSuccess)
 	if m.loggedIn {
-		return dialog("You are logged in", "Continue in your new terminal. You can close this one.",
+		return dialog("You are logged in", "Your node is open in the other terminal. You can close this one.",
 			[]string{ok.Render("✓") + " " + theme.Label.Render("Logged in as "+paths.AdminUser+" over SSH")},
 			button("Exit", true))
 	}
@@ -676,8 +723,13 @@ func (m wizardModel) connectDialog() []string {
 	if m.loginUnreadable {
 		status = "Could not read the login log"
 	}
-	return dialog("Connect to your node",
-		"Your node is installed. Open a new terminal and log in as "+paths.AdminUser+" with your password. Your node opens there.",
+	if m.asking {
+		return dialog("Leave without logging in?",
+			"Log in once first to check your password works. Root can no longer log in over SSH.",
+			[]string{target}, button("Wait", !m.askExit)+"  "+button("Exit", m.askExit))
+	}
+	return dialog("Your node is ready",
+		"Open a new terminal and run this command. Enter your password and your node opens.",
 		[]string{target, "", m.spinnerView() + " " + theme.Dim.Render(status)},
 		button("Exit", true))
 }
@@ -687,6 +739,9 @@ func (m wizardModel) endNotice() []string {
 	text := "Exit and inspect the reported problem. A later 'sudo vpn install' checks the saved state before resuming."
 	if m.failed {
 		text = "Installation stopped after a step failed. Inspect the reported problem before running 'sudo vpn install' again. It resumes from the first incomplete step."
+	}
+	if m.rootLoginOff {
+		text += " " + installer.RootLoginOffNotice
 	}
 	var out []string
 	if m.completeErr != "" {
@@ -712,6 +767,9 @@ func (m wizardModel) helpLine() string {
 	case wzDone:
 		return theme.Hints("⌃C", "quit")
 	case wzConnect:
+		if m.asking {
+			return theme.Hints("←→", "buttons", "↩", "select")
+		}
 		return theme.Hints("↩", "exit")
 	}
 	return ""

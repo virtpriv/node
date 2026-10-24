@@ -33,8 +33,9 @@ is rejected and cleared, rather than silently changing the password.
 
 The installer never opens the TUI. When installation finishes, it shows the
 `ssh` command and reads SSH's log every few seconds for a `vpn` login made
-after the installer started. Enter or Ctrl+C leaves it, and the command is
-printed again.
+after the installer started. Enter or Ctrl+C closes the installer and prints
+the command again. Before a login is seen, the installer first asks if you
+want to leave, because root can no longer log in over SSH.
 
 ## Bitcoin network profiles
 
