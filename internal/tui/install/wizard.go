@@ -3,6 +3,7 @@ package install
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -159,14 +160,17 @@ func newWizardPasswordInput(placeholder string) textinput.Model {
 	// width with the text style, so the shade reaches the field's end.
 	st := textinput.DefaultStyles(theme.IsDark())
 	for _, s := range []struct {
-		state *textinput.StyleState
-		shade string
-	}{{&st.Focused, "238"}, {&st.Blurred, "235"}} {
-		bg := lipgloss.Color(s.shade)
-		s.state.Text = s.state.Text.Foreground(theme.ColorPrimary).Background(bg)
-		s.state.Placeholder = s.state.Placeholder.Foreground(theme.ColorFaint).Background(bg)
-		s.state.Prompt = s.state.Prompt.Background(bg)
+		state       *textinput.StyleState
+		shade, hint color.Color
+	}{
+		{&st.Focused, theme.ColorInstallShade, theme.ColorInstallHint},
+		{&st.Blurred, theme.ColorInstallShadeDim, theme.ColorFieldHint},
+	} {
+		s.state.Text = s.state.Text.Foreground(theme.ColorPrimary).Background(s.shade)
+		s.state.Placeholder = s.state.Placeholder.Foreground(s.hint).Background(s.shade)
+		s.state.Prompt = s.state.Prompt.Background(s.shade)
 	}
+	st.Cursor.Color = theme.ColorFieldCursor
 	ti.SetStyles(st)
 	ti.SetWidth(fieldW - 2)
 	return ti
@@ -182,9 +186,9 @@ func passwordField(in textinput.Model, focused bool) string {
 	if focused {
 		return in.View()
 	}
-	shade := lipgloss.NewStyle().Background(lipgloss.Color("235")).Width(fieldW)
+	shade := lipgloss.NewStyle().Background(theme.ColorInstallShadeDim).Width(fieldW)
 	if in.Value() == "" {
-		return shade.Foreground(theme.ColorFaint).Render(" " + in.Placeholder)
+		return shade.Foreground(theme.ColorFieldHint).Render(" " + in.Placeholder)
 	}
 	masked := strings.Repeat(string(in.EchoCharacter), min(utf8.RuneCountInString(in.Value()), fieldW-2))
 	return shade.Foreground(theme.ColorPrimary).Render(" " + masked)
@@ -717,8 +721,8 @@ func (m wizardModel) connectDialog() []string {
 			[]string{ok.Render("✓") + " " + theme.Label.Render("Logged in as "+paths.AdminUser+" over SSH")},
 			button("Exit", true))
 	}
-	target := lipgloss.NewStyle().Background(lipgloss.Color("238")).Width(dialogW - 8).
-		Render(" " + lipgloss.NewStyle().Bold(true).Foreground(theme.ColorPrimary).Background(lipgloss.Color("238")).Render(m.sshTarget()))
+	target := lipgloss.NewStyle().Background(theme.ColorInstallShade).Width(dialogW - 8).
+		Render(" " + lipgloss.NewStyle().Bold(true).Foreground(theme.ColorPrimary).Background(theme.ColorInstallShade).Render(m.sshTarget()))
 	status := "Waiting for your login"
 	if m.loginUnreadable {
 		status = "Could not read the login log"

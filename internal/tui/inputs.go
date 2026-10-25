@@ -5,11 +5,12 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 // ── Character filters ────────────────────────────────────
 // These accept incomplete input while typing. They do not establish semantic
-// validity; operation boundaries must validate the completed values.
+// validity. Operation boundaries must validate the completed values.
 
 func isBolt11Char(ch rune) bool {
 	return (ch >= 'a' && ch <= 'z') ||
@@ -73,9 +74,58 @@ func (errInvalidChar) Error() string { return "invalid character" }
 
 // ── Input styles ─────────────────────────────────────────
 
+// applyInputStyles gives a field the theme's colors. A focused field's text
+// has no color of its own, so it takes the window's text color.
 func applyInputStyles(ti *textinput.Model) {
-	s := textinput.DefaultStyles(true) // true = dark background
+	s := textinput.DefaultStyles(theme.IsDark())
+	for _, st := range []*textinput.StyleState{&s.Focused, &s.Blurred} {
+		st.Placeholder = st.Placeholder.Foreground(theme.ColorFieldHint)
+		st.Prompt = st.Prompt.Foreground(theme.ColorFieldText)
+	}
+	s.Blurred.Text = s.Blurred.Text.Foreground(theme.ColorFieldText)
+	s.Cursor.Color = theme.ColorFieldCursor
 	ti.SetStyles(s)
+}
+
+// restyleScreenFields gives an open screen's fields the current theme's
+// colors. A field keeps the colors it was made with, so a theme switch passes
+// every open screen through here. A screen that gets a field joins this list.
+// Only the colors change. The text, the cursor position and the focus stay.
+func restyleScreenFields(screen Screen) {
+	var fields []*textinput.Model
+	switch s := screen.(type) {
+	case *OnChainSendScreen:
+		fields = []*textinput.Model{&s.addrInput, &s.amtInput.ti, &s.labelInput, &s.feeInput.ti}
+	case *OnChainHomeScreen:
+		fields = []*textinput.Model{&s.labelInput}
+	case *SendScreen:
+		fields = []*textinput.Model{&s.sendInput}
+	case *ReceiveScreen:
+		fields = []*textinput.Model{&s.amountInput.ti, &s.memoInput}
+	case *ChannelOpenScreen:
+		fields = []*textinput.Model{&s.pubkeyInput, &s.hostInput, &s.amountInput.ti, &s.feeInput.ti}
+	case *ChannelCloseScreen:
+		fields = []*textinput.Model{&s.feeInput.ti}
+	case *ChannelDetailScreen:
+		if s.closeScreen != nil {
+			restyleScreenFields(s.closeScreen)
+		}
+	case *SyncthingPairScreen:
+		fields = []*textinput.Model{&s.input}
+	case *SSHKeyAddScreen:
+		fields = []*textinput.Model{&s.keyInput}
+	case *AutoUnlockScreen:
+		fields = []*textinput.Model{&s.pw1, &s.pw2}
+	case *P2PUpgradeScreen:
+		fields = []*textinput.Model{&s.input}
+	case *NodeUpdateScreen:
+		if s.releaseInput != nil {
+			fields = []*textinput.Model{s.releaseInput}
+		}
+	}
+	for _, field := range fields {
+		applyInputStyles(field)
+	}
 }
 
 // ── Factory functions ────────────────────────────────────

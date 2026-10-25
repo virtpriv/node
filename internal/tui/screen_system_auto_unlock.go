@@ -106,7 +106,6 @@ func newAutoUnlockPwInput() textinput.Model {
 	ti.CharLimit = 256
 	ti.SetWidth(40)
 	ti.EchoMode = textinput.EchoPassword
-	ti.EchoCharacter = '•'
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
 	return ti
