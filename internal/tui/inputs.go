@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
+	"charm.land/lipgloss/v2"
 	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/theme"
 )
@@ -74,16 +75,19 @@ func (errInvalidChar) Error() string { return "invalid character" }
 
 // ── Input styles ─────────────────────────────────────────
 
-// applyInputStyles gives a field the theme's colors. A focused field's text
-// has no color of its own, so it takes the window's text color.
+// applyInputStyles gives a field the theme's colors. Typed text and the prompt
+// take the value color whether the field has focus or not, so only hints are
+// dim. The installer's password fields use the same typed text, hint and
+// cursor colors. The cursor, and the marker on screens that draw one beside a
+// field, show which field has focus.
 func applyInputStyles(ti *textinput.Model) {
 	s := textinput.DefaultStyles(theme.IsDark())
 	for _, st := range []*textinput.StyleState{&s.Focused, &s.Blurred} {
-		st.Placeholder = st.Placeholder.Foreground(theme.ColorFieldHint)
-		st.Prompt = st.Prompt.Foreground(theme.ColorFieldText)
+		st.Text = lipgloss.NewStyle().Foreground(theme.ColorPrimary)
+		st.Prompt = lipgloss.NewStyle().Foreground(theme.ColorPrimary)
+		st.Placeholder = st.Placeholder.Foreground(theme.ColorDim)
 	}
-	s.Blurred.Text = s.Blurred.Text.Foreground(theme.ColorFieldText)
-	s.Cursor.Color = theme.ColorFieldCursor
+	s.Cursor.Color = theme.ColorCursor
 	ti.SetStyles(s)
 }
 
@@ -249,9 +253,9 @@ func validateOnChainAddrChars(s string) error {
 	return nil
 }
 
-// newDetailField creates a textinput for displaying a
-// value in a detail pane. The field is full-width and
-// scrollable. All fields start blurred.
+// newDetailField creates a field for editing a value in
+// place, such as a transaction's label, at the width the
+// caller gives. It starts without focus.
 func newDetailField(value string, w int) textinput.Model {
 	ti := textinput.New()
 	ti.Prompt = ""

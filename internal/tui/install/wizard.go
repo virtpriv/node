@@ -164,13 +164,13 @@ func newWizardPasswordInput(placeholder string) textinput.Model {
 		shade, hint color.Color
 	}{
 		{&st.Focused, theme.ColorInstallShade, theme.ColorInstallHint},
-		{&st.Blurred, theme.ColorInstallShadeDim, theme.ColorFieldHint},
+		{&st.Blurred, theme.ColorInstallShadeDim, theme.ColorDim},
 	} {
 		s.state.Text = s.state.Text.Foreground(theme.ColorPrimary).Background(s.shade)
 		s.state.Placeholder = s.state.Placeholder.Foreground(s.hint).Background(s.shade)
-		s.state.Prompt = s.state.Prompt.Background(s.shade)
+		s.state.Prompt = s.state.Prompt.Foreground(theme.ColorPrimary).Background(s.shade)
 	}
-	st.Cursor.Color = theme.ColorFieldCursor
+	st.Cursor.Color = theme.ColorCursor
 	ti.SetStyles(st)
 	ti.SetWidth(fieldW - 2)
 	return ti
@@ -188,7 +188,7 @@ func passwordField(in textinput.Model, focused bool) string {
 	}
 	shade := lipgloss.NewStyle().Background(theme.ColorInstallShadeDim).Width(fieldW)
 	if in.Value() == "" {
-		return shade.Foreground(theme.ColorFieldHint).Render(" " + in.Placeholder)
+		return shade.Foreground(theme.ColorDim).Render(" " + in.Placeholder)
 	}
 	masked := strings.Repeat(string(in.EchoCharacter), min(utf8.RuneCountInString(in.Value()), fieldW-2))
 	return shade.Foreground(theme.ColorPrimary).Render(" " + masked)

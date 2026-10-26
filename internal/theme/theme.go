@@ -15,7 +15,7 @@ import (
 var dark = true
 
 // Init sets the initial theme mode and rebuilds all
-// colors and styles. Call once from NewModel.
+// colors and styles. Call once when a program starts.
 func Init(isDark bool) {
 	dark = isDark
 	applyColors()
@@ -37,9 +37,9 @@ func Toggle() string {
 // IsDark returns the current mode.
 func IsDark() bool { return dark }
 
-// ThemeIcon returns the icon for the theme toggle.
-// Shows what you'd switch TO: ☼ when dark (switch to
-// light), ☽ when light (switch to dark).
+// ThemeIcon returns the icon for the theme toggle. It
+// shows the theme a press switches to, ☼ in dark for
+// light and ☽ in light for dark.
 func ThemeIcon() string {
 	if dark {
 		return "☼"
@@ -80,13 +80,6 @@ var (
 	ColorCheck  = lipgloss.Color("34")
 	ColorUpdate = lipgloss.Color("34")
 
-	// Text fields: the text of a field without focus (typed password
-	// characters too) and every field's prompt, a field's hint text and its
-	// cursor. A focused field's text takes ColorText.
-	ColorFieldText   = lipgloss.Color("248")
-	ColorFieldHint   = lipgloss.Color("246")
-	ColorFieldCursor = lipgloss.Color("251")
-
 	// ColorBackground and ColorText are the window's own colors while the
 	// program runs: the terminal's background and its default text color,
 	// which text with no role of its own takes. Bubble Tea sets them through
@@ -97,9 +90,9 @@ var (
 )
 
 // The installer's shaded boxes (the selected password field and the login
-// command, then the other field) and the hint text in the selected field. The
-// other field's hint is ColorFieldHint. The installer is always dark, so these
-// have dark values only.
+// command, then the other field) and the hint text in the selected field,
+// lighter than ColorDim because its box is lighter. The installer is always
+// dark, so these have dark values only.
 var (
 	ColorInstallShade    = lipgloss.Color("238")
 	ColorInstallShadeDim = lipgloss.Color("235")
@@ -127,9 +120,6 @@ func applyColors() {
 		ColorChanRemoteDim = lipgloss.Color("240")
 		ColorCheck = lipgloss.Color("34")
 		ColorUpdate = lipgloss.Color("34")
-		ColorFieldText = lipgloss.Color("248")
-		ColorFieldHint = lipgloss.Color("246")
-		ColorFieldCursor = lipgloss.Color("251")
 		ColorBackground = lipgloss.Color("234")
 		ColorText = lipgloss.Color("253")
 	} else {
@@ -152,9 +142,6 @@ func applyColors() {
 		ColorChanRemoteDim = lipgloss.Color("245")
 		ColorCheck = lipgloss.Color("28")
 		ColorUpdate = lipgloss.Color("28")
-		ColorFieldText = lipgloss.Color("238")
-		ColorFieldHint = lipgloss.Color("241")
-		ColorFieldCursor = lipgloss.Color("236")
 		ColorBackground = lipgloss.Color("255")
 		ColorText = lipgloss.Color("234")
 	}
