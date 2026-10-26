@@ -4,12 +4,14 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
+	"charm.land/lipgloss/v2"
 	"github.com/virtpriv/node/internal/config"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 // ── Character filters ────────────────────────────────────
 // These accept incomplete input while typing. They do not establish semantic
-// validity; operation boundaries must validate the completed values.
+// validity. Operation boundaries must validate the completed values.
 
 func isBolt11Char(ch rune) bool {
 	return (ch >= 'a' && ch <= 'z') ||
@@ -73,9 +75,61 @@ func (errInvalidChar) Error() string { return "invalid character" }
 
 // ── Input styles ─────────────────────────────────────────
 
+// applyInputStyles gives a field the theme's colors. Typed text and the prompt
+// take the value color whether the field has focus or not, so only hints are
+// dim. The installer's password fields use the same typed text, hint and
+// cursor colors. The cursor, and the marker on screens that draw one beside a
+// field, show which field has focus.
 func applyInputStyles(ti *textinput.Model) {
-	s := textinput.DefaultStyles(true) // true = dark background
+	s := textinput.DefaultStyles(theme.IsDark())
+	for _, st := range []*textinput.StyleState{&s.Focused, &s.Blurred} {
+		st.Text = lipgloss.NewStyle().Foreground(theme.ColorPrimary)
+		st.Prompt = lipgloss.NewStyle().Foreground(theme.ColorPrimary)
+		st.Placeholder = st.Placeholder.Foreground(theme.ColorDim)
+	}
+	s.Cursor.Color = theme.ColorCursor
 	ti.SetStyles(s)
+}
+
+// restyleScreenFields gives an open screen's fields the current theme's
+// colors. A field keeps the colors it was made with, so a theme switch passes
+// every open screen through here. A screen that gets a field joins this list.
+// Only the colors change. The text, the cursor position and the focus stay.
+func restyleScreenFields(screen Screen) {
+	var fields []*textinput.Model
+	switch s := screen.(type) {
+	case *OnChainSendScreen:
+		fields = []*textinput.Model{&s.addrInput, &s.amtInput.ti, &s.labelInput, &s.feeInput.ti}
+	case *OnChainHomeScreen:
+		fields = []*textinput.Model{&s.labelInput}
+	case *SendScreen:
+		fields = []*textinput.Model{&s.sendInput}
+	case *ReceiveScreen:
+		fields = []*textinput.Model{&s.amountInput.ti, &s.memoInput}
+	case *ChannelOpenScreen:
+		fields = []*textinput.Model{&s.pubkeyInput, &s.hostInput, &s.amountInput.ti, &s.feeInput.ti}
+	case *ChannelCloseScreen:
+		fields = []*textinput.Model{&s.feeInput.ti}
+	case *ChannelDetailScreen:
+		if s.closeScreen != nil {
+			restyleScreenFields(s.closeScreen)
+		}
+	case *SyncthingPairScreen:
+		fields = []*textinput.Model{&s.input}
+	case *SSHKeyAddScreen:
+		fields = []*textinput.Model{&s.keyInput}
+	case *AutoUnlockScreen:
+		fields = []*textinput.Model{&s.pw1, &s.pw2}
+	case *P2PUpgradeScreen:
+		fields = []*textinput.Model{&s.input}
+	case *NodeUpdateScreen:
+		if s.releaseInput != nil {
+			fields = []*textinput.Model{s.releaseInput}
+		}
+	}
+	for _, field := range fields {
+		applyInputStyles(field)
+	}
 }
 
 // ── Factory functions ────────────────────────────────────
@@ -199,9 +253,9 @@ func validateOnChainAddrChars(s string) error {
 	return nil
 }
 
-// newDetailField creates a textinput for displaying a
-// value in a detail pane. The field is full-width and
-// scrollable. All fields start blurred.
+// newDetailField creates a field for editing a value in
+// place, such as a transaction's label, at the width the
+// caller gives. It starts without focus.
 func newDetailField(value string, w int) textinput.Model {
 	ti := textinput.New()
 	ti.Prompt = ""

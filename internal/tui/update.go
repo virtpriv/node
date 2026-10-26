@@ -821,6 +821,12 @@ func (m Model) handleSidebarKey(
 				m.prefs.Theme = mode
 				m.savePreferences()
 				m.nav.UpdateThemeLabel()
+				for _, screen := range m.sectionScreens {
+					restyleScreenFields(screen)
+				}
+				for _, tab := range m.tabs {
+					restyleScreenFields(tab.Screen)
+				}
 			}
 			return m, nil
 		}
