@@ -104,13 +104,6 @@ func RunPreflight() (host.SSHObservation, error) {
 			failed++
 		}
 	}
-	// Warnings never refuse. They are printed and logged so the owner can
-	// judge them.
-	for _, w := range preflightWarnings() {
-		fmt.Fprintf(os.Stderr, "\n  WARNING: %s\n", w)
-		logger.Install("Preflight WARNING: %s", w)
-	}
-
 	if failed == 0 {
 		logger.Install("Preflight passed (%d/%d checks)",
 			len(results), len(results))
@@ -185,21 +178,6 @@ func checkDebianArchitecture() error {
 		return fmt.Errorf("cannot determine Debian architecture: %w", err)
 	}
 	return checkArchitecture(strings.TrimSpace(string(out)))
-}
-
-// preflightWarnings collects conditions worth telling the
-// operator about that are not grounds for refusal.
-func preflightWarnings() []string {
-	var ws []string
-	// Directory readability exposes names, not the contents of protected rules.
-	// Preserve host-managed directory permissions and report the deviation.
-	if fi, err := os.Stat(paths.SudoersDir); err == nil &&
-		fi.Mode().Perm()&0o004 != 0 {
-		ws = append(ws, fmt.Sprintf(
-			"%s has mode %o, while the certified Debian baseline uses 750. VPN leaves host-managed permissions unchanged.",
-			paths.SudoersDir, fi.Mode().Perm()))
-	}
-	return ws
 }
 
 // ── Check 1: OS ──────────────────────────────────────────
@@ -318,11 +296,9 @@ func sudoAbsent(status string, exit int, program bool) bool {
 }
 
 // listSudoersDropIns lists the files sudo's @includedir would parse. As
-// root it reads the directory directly. An earlier `sudo find` workaround,
-// needed because /etc/sudoers.d is 750 root:root on Debian 13 and the check
-// then ran without root, is gone. A missing directory means nothing to scan,
-// and any other failure refuses. Subdirectories are skipped because sudo's
-// includedir reads regular files only.
+// root it reads the directory directly. A missing directory means nothing
+// to scan, and any other failure refuses. Subdirectories are skipped because
+// sudo's includedir reads regular files only.
 func listSudoersDropIns(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
