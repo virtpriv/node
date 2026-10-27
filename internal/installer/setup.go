@@ -45,11 +45,6 @@ type InstallOptions struct {
 	// Unattended runs without a TUI or prompts and generates a login password.
 	// SSH keys are configured by the owner after installation.
 	Unattended bool
-	// UntilBake runs only PhaseBake steps, for building an image. It
-	// requires Unattended. The run ends without terminal ledger status,
-	// handoff or verification banner, because first-boot steps are still
-	// owed.
-	UntilBake bool
 }
 
 // installStartupDependencies keeps the lifecycle authorization boundary
@@ -63,7 +58,7 @@ type installStartupDependencies struct {
 	lookup              identityLookup
 	acquireRunLock      func(string, string) (*os.File, error)
 	classifyLifecycle   func(lifecycleFS, identityLookup) (lifecycleState, error)
-	runPreflight        func(checkMachine bool) (host.SSHObservation, error)
+	runPreflight        func() (host.SSHObservation, error)
 	initializeLifecycle func(lifecycleFS, identityLookup, installContext) (*installLedger, error)
 }
 
@@ -87,10 +82,6 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	if os.Geteuid() != 0 {
 		return errors.New(
 			"the installer must run as root, run: sudo vpn install")
-	}
-	if opts.UntilBake && !opts.Unattended {
-		return errors.New(
-			"--until=bake requires --unattended (image build path)")
 	}
 
 	// Package operations run without prompts for the whole run, as the
@@ -134,7 +125,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	}
 
 	// Preflight is read-only and precedes every durable initialization.
-	_, err = deps.runPreflight(!opts.UntilBake)
+	_, err = deps.runPreflight()
 	if err != nil {
 		return err
 	}
@@ -166,10 +157,6 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 			"--%s conflicts with the interrupted install network %q, drop the flag to resume the recorded lifecycle",
 			opts.Network, ledger.Context.Network)
 	}
-	if lifecycle.Disposition == lifecycleCompletionPending && opts.UntilBake {
-		return errors.New(
-			"base installation is awaiting finalization, resume without --until=bake")
-	}
 
 	// General configuration is reconstructed from immutable lifecycle context
 	// and fresh observations. It is not installation-completion authority.
@@ -182,13 +169,9 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 		cfg.DbCache = dec.DbCacheMB
 	}
 
-	allSteps := buildInstallSteps(cfg, dec)
-	if err := validateBaseInstallSteps(allSteps); err != nil {
+	steps := buildInstallSteps(cfg, dec)
+	if err := validateBaseInstallSteps(steps); err != nil {
 		return err
-	}
-	steps := allSteps
-	if opts.UntilBake {
-		steps = FilterPhase(steps, PhaseBake)
 	}
 
 	persistDbCache := func(v int) error {
@@ -203,7 +186,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 		return nil
 	}
 	completeInteractive := func() error {
-		if err := prepareInstallCompletion(cfg, dec, ledger, len(allSteps)); err != nil {
+		if err := prepareInstallCompletion(cfg, dec, ledger, len(steps)); err != nil {
 			return err
 		}
 		return publishTerminalLedger(ledger)
@@ -229,7 +212,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	}
 
 	if lifecycle.Disposition == lifecycleCompletionPending {
-		res = RunResult{Outcome: RunComplete, Total: len(allSteps)}
+		res = RunResult{Outcome: RunComplete, Total: len(steps)}
 	} else if opts.Unattended {
 		fmt.Printf("\n  Virtual Private Node, unattended install\n\n")
 		res, err = RunInstallUnattended(
@@ -265,20 +248,9 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 		return &StopError{Paused: true, StepName: res.StepName, StepNum: res.StepNum, Total: res.Total}
 	}
 
-	if opts.UntilBake {
-		// The bake slice completing is not the install completing. The
-		// first-boot steps (identity, SSH hardening and the rest) are still
-		// owed on the deployed machine.
-		logger.Install(
-			"bake phase complete (%d steps), install NOT marked "+
-				"complete, first-boot steps pending", res.Total)
-		fmt.Printf("\n  Bake phase complete (%d steps).\n", res.Total)
-		return nil
-	}
-
 	if opts.Unattended {
 		if err := prepareInstallCompletion(
-			cfg, dec, ledger, len(allSteps)); err != nil {
+			cfg, dec, ledger, len(steps)); err != nil {
 			return err
 		}
 		if needsPasswordReapply(dec.GeneratedPassword,
@@ -438,11 +410,8 @@ var (
 
 // buildInstallSteps returns the initial install step list. Every step
 // carries a stable Key, its identity in the ledger without a version, a Kind
-// (gates run again on every pass), a Group where steps hand temporary
-// material to each other (see engine.go), and a Phase, bake or first-boot.
-// The phases are provisional until the image work settles them. Identity
-// and SSH steps run at first boot, because they apply facts about the
-// deployed machine that an image build cannot know.
+// (gates run again on every pass) and a Group where steps hand temporary
+// material to each other (see engine.go).
 //
 // The firewall step comes right after the single apt operation outside Tor,
 // so denying incoming traffic is in place before anything else. Outgoing
@@ -472,7 +441,7 @@ func buildInstallSteps(
 		{Key: "host.prep",
 			Name: "Checking the host name and clock sync",
 			Fn:   host.PrepareBaseHost},
-		{Key: "identity.access", Phase: PhaseFirstBoot,
+		{Key: "identity.access",
 			Name: "Creating your " + paths.AdminUser + " user account",
 			Fn: func() error {
 				return applyIdentityAccess(dec)
@@ -632,20 +601,20 @@ func buildInstallSteps(
 		// Checks the owner's sudo first, then turns root's SSH login off and
 		// the owner's password login on. The root session running the
 		// install stays open, so the later steps run in it.
-		{Key: rootLoginOffStep, Phase: PhaseFirstBoot,
+		{Key: rootLoginOffStep,
 			Name: "Turning off root login over SSH",
 			Fn: func() error {
 				return installSSHHardening()
 			}},
 		// The unprivileged TUI uses fixed helper operations. The owner can
 		// separately authenticate with sudo for general host maintenance.
-		{Key: "journal.access", Phase: PhaseFirstBoot,
+		{Key: "journal.access",
 			Name: "Giving your " + paths.AdminUser + " user access to system logs",
 			Fn:   host.SetupJournalAccess},
-		{Key: "helper.enable", Phase: PhaseFirstBoot,
+		{Key: "helper.enable",
 			Name: "Starting the node's root helper",
 			Fn:   host.InstallHelperUnits},
-		{Key: "state.stage", Phase: PhaseFirstBoot,
+		{Key: "state.stage",
 			Name: "Staging files for the TUI",
 			Fn:   StageBoardAll},
 		// Once a special case after the TUI that warned but completed

@@ -92,23 +92,32 @@ func TestLedgerAcceptsEverySupportedImmutableProfile(t *testing.T) {
 	}
 }
 
-func TestLedgerAcceptsBakeProgressAndFullResumeUnion(t *testing.T) {
+// An install records its steps in list order, and a resumed run continues
+// that order, so the steps done are always the first steps of the list.
+func TestLedgerAcceptsOnlyTheFirstStepsInOrder(t *testing.T) {
+	for n := 0; n <= len(baseInstallStepKeys); n++ {
+		l := testLedger()
+		for _, key := range baseInstallStepKeys[:n] {
+			if err := l.markDone(key, "0.7.0"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := validateLedger(l); err != nil {
+			t.Fatalf("first %d steps refused: %v", n, err)
+		}
+	}
+	// The first six steps without the owner account, which no install writes.
 	l := testLedger()
-	for _, key := range bakeInstallStepKeys {
-		if err := l.markDone(key, "0.7.0"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := validateLedger(l); err != nil {
-		t.Fatalf("completed bake state refused: %v", err)
-	}
 	for _, key := range baseInstallStepKeys[:6] {
+		if key == "identity.access" {
+			continue
+		}
 		if err := l.markDone(key, "0.7.0"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := validateLedger(l); err != nil {
-		t.Fatalf("bake plus full-resume prefix refused: %v", err)
+	if err := validateLedger(l); err == nil {
+		t.Fatal("steps with a gap accepted")
 	}
 }
 

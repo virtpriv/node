@@ -12,15 +12,11 @@ import (
 
 // StageBoardAll builds the complete board at install time:
 // every fact that exists on this box right now. Facts whose
-// source does not exist yet are SKIPPED, not failed; a fresh
+// source does not exist yet are SKIPPED, not failed. A fresh
 // box has no wallet macaroon until the operator creates the
 // wallet (that moment stages it), and no Syncthing facts until
 // Syncthing is installed.
 func StageBoardAll() error {
-	if err := host.FixBoardOwnership(); err != nil {
-		return err
-	}
-
 	type fact struct {
 		name string
 		fn   func() error

@@ -80,7 +80,7 @@ func snapshotProtectedTree(t *testing.T, root string) []byte {
 
 func installStartupFixture(
 	t *testing.T, f *lifecycleFixture,
-	preflight func(checkMachine bool) (host.SSHObservation, error),
+	preflight func() (host.SSHObservation, error),
 ) (*int, *int) {
 	t.Helper()
 	preflightCalls := 0
@@ -91,9 +91,9 @@ func installStartupFixture(
 	deps.installLock = filepath.Join(deps.runtimeDir, "install.lock")
 	deps.fs = f.fs
 	deps.lookup = f.lookup
-	deps.runPreflight = func(checkMachine bool) (host.SSHObservation, error) {
+	deps.runPreflight = func() (host.SSHObservation, error) {
 		preflightCalls++
-		return preflight(checkMachine)
+		return preflight()
 	}
 	deps.initializeLifecycle = func(
 		lifecycleFS, identityLookup, installContext,
@@ -165,7 +165,7 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 		root := filepath.Dir(f.fs.varLibVPN)
 		before := snapshotProtectedTree(t, root)
 		preflightCalls, initializeCalls := installStartupFixture(
-			t, f, func(bool) (host.SSHObservation, error) {
+			t, f, func() (host.SSHObservation, error) {
 				return host.SSHObservation{}, errors.New("unexpected preflight")
 			})
 
@@ -225,7 +225,7 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 			root := filepath.Dir(f.fs.varLibVPN)
 			before := snapshotProtectedTree(t, root)
 			preflightCalls, initializeCalls := installStartupFixture(
-				t, f, func(bool) (host.SSHObservation, error) {
+				t, f, func() (host.SSHObservation, error) {
 					return host.SSHObservation{}, errors.New("unexpected preflight")
 				})
 
@@ -248,7 +248,7 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 		root := filepath.Dir(f.fs.varLibVPN)
 		before := snapshotProtectedTree(t, root)
 		preflightCalls, initializeCalls := installStartupFixture(
-			t, f, func(bool) (host.SSHObservation, error) {
+			t, f, func() (host.SSHObservation, error) {
 				return host.SSHObservation{}, checkArchitecture("arm64")
 			})
 
@@ -267,54 +267,11 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 	})
 }
 
-// The image build runs on a builder machine whose memory and disk say
-// nothing about the machine the image is deployed to. The machine checks
-// run on every other pass, including first boot on the real machine.
-func TestRootPreflightChecksTheMachineExceptAtBake(t *testing.T) {
-	requireRootTestEnvironment(t)
-	for _, tc := range []struct {
-		name string
-		opts InstallOptions
-		want bool
-	}{
-		{"interactive", InstallOptions{}, true},
-		{"unattended", InstallOptions{Unattended: true}, true},
-		{"image build", InstallOptions{Unattended: true, UntilBake: true}, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newLifecycleFixture(t)
-			stop := errors.New("stop after preflight")
-			checked := !tc.want
-			installStartupFixture(t, f, func(checkMachine bool) (host.SSHObservation, error) {
-				checked = checkMachine
-				return host.SSHObservation{}, stop
-			})
-			if err := RunInstall(tc.opts, unexpectedInstallFrontend(t)); !errors.Is(err, stop) {
-				t.Fatalf("install did not stop at preflight: %v", err)
-			}
-			if checked != tc.want {
-				t.Fatalf("machine checked %v, want %v", checked, tc.want)
-			}
-		})
-	}
-}
-
 func TestBaseInstallStepsMatchLedgerSchema(t *testing.T) {
 	cfg := config.Default()
 	steps := buildInstallSteps(cfg, &InstallDecisions{})
 	if err := validateBaseInstallSteps(steps); err != nil {
 		t.Fatal(err)
-	}
-	bake := FilterPhase(steps, PhaseBake)
-	if len(bake) != len(bakeInstallStepKeys) {
-		t.Fatalf("bake steps=%d schema keys=%d",
-			len(bake), len(bakeInstallStepKeys))
-	}
-	for i := range bake {
-		if bake[i].Key != bakeInstallStepKeys[i] {
-			t.Fatalf("bake step %d=%q schema=%q", i+1,
-				bake[i].Key, bakeInstallStepKeys[i])
-		}
 	}
 }
 
@@ -331,64 +288,46 @@ func unexpectedInstallFrontend(t *testing.T) InstallFrontend {
 	}
 }
 
+// stepIndex finds a step in the install list by its key.
+func stepIndex(t *testing.T, key string) int {
+	t.Helper()
+	for i, s := range buildInstallSteps(config.Default(), &InstallDecisions{}) {
+		if s.Key == key {
+			return i
+		}
+	}
+	t.Fatalf("step %q is missing", key)
+	return -1
+}
+
 // On a stale image the package upgrade is a large download. It must wait
-// until apt has been told to use Tor, in the full install and in an image
-// build alike, and the firewall must still come up right after the only
-// package step that runs without Tor.
+// until apt has been told to use Tor, and the firewall must still come up
+// right after the only package step that runs without Tor.
 func TestPackageUpgradeRunsBehindTorAndFirewallStaysFirst(t *testing.T) {
-	steps := buildInstallSteps(config.Default(), &InstallDecisions{})
-	for name, list := range map[string][]InstallStep{"full": steps, "bake": FilterPhase(steps, PhaseBake)} {
-		t.Run(name, func(t *testing.T) {
-			at := func(key string) int {
-				t.Helper()
-				for i, s := range list {
-					if s.Key == key {
-						return i
-					}
-				}
-				t.Fatalf("step %q is missing", key)
-				return -1
-			}
-			if at("firewall") != at("apt.base")+1 {
-				t.Fatal("the firewall no longer follows the first package step directly")
-			}
-			if at("apt.torproxy") < at("tor.gate") {
-				t.Fatal("apt is sent through Tor before Tor routing is verified")
-			}
-			if at("base.upgrade") < at("apt.torproxy") {
-				t.Fatal("the package upgrade runs before apt uses Tor")
-			}
-			if at("btc.download") < at("base.upgrade") {
-				t.Fatal("the package upgrade runs after the node software downloads")
-			}
-		})
+	at := func(key string) int { return stepIndex(t, key) }
+	if at("firewall") != at("apt.base")+1 {
+		t.Fatal("the firewall no longer follows the first package step directly")
+	}
+	if at("apt.torproxy") < at("tor.gate") {
+		t.Fatal("apt is sent through Tor before Tor routing is verified")
+	}
+	if at("base.upgrade") < at("apt.torproxy") {
+		t.Fatal("the package upgrade runs before apt uses Tor")
+	}
+	if at("btc.download") < at("base.upgrade") {
+		t.Fatal("the package upgrade runs after the node software downloads")
 	}
 }
 
 // Compressed swap is a Debian package, so it comes after apt uses Tor, and it
-// is on before Bitcoin Core starts its first sync, in a full install and in an
-// image build alike.
+// is on before Bitcoin Core starts its first sync.
 func TestCompressedSwapComesBeforeBitcoinCore(t *testing.T) {
-	steps := buildInstallSteps(config.Default(), &InstallDecisions{})
-	for name, list := range map[string][]InstallStep{"full": steps, "bake": FilterPhase(steps, PhaseBake)} {
-		t.Run(name, func(t *testing.T) {
-			at := func(key string) int {
-				t.Helper()
-				for i, s := range list {
-					if s.Key == key {
-						return i
-					}
-				}
-				t.Fatalf("step %q is missing", key)
-				return -1
-			}
-			if at("swap.zram") != at("base.upgrade")+1 {
-				t.Fatal("compressed swap does not follow the package upgrade directly")
-			}
-			if at("btc.download") != at("swap.zram")+1 {
-				t.Fatal("compressed swap is not set up just before Bitcoin Core")
-			}
-		})
+	at := func(key string) int { return stepIndex(t, key) }
+	if at("swap.zram") != at("base.upgrade")+1 {
+		t.Fatal("compressed swap does not follow the package upgrade directly")
+	}
+	if at("btc.download") != at("swap.zram")+1 {
+		t.Fatal("compressed swap is not set up just before Bitcoin Core")
 	}
 }
 

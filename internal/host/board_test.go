@@ -37,38 +37,9 @@ func assertBoardMetadata(t *testing.T, path string, mode os.FileMode) {
 	}
 }
 
-func TestBoardBakePublicationAndFirstBootOwnership(t *testing.T) {
-	requireStagingRoot(t)
-	b := stagingBoard{dir: filepath.Join(t.TempDir(), "state")}
-	if err := b.write("credential", []byte("baked"), os.Rename); err != nil {
-		t.Fatal(err)
-	}
-	assertBoardMetadata(t, b.dir, 0o700)
-	path := filepath.Join(b.dir, "credential")
-	assertBoardMetadata(t, path, 0o600)
-	if err := b.fixOwnership(); err == nil {
-		t.Fatal("ownership repair succeeded without admin group")
-	}
-	// The container may map only root. Real vpn-group access is a Debian gate.
-	b.haveGroup = true
-	if err := b.fixOwnership(); err != nil {
-		t.Fatal(err)
-	}
-	assertBoardMetadata(t, b.dir, 0o750)
-	assertBoardMetadata(t, path, 0o640)
-	if err := b.write("credential", []byte("current"), os.Rename); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil || string(data) != "current" {
-		t.Fatalf("data=%q err=%v", data, err)
-	}
-	assertBoardMetadata(t, path, 0o640)
-}
-
 func TestTLSBoardPublicationFailurePreservesPreviousCredential(t *testing.T) {
 	requireStagingRoot(t)
-	b := stagingBoard{dir: filepath.Join(t.TempDir(), "state"), haveGroup: true}
+	b := stagingBoard{dir: filepath.Join(t.TempDir(), "state")}
 	if err := b.write("cert", []byte("previous"), os.Rename); err != nil {
 		t.Fatal(err)
 	}
@@ -99,35 +70,21 @@ func TestTLSBoardPublicationFailurePreservesPreviousCredential(t *testing.T) {
 	}
 }
 
-func TestBoardRefusesSymlinkDirectoryAndOwnershipRepair(t *testing.T) {
+func TestBoardRefusesSymlinkDirectory(t *testing.T) {
 	requireStagingRoot(t)
 	dir := t.TempDir()
 	outside := filepath.Join(dir, "outside")
 	if err := os.Mkdir(outside, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	b := stagingBoard{dir: filepath.Join(dir, "state"), haveGroup: true}
+	b := stagingBoard{dir: filepath.Join(dir, "state")}
 	if err := os.Symlink(outside, b.dir); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.write("credential", []byte("secret"), os.Rename); err == nil {
 		t.Fatal("followed board symlink")
 	}
-	if err := os.Remove(b.dir); err != nil {
-		t.Fatal(err)
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Fatal("wrote through the board symlink")
 	}
-	if err := b.ensureDir(); err != nil {
-		t.Fatal(err)
-	}
-	secret := filepath.Join(outside, "private")
-	if err := os.WriteFile(secret, []byte("private"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(secret, filepath.Join(b.dir, "credential")); err != nil {
-		t.Fatal(err)
-	}
-	if err := b.fixOwnership(); err == nil {
-		t.Fatal("followed credential symlink during ownership repair")
-	}
-	assertBoardMetadata(t, secret, 0o600)
 }

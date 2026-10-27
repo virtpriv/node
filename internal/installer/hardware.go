@@ -6,10 +6,6 @@ package installer
 // /proc/meminfo and the size of the filesystem that will hold Bitcoin
 // Core's data. Preflight refuses a machine below the limits set here, and
 // the measured memory sets Bitcoin Core's database cache without asking.
-//
-// The image build (--until=bake) runs on a builder machine, so preflight
-// skips the machine checks there and runs them at first boot. The cache is
-// still chosen during the build, because Bitcoin Core is installed then.
 
 import (
 	"math"

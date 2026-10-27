@@ -14,17 +14,19 @@ import (
 // stagingBoard publishes deliberately shared credentials. It does not own
 // wallet data, auto-unlock secrets, or the separate backup export.
 type stagingBoard struct {
-	dir       string
-	gid       int
-	haveGroup bool
+	dir string
+	gid int
 }
 
 func productionStagingBoard() (stagingBoard, error) {
 	if os.Geteuid() != 0 {
 		return stagingBoard{}, fmt.Errorf("credential staging requires root")
 	}
-	gid, ok := vpnGID()
-	return stagingBoard{dir: paths.StateDir, gid: gid, haveGroup: ok}, nil
+	gid, err := vpnGID()
+	if err != nil {
+		return stagingBoard{}, err
+	}
+	return stagingBoard{dir: paths.StateDir, gid: gid}, nil
 }
 
 // writeBoard accepts only the fixed destinations selected by host operations.
@@ -49,30 +51,25 @@ func StageSyncthingWebPassword(password string) error {
 	return writeBoard(paths.StateSyncthingWebPassword, []byte(password+"\n"))
 }
 
-// vpnGID resolves the admin group's numeric gid. The group may
-// legitimately not exist yet during the bake phase of an image
-// build, since the admin user is created at first boot. The
-// caller then falls back to root-only modes and the first-boot
-// staging step re-applies ownership.
-func vpnGID() (int, bool) {
+// vpnGID resolves the owner group's numeric gid. The install creates the
+// group before anything is staged, so a missing group is an error, never a
+// reason to stage files the TUI cannot read.
+func vpnGID() (int, error) {
 	g, err := user.LookupGroup(paths.AdminUser)
 	if err != nil {
-		return 0, false
+		return 0, fmt.Errorf("credential staging needs the %s group: %w", paths.AdminUser, err)
 	}
 	gid, err := strconv.Atoi(g.Gid)
 	if err != nil {
-		return 0, false
+		return 0, fmt.Errorf("group %s has id %q", paths.AdminUser, g.Gid)
 	}
-	return gid, true
+	return gid, nil
 }
 
-// ensureDir creates the board directory with root:vpn
-// 0750 (root:root 0700 before the admin group exists).
-// Safe to repeat. It re-applies ownership and mode so a
-// bake-phase directory is corrected at first boot. As belt
-// and braces on top of the root-owned-ancestors guarantee, it
-// refuses to operate on anything that is not a real directory
-// owned by root.
+// ensureDir creates the board directory with root:vpn 0750. Safe to
+// repeat. It applies ownership and mode again each time. On top of the
+// guarantee that its ancestors are root owned, it refuses to operate on
+// anything that is not a real directory owned by root.
 func (b stagingBoard) ensureDir() error {
 	if err := os.MkdirAll(filepath.Dir(b.dir), 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", filepath.Dir(b.dir), err)
@@ -94,11 +91,7 @@ func (b stagingBoard) ensureDir() error {
 			"%s is not owned by root, refusing to stage",
 			b.dir)
 	}
-	gid, ok := b.gid, b.haveGroup
-	if !ok {
-		return os.Chmod(b.dir, 0o700)
-	}
-	if err := os.Chown(b.dir, 0, gid); err != nil {
+	if err := os.Chown(b.dir, 0, b.gid); err != nil {
 		return fmt.Errorf("chown %s: %w", b.dir, err)
 	}
 	return os.Chmod(b.dir, 0o750)
@@ -130,16 +123,9 @@ func (b stagingBoard) write(path string, data []byte, rename func(string, string
 		tmp.Close()
 		return fmt.Errorf("stage %s: chmod: %w", path, err)
 	}
-	if gid, ok := b.gid, b.haveGroup; ok {
-		if err := tmp.Chown(0, gid); err != nil {
-			tmp.Close()
-			return fmt.Errorf("stage %s: chown: %w", path, err)
-		}
-	} else if err := tmp.Chmod(0o600); err != nil {
-		// No admin group yet (bake phase), so keep it root only.
-		// The first-boot staging step re-owns every board file.
+	if err := tmp.Chown(0, b.gid); err != nil {
 		tmp.Close()
-		return fmt.Errorf("stage %s: chmod: %w", path, err)
+		return fmt.Errorf("stage %s: chown: %w", path, err)
 	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
@@ -153,49 +139,6 @@ func (b stagingBoard) write(path string, data []byte, rename func(string, string
 	}
 	if err := syncDir(b.dir); err != nil {
 		return fmt.Errorf("stage %s: %w", path, err)
-	}
-	return nil
-}
-
-// FixBoardOwnership re-applies root:vpn 0640 to every existing
-// board file and 0750 to the directory. The first-boot staging
-// step calls this so files written during an image bake (before
-// the admin group existed) become readable once the group does.
-func FixBoardOwnership() error {
-	b, err := productionStagingBoard()
-	if err != nil {
-		return err
-	}
-	return b.fixOwnership()
-}
-
-func (b stagingBoard) fixOwnership() error {
-	if err := b.ensureDir(); err != nil {
-		return err
-	}
-	gid, ok := b.gid, b.haveGroup
-	if !ok {
-		return fmt.Errorf(
-			"admin group %q does not exist", paths.AdminUser)
-	}
-	entries, err := os.ReadDir(b.dir)
-	if err != nil {
-		return fmt.Errorf("list %s: %w", b.dir, err)
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		p := filepath.Join(b.dir, e.Name())
-		if !e.Type().IsRegular() {
-			return fmt.Errorf("%s is not a regular board file, refusing ownership repair", p)
-		}
-		if err := os.Chown(p, 0, gid); err != nil {
-			return fmt.Errorf("chown %s: %w", p, err)
-		}
-		if err := os.Chmod(p, 0o640); err != nil {
-			return fmt.Errorf("chmod %s: %w", p, err)
-		}
 	}
 	return nil
 }

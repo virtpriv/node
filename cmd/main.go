@@ -4,10 +4,13 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/user"
 	"strconv"
+	"strings"
 
 	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/helperd"
@@ -223,35 +226,7 @@ func parseArgs(
 		}
 		return cmdUpdateWorker, opts, nil
 	case "install":
-		var networkFlag string
-		for _, a := range args[1:] {
-			switch a {
-			case "--testnet4":
-				opts.Network = config.NetworkTestnet4
-				if networkFlag != "" && networkFlag != a {
-					return 0, opts, fmt.Errorf(
-						"install network flags %s and %s conflict", networkFlag, a)
-				}
-				networkFlag = a
-			case "--signet":
-				opts.Network = config.NetworkPublicSignet
-				if networkFlag != "" && networkFlag != a {
-					return 0, opts, fmt.Errorf(
-						"install network flags %s and %s conflict", networkFlag, a)
-				}
-				networkFlag = a
-			case "--unattended":
-				opts.Unattended = true
-			case "--until=bake":
-				opts.UntilBake = true
-			case "--allow-console-only":
-				return 0, opts, errors.New("--allow-console-only is no longer supported: installation enables password SSH for vpn")
-			default:
-				return 0, opts, fmt.Errorf(
-					"unknown install flag %q", a)
-			}
-		}
-		return cmdInstall, opts, nil
+		return parseInstall(args[1:])
 	case "helperd":
 		if len(args) > 1 {
 			return 0, opts, fmt.Errorf(
@@ -284,22 +259,61 @@ func parseArgs(
 	}
 }
 
+// parseInstall reads the install options with Go's flag package. Its own
+// messages are dropped, because main prints the error and the help.
+func parseInstall(args []string) (command, installer.InstallOptions, error) {
+	var opts installer.InstallOptions
+	fs := flag.NewFlagSet("install", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	testnet4 := fs.Bool("testnet4", false, "")
+	signet := fs.Bool("signet", false, "")
+	fs.BoolVar(&opts.Unattended, "unattended", false, "")
+	// Go names an unknown option with one dash, whatever was typed, so
+	// vpn names it the way the owner typed it.
+	for _, arg := range args {
+		if arg == "--" || len(arg) < 2 || arg[0] != '-' {
+			break
+		}
+		typed, _, _ := strings.Cut(arg, "=")
+		name := strings.TrimLeft(typed, "-")
+		if fs.Lookup(name) == nil && name != "h" && name != "help" {
+			return 0, opts, fmt.Errorf("install: unknown option %s", typed)
+		}
+	}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return cmdHelp, opts, nil
+		}
+		return 0, opts, fmt.Errorf("install: %w", err)
+	}
+	if fs.NArg() > 0 {
+		return 0, opts, fmt.Errorf("install: unexpected %q", fs.Arg(0))
+	}
+	switch {
+	case *testnet4 && *signet:
+		return 0, opts, errors.New("install: --testnet4 and --signet conflict")
+	case *testnet4:
+		opts.Network = config.NetworkTestnet4
+	case *signet:
+		opts.Network = config.NetworkPublicSignet
+	}
+	return cmdInstall, opts, nil
+}
+
+// usage lists what an owner runs. The commands that systemd starts
+// (helperd, stage-lnd-cert, publish-lnd-backup, update-launch and
+// update-worker) are left out.
 func usage() string {
 	return `Virtual Private Node
 
 Usage:
-  vpn                open the node TUI (run as the ` +
-		paths.AdminUser + ` user)
-  sudo vpn install   start a fresh install or resume a recognized interruption
+  vpn                open your node (run as the ` + paths.AdminUser + ` user)
+  sudo vpn install   install, or continue an install that stopped
       --testnet4     use testnet4 instead of mainnet
-      --signet       use default public signet (testing only)
-      --unattended   no prompts (keys auto-copied from the box,
-                     login password generated and printed once)
-  vpn helperd        the node's root helper (started by systemd
-                     through its socket, not by hand)
-  vpn stage-lnd-cert refresh the node's staged copy of the
-                     LND TLS certificate (run by systemd's
-                     certificate watch, not by hand)
+      --signet       use the default public signet (testing only)
+      --unattended   install without screens and print a generated
+                     login password once
   vpn version        print the version
+  vpn help           show this help
 `
 }
