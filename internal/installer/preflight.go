@@ -21,8 +21,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -102,13 +104,6 @@ func RunPreflight() (host.SSHObservation, error) {
 			failed++
 		}
 	}
-	// Warnings never refuse. They are printed and logged so the owner can
-	// judge them.
-	for _, w := range preflightWarnings() {
-		fmt.Fprintf(os.Stderr, "\n  WARNING: %s\n", w)
-		logger.Install("Preflight WARNING: %s", w)
-	}
-
 	if failed == 0 {
 		logger.Install("Preflight passed (%d/%d checks)",
 			len(results), len(results))
@@ -136,7 +131,7 @@ func runPreflightChecks() ([]PreflightResult, host.SSHObservation) {
 	}
 	results = append(results, machineResults()...)
 	results = append(results,
-		PreflightResult{checkNameIOLogging, checkSudoersIOLogging()},
+		PreflightResult{checkNameIOLogging, checkSudoersIOLogging(paths.SudoersFile, paths.SudoersDir, sudoPackageAbsent())},
 		PreflightResult{checkNameDpkg, checkDpkgAudit()},
 		PreflightResult{checkNameUfw, checkUfwInstallable()},
 	)
@@ -183,21 +178,6 @@ func checkDebianArchitecture() error {
 		return fmt.Errorf("cannot determine Debian architecture: %w", err)
 	}
 	return checkArchitecture(strings.TrimSpace(string(out)))
-}
-
-// preflightWarnings collects conditions worth telling the
-// operator about that are not grounds for refusal.
-func preflightWarnings() []string {
-	var ws []string
-	// Directory readability exposes names, not the contents of protected rules.
-	// Preserve host-managed directory permissions and report the deviation.
-	if fi, err := os.Stat(paths.SudoersDir); err == nil &&
-		fi.Mode().Perm()&0o004 != 0 {
-		ws = append(ws, fmt.Sprintf(
-			"%s has mode %o, while the certified Debian baseline uses 750. VPN leaves host-managed permissions unchanged.",
-			paths.SudoersDir, fi.Mode().Perm()))
-	}
-	return ws
 }
 
 // ── Check 1: OS ──────────────────────────────────────────
@@ -251,12 +231,19 @@ func checkOSRelease(content string) error {
 // @includedir would parse in /etc/sudoers.d. As documented and accepted, a
 // nonstandard @includedir pointing elsewhere is not followed.
 //
+// Some provider images have no sudo, so no /etc/sudoers. Nothing can record
+// through sudo then, and the install adds Debian's sudo, whose /etc/sudoers
+// records nothing. Only Debian's package records decide that sudo is absent:
+// Debian never restores a settings file an admin deleted, so an installed
+// sudo without one is refused as before. The folder is still read, because
+// a file already in it takes effect once sudo is installed.
+//
 // Installation can run through sudo and handles account credentials. Retain
 // the existing refusal of observed terminal recording. Runtime node operations
 // use the helper. Owners can also use sudo for general host maintenance.
-func checkSudoersIOLogging() error {
-	files := []string{paths.SudoersFile}
-	dropIns, err := listSudoersDropIns()
+func checkSudoersIOLogging(sudoers, dir string, sudoAbsent bool) error {
+	files := []string{sudoers}
+	dropIns, err := listSudoersDropIns(dir)
 	if err != nil {
 		return err
 	}
@@ -264,6 +251,9 @@ func checkSudoersIOLogging() error {
 
 	for _, f := range files {
 		data, err := os.ReadFile(f)
+		if f == sudoers && sudoAbsent && errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("cannot read %s: %w", f, err)
 		}
@@ -279,20 +269,44 @@ func checkSudoersIOLogging() error {
 	return nil
 }
 
+// sudoPackageAbsent reports whether this machine has no sudo at all: Debian's
+// package records say sudo is not installed, and no sudo program is on the
+// path.
+func sudoPackageAbsent() bool {
+	out, err := exec.Command("dpkg-query", "-W", "-f=${db:Status-Status}", "sudo").Output()
+	exit := 0
+	if err != nil {
+		exit = -1
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exit = exitErr.ExitCode()
+		}
+	}
+	_, lookErr := exec.LookPath("sudo")
+	return sudoAbsent(strings.TrimSpace(string(out)), exit, lookErr == nil)
+}
+
+// sudoAbsent decides from dpkg-query's answer and whether a sudo program was
+// found. Only "not-installed" with no program means no sudo. Anything else
+// counts as installed, so the check stays strict: exit code 1 can also mean
+// damaged package records, and a program Debian does not know about may be
+// a sudo whose settings cannot be checked.
+func sudoAbsent(status string, exit int, program bool) bool {
+	return exit == 0 && status == "not-installed" && !program
+}
+
 // listSudoersDropIns lists the files sudo's @includedir would parse. As
-// root it reads the directory directly. An earlier `sudo find` workaround,
-// needed because /etc/sudoers.d is 750 root:root on Debian 13 and the check
-// then ran without root, is gone. A missing directory means nothing to scan,
-// and any other failure refuses. Subdirectories are skipped because sudo's
-// includedir reads regular files only.
-func listSudoersDropIns() ([]string, error) {
-	entries, err := os.ReadDir(paths.SudoersDir)
+// root it reads the directory directly. A missing directory means nothing
+// to scan, and any other failure refuses. Subdirectories are skipped because
+// sudo's includedir reads regular files only.
+func listSudoersDropIns(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf(
-			"cannot list %s: %w", paths.SudoersDir, err)
+			"cannot list %s: %w", dir, err)
 	}
 	var files []string
 	for _, e := range entries {
@@ -302,7 +316,7 @@ func listSudoersDropIns() ([]string, error) {
 		if !sudoersFileIncluded(e.Name()) {
 			continue
 		}
-		files = append(files, paths.SudoersDir+"/"+e.Name())
+		files = append(files, filepath.Join(dir, e.Name()))
 	}
 	return files, nil
 }
