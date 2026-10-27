@@ -324,7 +324,7 @@ func TestRootRunInstallExitRetainsRunLock(t *testing.T) {
 	if err := ledger.save(f.fs.ledger); err != nil {
 		t.Fatal(err)
 	}
-	installStartupFixture(t, f, func(bool) (host.SSHObservation, error) {
+	installStartupFixture(t, f, func() (host.SSHObservation, error) {
 		return host.SSHObservation{PasswordAuth: true}, nil
 	})
 	deps := newInstallStartupDependencies()
@@ -418,7 +418,7 @@ func TestRootRunInstallReportsPauseFailureAndRootLoginOff(t *testing.T) {
 		if err := ledger.save(f.fs.ledger); err != nil {
 			t.Fatal(err)
 		}
-		installStartupFixture(t, f, func(bool) (host.SSHObservation, error) {
+		installStartupFixture(t, f, func() (host.SSHObservation, error) {
 			return host.SSHObservation{PasswordAuth: true}, preflightErr
 		})
 		return f.fs.ledger

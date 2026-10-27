@@ -15,7 +15,7 @@ import (
 // step runner for resume decisions, ledger recording, and
 // logging. The TUI observes progress without executing steps.
 //
-// Resume rules (one place, ruled 2026-07-16):
+// Resume rules, in one place:
 //
 //   - MUTATION steps trust the ledger: a recorded completion
 //     is skipped. The ledger records completion, not present
@@ -46,17 +46,6 @@ const (
 	StepGate
 )
 
-// StepPhase classifies a step for the image pipeline. Bake
-// steps run at image-build time, first-boot steps must run on
-// the deployed box (identity, hardware, SSH, and
-// machine-specific staging).
-type StepPhase int
-
-const (
-	PhaseBake StepPhase = iota
-	PhaseFirstBoot
-)
-
 type StepStatus int
 
 const (
@@ -79,7 +68,6 @@ type InstallStep struct {
 	Fn    func() error
 	Kind  StepKind
 	Group string // resume-atomic pipeline, "" for self-contained
-	Phase StepPhase
 
 	Status StepStatus
 	Err    error
@@ -150,18 +138,6 @@ func planRun(steps []InstallStep, led *installLedger) []stepPlan {
 		}
 	}
 	return plan
-}
-
-// FilterPhase returns the steps whose Phase is at or before
-// until, the image pipeline's `--until=bake` slice.
-func FilterPhase(steps []InstallStep, until StepPhase) []InstallStep {
-	var out []InstallStep
-	for _, s := range steps {
-		if s.Phase <= until {
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 // ── Runner ───────────────────────────────────────────────
@@ -343,9 +319,9 @@ func classifyRun(
 
 // RunInstallUnattended executes steps with no TUI: one plain
 // line per step to stdout, same runner, same ledger, same log
-// trail. Its consumers are `vpn install --unattended` and the
-// image build pipeline. Interruption needs no handling here: a
-// killed process leaves the ledger truthful by write ordering.
+// trail. Its consumer is `vpn install --unattended`.
+// Interruption needs no handling here: a killed process leaves
+// the ledger truthful by write ordering.
 func RunInstallUnattended(
 	steps []InstallStep, version string, ledger *installLedger,
 	ledgerPath string,

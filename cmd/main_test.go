@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"os/user"
+	"strings"
 	"testing"
 
 	"github.com/virtpriv/node/internal/config"
@@ -21,7 +22,7 @@ func TestParseArgs(t *testing.T) {
 	if err != nil || cmd != cmdInstall {
 		t.Fatalf("install: got (%v,%v)", cmd, err)
 	}
-	if opts.Network != "" || opts.Unattended || opts.UntilBake {
+	if opts.Network != "" || opts.Unattended {
 		t.Errorf("install: unexpected opts %+v", opts)
 	}
 
@@ -43,9 +44,25 @@ func TestParseArgs(t *testing.T) {
 		t.Error("conflicting install network flags accepted")
 	}
 
-	if _, _, err := parseArgs(
-		[]string{"install", "--bogus"}); err == nil {
-		t.Error("unknown install flag accepted")
+	for _, args := range [][]string{
+		{"install", "--bogus"},
+		{"install", "--until=bake"},
+		{"install", "--allow-console-only"},
+		{"install", "mainnet"},
+		{"install", "--signet", "extra"},
+	} {
+		if _, _, err := parseArgs(args); err == nil {
+			t.Errorf("install arguments %v accepted", args)
+		}
+	}
+	// A mistyped option is named the way the owner typed it.
+	for _, typed := range []string{"--sigent", "-sigent", "--sigent=1"} {
+		_, _, err := parseArgs([]string{"install", typed})
+		name, _, _ := strings.Cut(typed, "=")
+		if err == nil || !strings.Contains(err.Error(), " "+name) ||
+			strings.Contains(err.Error(), "-"+name) {
+			t.Errorf("install %s: got %v, want the option as typed", typed, err)
+		}
 	}
 	if _, _, err := parseArgs([]string{"bogus"}); err == nil {
 		t.Error("unknown command accepted")
@@ -56,13 +73,6 @@ func TestParseArgs(t *testing.T) {
 			cmd != cmdVersion {
 			t.Errorf("%s: got (%v,%v), want version", v, cmd, err)
 		}
-	}
-
-	cmd, opts, err = parseArgs([]string{
-		"install", "--unattended", "--allow-console-only"})
-	if err == nil {
-		t.Errorf("allow-console-only: got (%v,%+v,%v)",
-			cmd, opts, err)
 	}
 
 	cmd, _, err = parseArgs([]string{"helperd"})

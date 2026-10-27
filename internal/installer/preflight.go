@@ -4,9 +4,8 @@ package installer
 
 // Install preflight. Before the install engine changes anything, check
 // what this binary relies on and refuse a machine it cannot trust. Every
-// check runs, apart from the machine checks during an image build, and every
-// failure is reported at once, so the owner fixes everything in one round
-// trip.
+// check runs and every failure is reported at once, so the owner fixes
+// everything in one round trip.
 //
 // RunInstall calls it under root (`sudo vpn install`) before the wizard
 // opens. A refused machine keeps its configuration. No user is created, no
@@ -57,12 +56,9 @@ const (
 // detectHardware is a variable so tests can stand in for the machine.
 var detectHardware = DetectHardware
 
-// machineResults measures the machine and checks it, unless the run builds an
-// image on a builder machine. The measured values go to the install log.
-func machineResults(checkMachine bool) []PreflightResult {
-	if !checkMachine {
-		return nil
-	}
+// machineResults measures the machine and checks it. The measured values go
+// to the install log.
+func machineResults() []PreflightResult {
 	hw := detectHardware()
 	logger.Install("Preflight measured memory %s, disk %s",
 		measured(hw.MemoryBytes), measured(hw.DiskBytes))
@@ -96,8 +92,8 @@ func measured(bytes uint64) string {
 // RunPreflight reports all failed checks before lifecycle initialization.
 // The returned SSH observation describes preflight time, not the effective
 // owner policy that installation will establish and verify later.
-func RunPreflight(checkMachine bool) (host.SSHObservation, error) {
-	results, obs := runPreflightChecks(checkMachine)
+func RunPreflight() (host.SSHObservation, error) {
+	results, obs := runPreflightChecks()
 
 	failed := 0
 	for _, r := range results {
@@ -129,15 +125,14 @@ func RunPreflight(checkMachine bool) (host.SSHObservation, error) {
 		failed, len(results))
 }
 
-// runPreflightChecks runs every check in order, except the machine checks
-// during an image build. Running as root removed the sudo dependency that
-// once made a failed check skip the checks after it.
-func runPreflightChecks(checkMachine bool) ([]PreflightResult, host.SSHObservation) {
+// runPreflightChecks runs every check in order. Running as root removed the
+// sudo dependency that once made a failed check skip the checks after it.
+func runPreflightChecks() ([]PreflightResult, host.SSHObservation) {
 	results := []PreflightResult{
 		{checkNameDebian, checkDebian13()},
 		{checkNameArch, checkDebianArchitecture()},
 	}
-	results = append(results, machineResults(checkMachine)...)
+	results = append(results, machineResults()...)
 	results = append(results,
 		PreflightResult{checkNameIOLogging, checkSudoersIOLogging()},
 		PreflightResult{checkNameDpkg, checkDpkgAudit()},

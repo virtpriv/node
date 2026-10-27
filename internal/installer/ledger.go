@@ -59,34 +59,6 @@ var baseInstallStepKeys = []string{
 	"shellenv",
 }
 
-var bakeInstallStepKeys = []string{
-	"binary.install",
-	"apt.base",
-	"firewall",
-	"host.prep",
-	"service-identities.v1",
-	"ipv6.disable",
-	"tor.configure",
-	"tor.gate",
-	"apt.torproxy",
-	"base.upgrade",
-	"swap.zram",
-	"btc.download",
-	"btc.verify",
-	"btc.install",
-	"btc.start",
-	"security",
-	"lnd.download",
-	"lnd.verify",
-	"lnd.install",
-	"tor.lnd",
-	"lnd.configure",
-	"lnd.start",
-	"lnd.tls-san",
-	"lnd.certwatch",
-	"shellenv",
-}
-
 type ledgerEntry struct {
 	CompletedAt string `json:"completed_at"`
 	Version     string `json:"version"`
@@ -199,42 +171,17 @@ func validateLedger(l *installLedger) error {
 	return nil
 }
 
-// A process can add only a prefix of the full run or a prefix of the bake run.
-// Across resumes the durable set is therefore the union of one prefix from
-// each supported sequence. Other subsets were not produced by this installer
-// and are ambiguous rather than automatic repair instructions.
+// Steps run and are recorded in list order, and a resumed run continues
+// that order, so the steps done are always the first steps of the list.
+// Any other set was not written by this installer and is refused rather
+// than read as a repair instruction.
 func validInstallProgressSubset(steps map[string]ledgerEntry) bool {
-	want := make(map[string]bool, len(steps))
-	for key := range steps {
-		want[key] = true
-	}
-	for fullN := 0; fullN <= len(baseInstallStepKeys); fullN++ {
-		for bakeN := 0; bakeN <= len(bakeInstallStepKeys); bakeN++ {
-			candidate := map[string]bool{}
-			for _, key := range baseInstallStepKeys[:fullN] {
-				candidate[key] = true
-			}
-			for _, key := range bakeInstallStepKeys[:bakeN] {
-				candidate[key] = true
-			}
-			if sameStepSet(candidate, want) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func sameStepSet(a, b map[string]bool) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for key := range a {
-		if !b[key] {
+	for _, key := range baseInstallStepKeys[:min(len(steps), len(baseInstallStepKeys))] {
+		if _, ok := steps[key]; !ok {
 			return false
 		}
 	}
-	return true
+	return len(steps) <= len(baseInstallStepKeys)
 }
 
 func validDbCache(v int) bool {

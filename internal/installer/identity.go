@@ -27,10 +27,9 @@ type InstallDecisions struct {
 	GeneratedPassword string
 	// PasswordApplied is set by the identity step after chpasswd
 	// succeeded. The generated password is printed only when this is set.
-	// On a resume that skips the identity step from the ledger, or an
-	// --until=bake run that leaves it out, this pass generated a password
-	// that was never applied, and printing it would hand the owner a
-	// password that does not work.
+	// On a resume that skips the identity step from the ledger, this pass
+	// generated a password that was never applied, and printing it would
+	// hand the owner a password that does not work.
 	PasswordApplied bool
 	// DbCacheMB is the database cache recorded for this install.
 	DbCacheMB int

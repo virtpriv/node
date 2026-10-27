@@ -178,9 +178,9 @@ func TestPlanScenarios(t *testing.T) {
 	}
 }
 
-// The gate must re-run even when its own key is recorded —
-// a recorded gate means "it held on some earlier pass," which
-// is exactly what a gate must never rely on.
+// The gate must re-run even when its own key is recorded. A
+// recorded gate means "it held on some earlier pass", which is
+// exactly what a gate must never rely on.
 func TestPlanGateIgnoresOwnLedgerEntry(t *testing.T) {
 	led := testLedger()
 	if err := led.markDone("firewall", "0.6.3"); err != nil {
@@ -190,22 +190,6 @@ func TestPlanGateIgnoresOwnLedgerEntry(t *testing.T) {
 	plan := planRun(steps, led)
 	if !plan[2].Run {
 		t.Fatal("gate was ledger-skipped")
-	}
-}
-
-func TestFilterPhase(t *testing.T) {
-	steps := []InstallStep{
-		{Key: "a", Phase: PhaseBake},
-		{Key: "b", Phase: PhaseFirstBoot},
-		{Key: "c", Phase: PhaseBake},
-	}
-	bake := FilterPhase(steps, PhaseBake)
-	if len(bake) != 2 || bake[0].Key != "a" || bake[1].Key != "c" {
-		t.Errorf("bake filter = %v", bake)
-	}
-	allSteps := FilterPhase(steps, PhaseFirstBoot)
-	if len(allSteps) != 3 {
-		t.Errorf("first-boot filter kept %d of 3", len(allSteps))
 	}
 }
 
@@ -291,8 +275,8 @@ func TestClassifyRun(t *testing.T) {
 		t.Error("failed run lost its error")
 	}
 
-	// Quit mid-run: done=false → interrupted, at the current
-	// step — never complete.
+	// Quit mid-run: done=false gives interrupted, at the current
+	// step, never complete.
 	res = classifyRun(steps, false, false, 2)
 	if res.Outcome != RunInterrupted {
 		t.Errorf("interrupted run classified %v", res.Outcome)
@@ -380,7 +364,7 @@ func TestRunInstallUnattendedFailureStops(t *testing.T) {
 			t.Errorf("%s ran after the failure", k)
 		}
 	}
-	// Steps before it are recorded; the gate is not.
+	// Steps before it are recorded, the gate is not.
 	led = mustReadLedger(t, path)
 	if !led.done("binary.install") || !led.done("apt.base") {
 		t.Error("pre-failure steps not recorded")
