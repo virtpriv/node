@@ -13,7 +13,7 @@ import (
 )
 
 // InstallInitialBinary places the running executable at the fixed VPN path.
-// Only the admitted base installer calls this; it is not an update operation.
+// Only the admitted base installer calls this. It is not an update operation.
 func InstallInitialBinary() error {
 	self, err := os.Executable()
 	if err != nil {
@@ -66,7 +66,7 @@ func PrepareBaseHost() error {
 			}
 		}
 	}
-	// NTP remains best effort; inability to enable it is logged.
+	// NTP stays best effort. A failure to turn it on is logged.
 	if err := system.RunRootSilent(
 		"timedatectl", "set-ntp", "true"); err != nil {
 		logger.Install(
@@ -95,8 +95,13 @@ func InstallUnattendedUpgrades() error {
 		"unattended-upgrades", "apt-listchanges")
 }
 
-// ConfigureUnattendedUpgrades sets the appliance's security-only apt policy,
-// including the existing automatic reboot schedule.
+// ConfigureUnattendedUpgrades lets Debian install its security updates by
+// itself and restart at 04:00 when an update needs it. The origin lines are
+// Debian's own, from the template in its unattended-upgrades package. Debian's
+// security archive has the suite stable-security and the codename
+// <codename>-security, so it is matched by codename. The older line
+// "${distro_id}:${distro_codename}-security" matches the suite and so matched
+// nothing on Debian.
 func ConfigureUnattendedUpgrades() error {
 	autoConf := `APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
@@ -107,9 +112,10 @@ APT::Periodic::AutocleanInterval "7";
 		return err
 	}
 
-	upgradeConf := `// Virtual Private Node — Unattended Upgrades
-Unattended-Upgrade::Allowed-Origins {
-    "${distro_id}:${distro_codename}-security";
+	upgradeConf := `// Virtual Private Node installs Debian's security updates by itself.
+Unattended-Upgrade::Origins-Pattern {
+        "origin=Debian,codename=${distro_codename},label=Debian-Security";
+        "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
 };
 Unattended-Upgrade::Automatic-Reboot "true";
 Unattended-Upgrade::Automatic-Reboot-Time "04:00";
