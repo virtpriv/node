@@ -48,7 +48,7 @@ func TestParsePasswordAuth(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := parsePasswordAuth(tt.input)
 			if (err != nil) != tt.wantErr || got != tt.want {
-				t.Fatalf("got %v, error %v; want %v, error %v", got, err, tt.want, tt.wantErr)
+				t.Fatalf("got %v, error %v, want %v, error %v", got, err, tt.want, tt.wantErr)
 			}
 		})
 	}
@@ -60,14 +60,17 @@ func TestSSHApplyValidatesRestoresAndDoesNotRestartOnFailure(t *testing.T) {
 		wantEvents                                               string
 		exists                                                   bool
 		readErr, writeErr, validationErr, restoreErr, restartErr error
+		// notConfirmed: the new setting may be on disk, so sshd may use
+		// it now or at its next start.
+		notConfirmed bool
 	}{
 		{name: "success", wantEvents: "read,write,validate,restart", exists: true},
 		{name: "read failure", wantEvents: "read", exists: true, readErr: errors.New("denied")},
-		{name: "write failure", wantEvents: "read,write", exists: true, writeErr: errors.New("disk full")},
+		{name: "write failure", wantEvents: "read,write", exists: true, writeErr: errors.New("disk full"), notConfirmed: true},
 		{name: "restore previous", wantEvents: "read,write,validate,restore", exists: true, validationErr: errors.New("bad config")},
 		{name: "remove new", wantEvents: "read,write,validate,remove", validationErr: errors.New("bad config")},
-		{name: "restore failure", wantEvents: "read,write,validate,restore", exists: true, validationErr: errors.New("bad config"), restoreErr: errors.New("denied")},
-		{name: "restart failure", wantEvents: "read,write,validate,restart", exists: true, restartErr: errors.New("restart failed")},
+		{name: "restore failure", wantEvents: "read,write,validate,restore", exists: true, validationErr: errors.New("bad config"), restoreErr: errors.New("denied"), notConfirmed: true},
+		{name: "restart failure", wantEvents: "read,write,validate,restart", exists: true, restartErr: errors.New("restart failed"), notConfirmed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var events []string
@@ -106,6 +109,9 @@ func TestSSHApplyValidatesRestoresAndDoesNotRestartOnFailure(t *testing.T) {
 			}
 			if tc.restoreErr != nil && !strings.Contains(err.Error(), "restoring") {
 				t.Fatal("restore failure hidden")
+			}
+			if errors.Is(err, ErrSSHSettingNotConfirmed) != tc.notConfirmed {
+				t.Fatalf("not confirmed %v, want %v: %v", !tc.notConfirmed, tc.notConfirmed, err)
 			}
 		})
 	}
@@ -196,7 +202,7 @@ func TestOwnerSSHPolicyWithNativeParser(t *testing.T) {
 			}
 			// An earlier matching provider rule must cause refusal, not false success.
 			conflict := "Match User vpn\n PasswordAuthentication " + map[string]string{"yes": "no", "no": "yes"}[setting] + "\nMatch all\n"
-			// Includes restore global parsing state; put the conflict in an earlier include.
+			// Includes restore global parsing state, so the conflict goes in an earlier include.
 			earlier := filepath.Join(dir, "earlier.conf")
 			if err := os.WriteFile(earlier, []byte(conflict), 0600); err != nil {
 				t.Fatal(err)

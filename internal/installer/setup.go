@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/virtpriv/node/internal/component"
 	"github.com/virtpriv/node/internal/config"
@@ -60,6 +62,8 @@ type installStartupDependencies struct {
 	classifyLifecycle   func(lifecycleFS, identityLookup) (lifecycleState, error)
 	runPreflight        func() (host.SSHObservation, error)
 	initializeLifecycle func(lifecycleFS, identityLookup, installContext) (*installLedger, error)
+	// workBase holds each run's download folder.
+	workBase string
 }
 
 func productionInstallStartupDependencies() installStartupDependencies {
@@ -72,6 +76,7 @@ func productionInstallStartupDependencies() installStartupDependencies {
 		classifyLifecycle:   classifyLifecycleState,
 		runPreflight:        RunPreflight,
 		initializeLifecycle: initializeLifecycle,
+		workBase:            os.TempDir(),
 	}
 }
 
@@ -169,7 +174,16 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 		cfg.DbCache = dec.DbCacheMB
 	}
 
-	steps := buildInstallSteps(cfg, dec)
+	// Downloads wait in a folder of this run until they are installed. The
+	// folder goes when the run ends, however it ends. Folders of a run that
+	// was killed go first, since /tmp is kept in memory on Debian 13.
+	removeKilledRunFolders(deps.workBase)
+	work, err := os.MkdirTemp(deps.workBase, workFolderPrefix)
+	if err != nil {
+		return fmt.Errorf("create the download folder: %w", err)
+	}
+	defer os.RemoveAll(work)
+	steps := buildInstallSteps(cfg, dec, work)
 	if err := validateBaseInstallSteps(steps); err != nil {
 		return err
 	}
@@ -179,7 +193,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 			return err
 		}
 		if err := ledger.save(paths.InstallStateFile); err != nil {
-			return fmt.Errorf("record db cache decision: %w", err)
+			return fmt.Errorf("could not save the install's progress: %w", err)
 		}
 		dec.DbCacheMB = v
 		cfg.DbCache = v
@@ -193,6 +207,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	}
 
 	var res RunResult
+	var startErr error
 	if opts.Unattended && lifecycle.Disposition != lifecycleCompletionPending {
 		if err := fillUnattendedDecisions(dec); err != nil {
 			return err
@@ -224,6 +239,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 		}
 		session := newInstallSession(runner, dec, persistDbCache, completeInteractive)
 		res, err = runInstallInteractive(session, installView(session), frontend)
+		startErr = session.refusal()
 	}
 	if err != nil {
 		return err
@@ -237,15 +253,28 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	case RunFailed:
 		// The runner already logged the failure line. main prints the
 		// error to stderr.
-		return &StopError{StepName: res.StepName, StepNum: res.StepNum, Total: res.Total, Err: res.Err}
+		return &StopError{StepName: res.StepName, StepNum: res.StepNum, Total: res.Total, Err: res.Err,
+			RootLoginMayBeOff: rootLoginMayBeOff(res.Err)}
 	case RunInterrupted:
-		// The log must not just stop. Record how far the run got and that
-		// running again resumes.
+		// The log must not just stop. Record how far the install got and
+		// what running it again does.
+		if len(ledger.Steps) == 0 {
+			if startErr != nil {
+				logger.Install("install did not start, run sudo vpn install to try again")
+			} else {
+				logger.Install("install did not start, run sudo vpn install to start it")
+			}
+			return &StopError{NotStarted: true, StartErr: startErr}
+		}
+		stop := &StopError{Paused: true, Total: len(steps), StartErr: startErr}
+		if i, ok := nextStep(steps, ledger); ok {
+			stop.StepNum, stop.StepName = i+1, steps[i].Name
+		}
 		logger.Install(
 			"install PAUSED at step %d of %d (%s), "+
-				"run sudo vpn install to continue", res.StepNum, res.Total,
-			res.StepName)
-		return &StopError{Paused: true, StepName: res.StepName, StepNum: res.StepNum, Total: res.Total}
+				"run sudo vpn install to continue", stop.StepNum, stop.Total,
+			stop.StepName)
+		return stop
 	}
 
 	if opts.Unattended {
@@ -306,6 +335,39 @@ func withRootLoginOff(err error, ledger *installLedger) error {
 		return err
 	}
 	return &StopError{Err: err, RootLoginOff: true}
+}
+
+// workFolderPrefix names a run's download folder.
+const workFolderPrefix = "vpn-install-"
+
+// removeKilledRunFolders removes the download folders of runs that were
+// killed before they could remove their own. Only vpn's own are touched: a
+// real folder, not a link, owned by root, private, with vpn's name. The
+// install lock means no other run is using one.
+func removeKilledRunFolders(base string) {
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		logger.Install("WARNING: could not list %s for old download folders: %v", base, err)
+		return
+	}
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), workFolderPrefix) {
+			continue
+		}
+		path := filepath.Join(base, e.Name())
+		fi, err := os.Lstat(path)
+		if err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o700 {
+			continue
+		}
+		if st, ok := fi.Sys().(*syscall.Stat_t); !ok || st.Uid != 0 {
+			continue
+		}
+		if err := os.RemoveAll(path); err != nil {
+			logger.Install("WARNING: could not remove the old download folder %s: %v", path, err)
+			continue
+		}
+		logger.Install("removed the download folder of an earlier run, %s", path)
+	}
 }
 
 func validateBaseInstallSteps(steps []InstallStep) error {
@@ -419,10 +481,11 @@ var (
 // break established SSH sessions. The base upgrade, a large download on an
 // old image, waits until apt goes through Tor.
 func buildInstallSteps(
-	cfg *config.AppConfig, dec *InstallDecisions,
+	cfg *config.AppConfig, dec *InstallDecisions, work string,
 ) []InstallStep {
 	// Pipeline working directories are created in each pipeline's first
-	// step, captured by closures and removed in the final step. Random paths
+	// step inside the run's folder, captured by closures and removed in the
+	// final step, or with the run's folder when the run ends. Random paths
 	// from os.MkdirTemp prevent symlink attacks. These closures are why the
 	// btc and lnd triplets are Groups that resume as a whole. The workdir
 	// path lives only in this process, so a resumed process can never enter
@@ -471,12 +534,7 @@ func buildInstallSteps(
 		{Key: "tor.gate", Name: "Verifying the Tor connection",
 			Kind: StepGate, Fn: verifyTorRouting},
 		{Key: "apt.torproxy", Name: "Sending apt package downloads through Tor",
-			Fn: func() error {
-				if err := host.ConfigureAptTor(); err != nil {
-					return err
-				}
-				return host.EnsureGPG()
-			}},
+			Fn: host.ConfigureAptTor},
 		// Through Tor, like every later apt operation. The package lists
 		// are fetched again first, because those from the first step can
 		// be days old when an install resumes, and a superseded package
@@ -502,7 +560,7 @@ func buildInstallSteps(
 			Name: "Downloading Bitcoin Core " + component.BitcoinCoreVersion + " through Tor",
 			Fn: func() error {
 				var err error
-				btcWork, err = os.MkdirTemp("", "vpn-btc-")
+				btcWork, err = os.MkdirTemp(work, "btc-")
 				if err != nil {
 					return fmt.Errorf("create work dir: %w", err)
 				}
@@ -513,6 +571,9 @@ func buildInstallSteps(
 			Fn: func() error {
 				return host.VerifyBitcoinCore(btcWork)
 			}},
+		// Also writes lnd.conf. LND's Bitcoin Core password is created here
+		// with bitcoin.conf and lnd.conf is where it is kept. The LND onion
+		// it names was created by Tor in the tor.configure step.
 		{Key: "btc.install", Group: "btc",
 			Name: "Installing and configuring Bitcoin Core",
 			Fn: func() error {
@@ -547,7 +608,7 @@ func buildInstallSteps(
 			Name: "Downloading LND " + strings.TrimSuffix(component.LNDVersion, "-beta") + " through Tor",
 			Fn: func() error {
 				var err error
-				lndWork, err = os.MkdirTemp("", "vpn-lnd-")
+				lndWork, err = os.MkdirTemp(work, "lnd-")
 				if err != nil {
 					return fmt.Errorf("create work dir: %w", err)
 				}
@@ -566,23 +627,7 @@ func buildInstallSteps(
 					return err
 				}
 				os.RemoveAll(lndWork)
-				return host.WriteLNDServiceFromConfig(cfg)
-			}},
-		{Key: "tor.lnd", Name: "Restarting Tor",
-			Fn: func() error {
-				if err := host.WriteTorConfig(cfg); err != nil {
-					return err
-				}
-				return host.EnableAndRestartTor()
-			}},
-		{Key: "lnd.configure",
-			Name: "Configuring LND",
-			Fn: func() error {
-				// Re-read the onion after the dedicated LND Tor
-				// restart and rewrite lnd.conf with the preserved,
-				// LND-only bitcoind credential. Missing or invalid
-				// onion state fails closed inside host.WriteLNDConfig.
-				return host.WriteLNDConfig(cfg)
+				return host.WriteLNDService()
 			}},
 		{Key: "lnd.start", Name: "Starting LND", Fn: host.EnableAndRestartLND},
 		{Key: "lnd.tls-san", Kind: StepGate,
@@ -616,7 +661,7 @@ func buildInstallSteps(
 			Fn:   host.InstallHelperUnits},
 		{Key: "state.stage",
 			Name: "Staging files for the TUI",
-			Fn:   StageBoardAll},
+			Fn:   stageBoard},
 		// Once a special case after the TUI that warned but completed
 		// anyway. As a real step it gets the ledger, the completion gate,
 		// failure logging and resume, and the special case is gone.

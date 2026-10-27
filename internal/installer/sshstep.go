@@ -14,6 +14,6 @@ func installSSHHardening() error {
 	if err := host.ApplySSHHardening("yes"); err != nil {
 		return err
 	}
-	logger.Install("SSH hardening applied: root login disabled; owner password login enabled")
+	logger.Install("SSH hardening applied, root login off, owner password login on")
 	return nil
 }

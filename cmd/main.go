@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/user"
 	"strconv"
@@ -131,6 +132,12 @@ func main() {
 
 var errWrongTUIIdentity = errors.New("wrong effective identity for node TUI")
 
+// notInstalled reports a missing settings folder or file. The install writes
+// them only when it finishes, so the node is not installed yet, or its
+// install stopped. The settings loader wraps the error, which os.IsNotExist
+// does not see through.
+func notInstalled(err error) bool { return errors.Is(err, fs.ErrNotExist) }
+
 func loadConsoleConfig(
 	euid int,
 	lookup func(string) (*user.User, error),
@@ -168,11 +175,10 @@ func runConsole() {
 		os.Exit(1)
 	}
 	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr,
-				"  No configuration found at %s, this node is "+
-					"not installed.\n  To install: sudo vpn install\n",
-				config.DefaultPath)
+		if notInstalled(err) {
+			fmt.Fprint(os.Stderr,
+				"  Virtual Private Node is not installed yet, or its install has not finished.\n"+
+					"  To install or continue: sudo vpn install\n")
 		} else {
 			fmt.Fprintf(os.Stderr,
 				"  Cannot start: configuration at %s is "+

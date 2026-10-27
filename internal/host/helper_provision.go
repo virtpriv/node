@@ -20,9 +20,9 @@ Description=vpn root helper control socket
 
 [Socket]
 ListenStream=` + paths.HelperSocket + `
-# root:vpn 0660 — the mode is applied when systemd creates the
+# root:vpn 0660. The mode is applied when systemd creates the
 # node, so the socket is never briefly world-connectable. These
-# permissions ARE the authentication; the helper additionally
+# permissions ARE the authentication, and the helper also
 # verifies each connecting process's uid (SO_PEERCRED).
 SocketUser=root
 SocketGroup=` + paths.AdminUser + `
@@ -72,7 +72,7 @@ SyslogIdentifier=vpn-helperd
 # ProtectHome=read-only, NOT =yes, is load-bearing. The
 # password-auth lockout guard (the rebuild-ssh-config verb)
 # reads the admin user's authorized_keys under /home to refuse
-# stranding the box; hiding home (=yes) makes it read an empty
+# stranding the box. Hiding home (=yes) makes it read an empty
 # /home and wrongly refuse every disable. Read-only still stops
 # the helper from writing home, and the node's secrets live in
 # /var/lib, not home. Broader sandboxing (ProtectSystem=) would
@@ -120,9 +120,9 @@ func InstallHelperUnits() error {
 func SetupJournalAccess() error {
 	// Persistent journald storage hinges on /var/log/journal
 	// existing (Storage=auto). Assert it on the actual box
-	// rather than trusting packaging defaults; the tmpfiles
-	// pass applies the packaged ownership/ACLs that make the
-	// systemd-journal group model work.
+	// rather than trusting packaging defaults. The tmpfiles
+	// pass applies the packaged ownership and ACLs that make
+	// the systemd-journal group model work.
 	if _, err := os.Stat("/var/log/journal"); os.IsNotExist(err) {
 		if err := os.MkdirAll("/var/log/journal", 0o755); err != nil {
 			return fmt.Errorf("create /var/log/journal: %w", err)
@@ -138,8 +138,8 @@ func SetupJournalAccess() error {
 	}
 
 	// systemd-journal membership grants read on ALL system
-	// journals: sshd auth lines included, which the first-run
-	// banner needs. Read-only: members cannot write or rewrite
+	// journals, sshd's included. The TUI shows the node's service
+	// logs from them. Read-only: members cannot write or rewrite
 	// journal files. -aG, never -G: a bare -G REPLACES the
 	// supplementary group set.
 	if err := system.RunRoot("usermod", "-aG",

@@ -2,6 +2,7 @@ package install
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -110,7 +111,7 @@ func TestWizardPasswordPastePreservesOrRejects(t *testing.T) {
 			}
 			m, cmd := updateWizard(t, m, enter())
 			if tc.want != "" {
-				if m.phase != wzSteps || cmd == nil {
+				if !m.starting || cmd == nil {
 					t.Fatal("valid password could not continue")
 				}
 				result := cmd()
@@ -162,7 +163,7 @@ func TestWizardPasswordMinimumMismatchAndRecovery(t *testing.T) {
 	m.pwInput.SetValue("abcdefghijklmnop")
 	m.pwConfirm.SetValue("abcdefghijklmnop")
 	m, cmd := updateWizard(t, m, enter())
-	if m.phase != wzSteps || cmd == nil {
+	if !m.starting || cmd == nil {
 		t.Fatal("corrected password could not continue")
 	}
 }
@@ -207,12 +208,12 @@ func TestWizardDecisionRetryAndCompletionFailure(t *testing.T) {
 	m.pwFocus = 2
 	session.err = errors.New("cache write failed")
 	m, cmd := updateWizard(t, m, enter())
-	if m.phase != wzSteps || cmd == nil {
-		t.Fatal("password did not lead straight to the install")
+	if m.phase != wzPassword || cmd == nil {
+		t.Fatal("the start was not requested from the password dialog")
 	}
 	m, cmd = updateWizard(t, m, cmd())
-	if m.phase != wzPassword || m.pwErr == "" || cmd != nil {
-		t.Fatal("decision error not recoverable")
+	if m.phase != wzPassword || m.pwErr == "" || cmd != nil || !m.dialogShown() {
+		t.Fatal("decision error not shown on the dialog")
 	}
 	session.err = nil
 	m.pwFocus = 2
@@ -420,5 +421,86 @@ func assertQuit(t *testing.T, cmd tea.Cmd) {
 	msg := cmd()
 	if _, ok := msg.(tea.QuitMsg); !ok {
 		t.Fatalf("exit command returned %T, want tea.QuitMsg", msg)
+	}
+}
+
+// The dialog stays until the start succeeds, so a failed start shows its
+// error at once, whatever the start took. Keys wait for the start, except
+// ctrl+c, which leaves as Exit does.
+func TestWizardStartKeepsTheDialogUntilItSucceeds(t *testing.T) {
+	start := func(t *testing.T) (wizardModel, *fakeSession, tea.Cmd) {
+		t.Helper()
+		m, session := wizardFixture()
+		m.pwInput.SetValue("abcdefghijklmnop")
+		m.pwConfirm.SetValue("abcdefghijklmnop")
+		m.pwFocus = focusStart
+		m, cmd := updateWizard(t, m, enter())
+		if cmd == nil {
+			t.Fatal("no start requested")
+		}
+		return m, session, cmd
+	}
+
+	t.Run("keys wait for the start", func(t *testing.T) {
+		m, session, startCmd := start(t)
+		for range 3 {
+			m, _ = updateWizard(t, m, tea.KeyPressMsg{Code: tea.KeyLeft})
+			if _, again := updateWizard(t, m, enter()); again != nil {
+				t.Fatal("a second start was requested")
+			}
+		}
+		if m.pwFocus != focusStart {
+			t.Fatal("a key moved the focus during the start")
+		}
+		for range 100 {
+			m, _ = updateWizard(t, m, frameTick{})
+			if !m.dialogShown() {
+				t.Fatal("the dialog left the screen during the start")
+			}
+		}
+		m, wait := updateWizard(t, m, startCmd())
+		if m.phase != wzSteps || wait == nil || session.starts != 1 {
+			t.Fatal("a successful start did not move to the steps")
+		}
+	})
+
+	t.Run("ctrl+c leaves during the start", func(t *testing.T) {
+		m, _, _ := start(t)
+		_, cmd := updateWizard(t, m, ctrlC())
+		if cmd == nil {
+			t.Fatal("ctrl+c did nothing")
+		}
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Fatal("ctrl+c did not leave")
+		}
+	})
+}
+
+// A failed step's error and the step's name stay in view wherever the step
+// is in the list. An error longer than the window keeps the name.
+func TestWizardFailedStepErrorStaysInView(t *testing.T) {
+	names := make([]installer.InstallStepView, 28)
+	for i := range names {
+		names[i].Name = fmt.Sprintf("Step %d of the install", i+1)
+	}
+	for _, words := range []int{8, 60, 400} {
+		for at := range names {
+			steps := append([]installer.InstallStepView(nil), names...)
+			for i := range at {
+				steps[i].Status = installer.StepDone
+			}
+			steps[at].Status = installer.StepFailed
+			steps[at].Err = errors.New(strings.Repeat("cause ", words) + "LASTWORD")
+			m := newWizardModel(installer.InstallView{Steps: steps}, &fakeSession{events: make(chan installer.InstallEvent)}, nil)
+			m.phase, m.failed, m.drawn = wzDone, true, namesShown
+			m, _ = updateWizard(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+			view := m.View().Content
+			if !strings.Contains(view, steps[at].Name) {
+				t.Fatalf("%d words at step %d: the step's name is not in view", words, at+1)
+			}
+			if words < 400 && !strings.Contains(view, "LASTWORD") {
+				t.Fatalf("%d words at step %d: the end of the error is not in view", words, at+1)
+			}
+		}
 	}
 }

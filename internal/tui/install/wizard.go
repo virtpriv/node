@@ -84,6 +84,9 @@ type wizardModel struct {
 	completeErr string
 	stopping    bool
 	failed      bool
+	// starting is set from Enter on Start install until the start answers.
+	// The dialog stays on screen, so a refused start shows its error at once.
+	starting bool
 
 	phase         wizardPhase
 	width, height int
@@ -118,8 +121,9 @@ type wizardModel struct {
 	// askExit whether its Exit button is selected.
 	asking, askExit bool
 	// rootLoginOff follows the install record: before the run, then from
-	// the final event.
-	rootLoginOff bool
+	// the final event. rootLoginMayBeOff comes from the final event when the
+	// SSH step failed after it may have turned root's login off.
+	rootLoginOff, rootLoginMayBeOff bool
 }
 
 func newWizardModel(info installer.InstallView, session installSession, login func() (bool, error)) wizardModel {
@@ -258,9 +262,10 @@ func (m wizardModel) Update(
 		return m, tea.Tick(loginEvery, func(time.Time) tea.Msg { return loginTick{} })
 
 	case wizardStartMsg:
-		if m.phase != wzSteps {
+		if !m.starting && m.phase != wzSteps {
 			return m, nil
 		}
+		m.starting = false
 		if msg.err != nil {
 			if m.stopping {
 				return m, tea.Quit
@@ -268,14 +273,14 @@ func (m wizardModel) Update(
 			// Only the password screen offers a retry. Without one, the done
 			// screen reports the error.
 			if !m.info.NeedIdentity {
-				m.completeErr = "Could not start the install: " + msg.err.Error()
+				m.completeErr = installer.RefusedStartText(msg.err)
 				m.phase = wzDone
 				return m, nil
 			}
-			m.phase = wzPassword
-			m.pwErr = "Could not start the install: " + msg.err.Error()
+			m.pwErr = installer.RefusedStartText(msg.err) + " Choose Start install to try again."
 			return m, nil
 		}
+		m.phase = wzSteps
 		m.input.Password = loginpassword.Password{}
 		m.pwInput.Reset()
 		m.pwConfirm.Reset()
@@ -285,8 +290,9 @@ func (m wizardModel) Update(
 		return m.updateSteps(msg)
 
 	case tea.PasteMsg:
-		// Nothing reaches a field the owner cannot see yet.
-		if m.phase == wzPassword && !m.dialogShown() {
+		// Nothing reaches a field the owner cannot see yet, or while the
+		// start answers.
+		if m.phase == wzPassword && (!m.dialogShown() || m.starting) {
 			return m, nil
 		}
 		return m.handlePaste(msg)
@@ -312,7 +318,9 @@ func (m wizardModel) Update(
 		}
 		switch m.phase {
 		case wzPassword:
-			if !m.dialogShown() {
+			// Keys wait for the dialog and for the start's answer. ctrl+c
+			// above still leaves, as Exit does.
+			if !m.dialogShown() || m.starting {
 				return m, nil
 			}
 			return m.updatePassword(msg)
@@ -450,7 +458,7 @@ func (m wizardModel) updatePassword(
 		}
 		m.input.Password = pw
 		m.pwErr = ""
-		m.phase = wzSteps
+		m.starting = true
 		return m, m.startSteps()
 	}
 	if m.pwFocus < focusStart {
@@ -488,7 +496,7 @@ func (m wizardModel) updateSteps(msg wizardProgressMsg) (tea.Model, tea.Cmd) {
 	}
 	e := msg.event
 	if e.Final {
-		m.rootLoginOff = e.RootLoginOff
+		m.rootLoginOff, m.rootLoginMayBeOff = e.RootLoginOff, e.RootLoginMayBeOff
 		m.failed = e.Result.Outcome == installer.RunFailed
 		if e.CompletionErr != nil {
 			m.completeErr = e.CompletionErr.Error()
@@ -630,10 +638,11 @@ func (m wizardModel) titleRows() []string {
 }
 
 // stepRows lists every step: a mark, the name and, once it ran, its time.
-func (m wizardModel) stepRows(w int) []string {
+// from and to are the first and last rows of the running or failed step,
+// its error included.
+func (m wizardModel) stepRows(w int) (rows []string, from, to int) {
 	done := lipgloss.NewStyle().Foreground(theme.ColorSuccess).Render("✓")
 	faint := lipgloss.NewStyle().Foreground(theme.ColorFaint)
-	var rows []string
 	for i, s := range m.steps {
 		var mark, name, took string
 		switch s.Status {
@@ -652,32 +661,33 @@ func (m wizardModel) stepRows(w int) []string {
 		default:
 			mark, name = faint.Render("·"), faint.Render(s.Name)
 		}
+		start := len(rows)
 		rows = append(rows, spread(" "+mark+" "+name, took, w))
 		if s.Status == installer.StepFailed && s.Err != nil {
 			for _, l := range wrap("Error: "+s.Err.Error(), w-6, theme.Warning) {
 				rows = append(rows, "   "+l)
 			}
 		}
+		if s.Status == installer.StepRunning || s.Status == installer.StepFailed {
+			from, to = start, len(rows)-1
+		}
 	}
-	return rows
+	return rows, from, to
 }
 
 // stepWindow shows as many steps as fit in h rows and keeps the running or
 // failed step in view, with a few of the steps after it.
 func (m wizardModel) stepWindow(h int) []string {
 	const colW = 65
-	rows := m.stepRows(colW)
-	at := 0
-	for i, s := range m.steps {
-		if s.Status == installer.StepRunning || s.Status == installer.StepFailed {
-			at = i
-		}
-	}
-	if m.phase == wzFinish {
-		at = len(rows) - 1
-	}
+	rows, from, to := m.stepRows(colW)
 	fits := max(1, h-1)
-	first := min(max(0, at-fits+4), max(0, len(rows)-fits))
+	// The running or failed step and its whole error stay in view, with a
+	// few steps after it. An error longer than the window keeps its step's
+	// name. After a complete install the list shows its end.
+	first := min(max(0, to-fits+4), max(0, len(rows)-fits), from)
+	if m.phase == wzFinish {
+		first = max(0, len(rows)-fits)
+	}
 	out := []string{""}
 	for _, r := range rows[first:min(len(rows), first+fits)] {
 		out = append(out, strings.Repeat(" ", (contentW-colW)/2)+r)
@@ -703,7 +713,8 @@ func (m wizardModel) passwordDialog() []string {
 	}
 	indent := strings.Repeat(" ", 12)
 	if m.pwErr != "" {
-		for _, l := range wrap(m.pwErr, dialogW-16, theme.Warning) {
+		// The error lines up with the fields and ends where they end.
+		for _, l := range wrap(m.pwErr, fieldW, theme.Warning) {
 			body = append(body, indent+l)
 		}
 	} else {
@@ -744,8 +755,11 @@ func (m wizardModel) endNotice() []string {
 	if m.failed {
 		text = "Installation stopped after a step failed. Inspect the reported problem before running 'sudo vpn install' again. It resumes from the first incomplete step."
 	}
+	text += " Details are in " + paths.LogFile + "."
 	if m.rootLoginOff {
 		text += " " + installer.RootLoginOffNotice
+	} else if m.rootLoginMayBeOff {
+		text += " " + installer.RootLoginMayBeOffNotice
 	}
 	var out []string
 	if m.completeErr != "" {

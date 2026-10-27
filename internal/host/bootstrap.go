@@ -3,7 +3,6 @@ package host
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -77,7 +76,7 @@ func PrepareBaseHost() error {
 
 // DisableIPv6 applies the base appliance IPv4 policy.
 func DisableIPv6() error {
-	content := `# Virtual Private Node — disable IPv6
+	content := `# Virtual Private Node turns IPv6 off.
 net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
@@ -134,7 +133,7 @@ func InstallFail2ban() error {
 
 // ConfigureFail2ban writes the initial SSH jail and starts the service.
 func ConfigureFail2ban() error {
-	content := `# Virtual Private Node — Fail2ban
+	content := `# Virtual Private Node, stricter SSH login protection.
 [sshd]
 enabled = true
 mode = aggressive
@@ -166,12 +165,4 @@ Acquire::Retries "3";
 `
 	return system.WriteFileRoot(paths.AptTorProxy,
 		[]byte(content), 0644)
-}
-
-// EnsureGPG installs the verifier when the admitted installation needs it.
-func EnsureGPG() error {
-	if _, err := exec.LookPath("gpg"); err == nil {
-		return nil
-	}
-	return system.RunRoot("apt-get", "install", "-y", "-qq", "gnupg")
 }

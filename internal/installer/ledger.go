@@ -47,8 +47,6 @@ var baseInstallStepKeys = []string{
 	"lnd.download",
 	"lnd.verify",
 	"lnd.install",
-	"tor.lnd",
-	"lnd.configure",
 	"lnd.start",
 	"lnd.tls-san",
 	"lnd.certwatch",

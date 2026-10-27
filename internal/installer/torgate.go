@@ -1,31 +1,30 @@
 // internal/installer/torgate.go
 //
-// Install-path Tor hard-gate (IA-2-K). Runs as its own install step
-// between "Installing Tor" and "Configuring apt for Tor", so it must
-// succeed before ANY Tor-dependent network operation: apt over the
-// socks5h proxy (host.EnsureGPG onward) and every DownloadRequireTor site.
+// The Tor check, the install step "Verifying the Tor connection". It comes
+// after "Setting up Tor and your onion addresses" and before "Sending apt
+// package downloads through Tor". As a gate it runs again on every pass, so
+// no download through Tor runs in a pass whose Tor was not checked. The
+// package upgrade step waits for Tor again with waitForTorBootstrap, because
+// an upgrade can restart Tor.
 //
 // Two layers:
 //
-//  1. HARD GATE — no external dependency. Wait for Tor to report
+//  1. The gate, with no outside dependency. Wait until Tor reports
 //     bootstrap PROGRESS=100 on its own control port (127.0.0.1:9051,
-//     cookie auth). Local, deterministic; the install step fails on
-//     timeout. This is the postcondition for host.EnableAndRestartTor: rc=0 means
-//     "the unit started", PROGRESS=100 means "Tor is routing".
+//     cookie authentication). A started unit only says Tor runs.
+//     PROGRESS=100 says Tor can route.
 //
-//  2. TRIPWIRE — best-effort external probe. torsocks-fetch
-//     check.torproject.org/api/ip:
-//       IsTor:true   -> routing confirmed end-to-end; proceed.
-//       IsTor:false  -> PROVEN clearnet exit (torsocks present but not
-//                       intercepting, e.g. broken LD_PRELOAD lib) ->
-//                       hard fail. This is the only detector for a
-//                       fail-open torsocks; presence checks cannot
-//                       see it.
-//       unreachable  -> warn and proceed. Bootstrap is already
-//                       confirmed locally, and torsocks fail-closed
-//                       behavior ([LIVE], Gate 0) backstops the leak
-//                       half. Install success never depends on the
-//                       third-party endpoint being up.
+//  2. A best-effort outside check: check.torproject.org/api/ip fetched
+//     through torsocks.
+//       IsTor:true   routing confirmed end to end, continue.
+//       IsTor:false  a request through torsocks left on clearnet, so
+//                    torsocks is present but not intercepting (a broken
+//                    preload library, for example). The step fails. This
+//                    is the only check that sees a torsocks that fails
+//                    open.
+//       unreachable  warn and continue. Tor reported itself ready, and
+//                    torsocks refuses to connect when it cannot reach
+//                    Tor. The install never depends on the outside site.
 
 package installer
 
@@ -43,24 +42,17 @@ import (
 	"github.com/virtpriv/node/internal/system"
 )
 
-// Tor runtime constants. These are Tor-owned values, not Go logic
-// paths (same rationale as the HiddenServiceDir strings in tor.go):
-// the control port matches host.BuildTorConfig. The cookie path is Debian's
-// packaged Tor runtime layout.
+// Tor's own values, not Go logic paths, like the HiddenServiceDir strings
+// in tor.go. The control port matches host.BuildTorConfig. The cookie path
+// is the one set by Debian's tor-service-defaults-torrc.
 const (
 	torControlAddr = "127.0.0.1:9051"
 	torCookiePath  = "/run/tor/control.authcookie"
 
-	// Stall clock and ceiling (operator ruling at the commit-6
-	// live run, replacing the original flat 90s deadline). The
-	// flat deadline dated from when the bootstrap script gave
-	// Tor a warm-up minute plus an SSH round trip before this
-	// gate ever ran; with the script absorbed, the gate fires
-	// seconds after Tor first starts, and a healthy slow box
-	// was failed at 65% while still advancing. Now: fail only
-	// when bootstrap PROGRESS has not moved for the stall
-	// window; the ceiling bounds the step against pathological
-	// crawl (a bounded install step must end).
+	// Fail only when Tor's bootstrap progress has not moved for the
+	// stall window. The gate runs seconds after Tor first starts, so a
+	// flat deadline would fail a slow machine that is still advancing.
+	// The ceiling ends a start that only crawls.
 	torStallWindow      = 90 * time.Second
 	torBootstrapCeiling = 10 * time.Minute
 	torBootstrapPoll    = 3 * time.Second
@@ -69,11 +61,11 @@ const (
 	torProbeAttempts = 2
 )
 
-// verifyTorRouting is the "Verifying Tor routing" install step.
+// verifyTorRouting is the "Verifying the Tor connection" install step.
 func verifyTorRouting() error {
 	if _, err := exec.LookPath("torsocks"); err != nil {
-		return fmt.Errorf("torsocks not found — refusing to proceed: " +
-			"all downloads must route through Tor")
+		return fmt.Errorf("torsocks not found, refusing to continue: " +
+			"every download must go through Tor")
 	}
 
 	if err := waitForTorBootstrap(
@@ -86,14 +78,14 @@ func verifyTorRouting() error {
 }
 
 // waitForTorBootstrap polls Tor's control port until it reports
-// bootstrap PROGRESS=100, failing on STALL (no progress change
-// for the stall window) or on the absolute ceiling. Any change
-// in reported progress resets the stall clock — including a
-// drop, because Tor resets its counter to zero when it restarts
-// mid-bootstrap, and rebootstrapping is activity, not a stall.
-// Poll errors are retried silently within the same clocks —
-// immediately after host.EnableAndRestartTor the control port may not be
-// listening yet.
+// bootstrap PROGRESS=100. It fails when the progress has not changed for
+// the stall window, or at the ceiling. Any change resets the stall clock,
+// a drop included, because Tor counts from zero again when it restarts
+// during bootstrap, and that is activity, not a stall. Poll errors are
+// retried silently within the same clocks, since right after
+// host.EnableAndRestartTor the control port may not listen yet. The
+// messages name tor@default, the real Tor. Debian's tor.service only runs
+// /bin/true.
 func waitForTorBootstrap(
 	stallWindow, ceiling time.Duration,
 ) error {
@@ -125,25 +117,24 @@ func waitForTorBootstrap(
 	}
 
 	if lastProgress < 0 && lastErr != nil {
-		return fmt.Errorf("Tor bootstrap check failed within %s "+
-			"(control port never answered: %v — is ControlPort "+
-			"9051 enabled in torrc?) — check: systemctl status "+
-			"tor; journalctl -u tor", stallWindow, lastErr)
+		return fmt.Errorf("Tor's control port did not answer within %s: %v. "+
+			"Check: systemctl status tor@default and journalctl -u tor@default",
+			stallWindow, lastErr)
 	}
 	if time.Since(start) >= ceiling {
-		return fmt.Errorf("Tor did not finish bootstrapping "+
-			"within %s (last progress %d%%) — check: systemctl "+
-			"status tor; journalctl -u tor", ceiling, lastProgress)
+		return fmt.Errorf("Tor did not finish bootstrapping within %s "+
+			"(last progress %d%%). Check: systemctl status tor@default "+
+			"and journalctl -u tor@default", ceiling, lastProgress)
 	}
-	return fmt.Errorf("Tor bootstrap STALLED at %d%% for %s — "+
-		"check: systemctl status tor; journalctl -u tor",
+	return fmt.Errorf("Tor bootstrap STALLED at %d%% for %s. "+
+		"Check: systemctl status tor@default and journalctl -u tor@default",
 		lastProgress, stallWindow)
 }
 
-// keepWaitingForTor is the gate's clock rule as a pure function
-// (unit-tested): keep waiting while the stall window has not
-// elapsed since the last progress change AND the absolute
-// ceiling has not elapsed since the step started.
+// keepWaitingForTor is the gate's clock rule as a pure function, tested on
+// its own: keep waiting while the stall window has not passed since the
+// last progress change and the ceiling has not passed since the step
+// started.
 func keepWaitingForTor(
 	now, start, lastAdvance time.Time,
 	stallWindow, ceiling time.Duration,
@@ -162,10 +153,9 @@ func keepWaitingForTor(
 // parse PROGRESS. The cookie is re-read on every attempt because Tor
 // regenerates it on restart.
 func queryTorBootstrapProgress() (int, error) {
-	// The installer runs as root; daemon access to this cookie is
-	// granted only inside the bitcoind and lnd units through
-	// SupplementaryGroups=debian-tor. Read it directly through the
-	// root-requiring wrapper here.
+	// The installer runs as root. Daemons reach this cookie only inside
+	// the bitcoind and lnd units, through SupplementaryGroups=debian-tor.
+	// Here it is read through the wrapper that requires root.
 	cookie, err := system.ReadFileRoot(torCookiePath)
 	if err != nil {
 		return 0, fmt.Errorf("read control cookie: %w", err)
@@ -218,7 +208,7 @@ func queryTorBootstrapProgress() (int, error) {
 //
 //	250-status/bootstrap-phase=NOTICE BOOTSTRAP PROGRESS=100 TAG=done SUMMARY="Done"
 //
-// Pure function — unit-tested.
+// A pure function, tested on its own.
 func parseBootstrapProgress(line string) (int, bool) {
 	const key = "PROGRESS="
 	i := strings.Index(line, key)
@@ -240,14 +230,14 @@ func parseBootstrapProgress(line string) (int, bool) {
 	return n, true
 }
 
-// torProbeVerdict classifies one tripwire probe result. Pure
-// function — unit-tested.
+// torProbeResult is what one outside check showed. torProbeVerdict, a
+// pure function tested on its own, decides it.
 type torProbeResult int
 
 const (
-	probeTor         torProbeResult = iota // IsTor:true — confirmed
-	probeClearnet                          // IsTor:false — PROVEN leak
-	probeUnreachable                       // error / garbage — unknown
+	probeTor         torProbeResult = iota // IsTor:true, confirmed
+	probeClearnet                          // IsTor:false, a proven leak
+	probeUnreachable                       // an error or garbage, unknown
 )
 
 func torProbeVerdict(output string, err error) torProbeResult {
@@ -263,9 +253,9 @@ func torProbeVerdict(output string, err error) torProbeResult {
 	return probeUnreachable
 }
 
-// runTorExitProbe runs the best-effort external tripwire. Only a
-// proven clearnet exit (IsTor:false) fails the step; an unreachable
-// endpoint warns and proceeds.
+// runTorExitProbe runs the best-effort outside check. Only a proven
+// clearnet exit (IsTor:false) fails the step. An unreachable site warns
+// and the install continues.
 func runTorExitProbe() error {
 	for attempt := 0; attempt < torProbeAttempts; attempt++ {
 		output, err := system.RunOutputWithTimeout(15*time.Second,
@@ -277,17 +267,18 @@ func runTorExitProbe() error {
 				"Tor routing CONFIRMED via check.torproject.org")
 			return nil
 		case probeClearnet:
-			return fmt.Errorf("CLEARNET LEAK DETECTED: request via " +
-				"torsocks exited on clearnet (IsTor:false) — torsocks " +
-				"is present but not intercepting; refusing to proceed")
+			return fmt.Errorf("CLEARNET LEAK DETECTED: a request " +
+				"through torsocks left on clearnet (IsTor:false), so " +
+				"torsocks is not intercepting. Refusing to continue")
 		case probeUnreachable:
 			if attempt < torProbeAttempts-1 {
 				time.Sleep(5 * time.Second)
 			}
 		}
 	}
-	logger.Install("WARNING: Tor exit probe unreachable — proceeding on " +
-		"local bootstrap confirmation (torsocks fail-closed backstops); " +
-		"verify later with: torsocks curl -s " + torProbeURL)
+	logger.Install("WARNING: the outside Tor check could not be reached. " +
+		"Continuing, because Tor reported itself ready and torsocks " +
+		"refuses to connect without Tor. To check later: torsocks curl -s " +
+		torProbeURL)
 	return nil
 }
