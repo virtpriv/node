@@ -4,6 +4,8 @@ package installer
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -172,6 +174,80 @@ func TestSudoersIOLoggingClean(t *testing.T) {
 	for _, tt := range cases {
 		if d, found := sudoersEnablesIOLogging(tt.content); found {
 			t.Errorf("%s: false positive on %q", tt.name, d)
+		}
+	}
+}
+
+// ── checkSudoersIOLogging ────────────────────────────────
+
+// A machine without sudo has no /etc/sudoers. Nothing can record through
+// sudo then, and the install adds Debian's sudo, whose settings record
+// nothing. Only Debian's package records decide that sudo is absent. A file
+// already in the folder still counts, because it takes effect once sudo is
+// installed.
+func TestSudoersCheckWithoutSudo(t *testing.T) {
+	t.Run("no sudo at all passes", func(t *testing.T) {
+		root := t.TempDir()
+		err := checkSudoersIOLogging(filepath.Join(root, "sudoers"), filepath.Join(root, "sudoers.d"), true)
+		if err != nil {
+			t.Errorf("got %v, want a pass", err)
+		}
+	})
+	t.Run("a recording file waiting for sudo is refused", func(t *testing.T) {
+		root := t.TempDir()
+		dir := filepath.Join(root, "sudoers.d")
+		waiting := filepath.Join(dir, "recording")
+		if err := os.Mkdir(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(waiting, []byte("Defaults log_input\n"), 0o440); err != nil {
+			t.Fatal(err)
+		}
+		err := checkSudoersIOLogging(filepath.Join(root, "sudoers"), dir, true)
+		if err == nil || !strings.Contains(err.Error(), waiting) {
+			t.Errorf("got %v, want a refusal naming %s", err, waiting)
+		}
+	})
+	t.Run("a settings file that cannot be read is refused", func(t *testing.T) {
+		root := t.TempDir()
+		sudoers := filepath.Join(root, "sudoers")
+		if err := os.Mkdir(sudoers, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := checkSudoersIOLogging(sudoers, filepath.Join(root, "sudoers.d"), true); err == nil {
+			t.Error("an unreadable settings file passed")
+		}
+	})
+	t.Run("sudo installed with its settings file deleted is refused", func(t *testing.T) {
+		root := t.TempDir()
+		if err := checkSudoersIOLogging(filepath.Join(root, "sudoers"), filepath.Join(root, "sudoers.d"), false); err == nil {
+			t.Error("a missing settings file passed while sudo is installed")
+		}
+	})
+}
+
+// sudo counts as absent only when Debian's package records say
+// "not-installed", as on a cloud image without sudo, and no sudo program is
+// on the machine. Anything else, an error included, counts as installed.
+func TestSudoAbsent(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  string
+		exit    int
+		program bool
+		want    bool
+	}{
+		{"never installed, no program", "not-installed", 0, false, true},
+		{"never installed, a sudo program anyway", "not-installed", 0, true, false},
+		{"no record at all", "", 1, false, false},
+		{"installed", "installed", 0, true, false},
+		{"removed, settings kept", "config-files", 0, false, false},
+		{"half installed", "half-installed", 0, false, false},
+		{"dpkg failed", "", 2, false, false},
+	}
+	for _, tt := range cases {
+		if got := sudoAbsent(tt.status, tt.exit, tt.program); got != tt.want {
+			t.Errorf("%s: got %v, want %v", tt.name, got, tt.want)
 		}
 	}
 }
