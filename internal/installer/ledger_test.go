@@ -222,7 +222,7 @@ func TestLedgerFollowsThePackageUpgradeBehindTor(t *testing.T) {
 	if err := validateLedger(stopped); err != nil {
 		t.Fatal("install stopped before the package upgrade cannot resume:", err)
 	}
-	steps := buildInstallSteps(config.Default(), &InstallDecisions{})
+	steps := buildInstallSteps(config.Default(), &InstallDecisions{}, t.TempDir())
 	var runs []string
 	for i, p := range planRun(steps, stopped) {
 		if p.Run && steps[i].Kind != StepGate {
@@ -237,5 +237,29 @@ func TestLedgerFollowsThePackageUpgradeBehindTor(t *testing.T) {
 	}
 	if validateLedger(record("binary.install", "apt.base", "firewall", "base.upgrade")) == nil {
 		t.Fatal("accepted a record in the earlier order, where the upgrade ran before Tor")
+	}
+}
+
+// "Restarting Tor" and "Configuring LND" repeated steps 8 and 15 and are
+// gone. A record from a build that still had them is refused, like any
+// record this installer did not write. That holds for a finished record
+// too: on a node installed by such a build, sudo vpn install now refuses
+// instead of saying it is already installed. Only test nodes hold one,
+// since v0.7.0 installs fresh.
+func TestLedgerRefusesTheRemovedSteps(t *testing.T) {
+	for _, removed := range []string{"tor.lnd", "lnd.configure"} {
+		l := testLedger()
+		for _, key := range baseInstallStepKeys {
+			if key == "lnd.start" {
+				break
+			}
+			if err := l.markDone(key, "0.7.0"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		l.Steps[removed] = ledgerEntry{CompletedAt: "2026-10-20T12:00:00Z", Version: "0.7.0-rc.13"}
+		if err := validateLedger(l); err == nil {
+			t.Errorf("a record holding %s was accepted", removed)
+		}
 	}
 }

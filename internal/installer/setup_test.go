@@ -269,7 +269,7 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 
 func TestBaseInstallStepsMatchLedgerSchema(t *testing.T) {
 	cfg := config.Default()
-	steps := buildInstallSteps(cfg, &InstallDecisions{})
+	steps := buildInstallSteps(cfg, &InstallDecisions{}, t.TempDir())
 	if err := validateBaseInstallSteps(steps); err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func unexpectedInstallFrontend(t *testing.T) InstallFrontend {
 // stepIndex finds a step in the install list by its key.
 func stepIndex(t *testing.T, key string) int {
 	t.Helper()
-	for i, s := range buildInstallSteps(config.Default(), &InstallDecisions{}) {
+	for i, s := range buildInstallSteps(config.Default(), &InstallDecisions{}, t.TempDir()) {
 		if s.Key == key {
 			return i
 		}
@@ -374,7 +374,7 @@ func TestPackageUpgradeConfirmsTorBeforeItReportsDone(t *testing.T) {
 			return nil
 		}
 		var step *InstallStep
-		steps := buildInstallSteps(config.Default(), &InstallDecisions{})
+		steps := buildInstallSteps(config.Default(), &InstallDecisions{}, t.TempDir())
 		for i := range steps {
 			if steps[i].Key == "base.upgrade" {
 				step = &steps[i]

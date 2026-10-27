@@ -253,3 +253,26 @@ func TestMachineChecks(t *testing.T) {
 		})
 	}
 }
+
+// A container plan shares its host's kernel, so the firewall, IPv6 and swap
+// steps cannot work there. systemd-detect-virt --container prints the kind
+// of container, or "none" with a nonzero exit outside one. An answer that
+// cannot be read passes, as for the other checks.
+func TestCheckVirtualMachine(t *testing.T) {
+	exitOne := errors.New("exit status 1")
+	for _, tc := range []struct {
+		out    string
+		err    error
+		refuse bool
+	}{
+		{"none", exitOne, false},
+		{"lxc", nil, true},
+		{"openvz", nil, true},
+		{"docker", nil, true},
+		{"", errors.New("executable file not found"), false},
+	} {
+		if err := checkVirtualMachine(tc.out, tc.err); (err != nil) != tc.refuse {
+			t.Errorf("%q, %v: refused %v, want %v", tc.out, tc.err, err != nil, tc.refuse)
+		}
+	}
+}

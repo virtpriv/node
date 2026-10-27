@@ -9,13 +9,11 @@ import (
 func withInitialFirewallTestDeps(t *testing.T) {
 	t.Helper()
 	oldObserve := observeSSHForFirewall
-	oldInstall := installUFWForFirewall
 	oldRead := readUFWDefaultForFirewall
 	oldWrite := writeUFWDefaultForFirewall
 	oldRun := runInitialFirewallCommand
 	t.Cleanup(func() {
 		observeSSHForFirewall = oldObserve
-		installUFWForFirewall = oldInstall
 		readUFWDefaultForFirewall = oldRead
 		writeUFWDefaultForFirewall = oldWrite
 		runInitialFirewallCommand = oldRun
@@ -28,7 +26,6 @@ func TestConfigureFirewallRefusesBeforeMutationWhenSSHObservationFails(t *testin
 		return SSHObservation{}, errors.New("sshd unavailable")
 	}
 	mutated := false
-	installUFWForFirewall = func() error { mutated = true; return nil }
 	readUFWDefaultForFirewall = func() (string, error) { mutated = true; return "", nil }
 	writeUFWDefaultForFirewall = func([]byte) error { mutated = true; return nil }
 	runInitialFirewallCommand = func([]string) error { mutated = true; return nil }
@@ -40,16 +37,11 @@ func TestConfigureFirewallRefusesBeforeMutationWhenSSHObservationFails(t *testin
 	}
 }
 
-func TestConfigureFirewallUsesFreshObservedPorts(t *testing.T) {
+func TestConfigureFirewallOpensTheObservedPorts(t *testing.T) {
 	withInitialFirewallTestDeps(t)
-	prepared := false
 	observeSSHForFirewall = func() (SSHObservation, error) {
-		if !prepared {
-			return SSHObservation{Ports: []int{22}, PasswordAuth: true}, nil
-		}
 		return SSHObservation{Ports: []int{2222, 22022}, PasswordAuth: true}, nil
 	}
-	installUFWForFirewall = func() error { prepared = true; return nil }
 	readUFWDefaultForFirewall = func() (string, error) { return "IPV6=yes\n", nil }
 	writeUFWDefaultForFirewall = func([]byte) error { return nil }
 	var got [][]string
@@ -69,28 +61,5 @@ func TestConfigureFirewallUsesFreshObservedPorts(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("commands\n got: %#v\nwant: %#v", got, want)
-	}
-}
-
-func TestConfigureFirewallReobservesAfterPackagePreparation(t *testing.T) {
-	withInitialFirewallTestDeps(t)
-	calls := 0
-	observeSSHForFirewall = func() (SSHObservation, error) {
-		calls++
-		if calls == 1 {
-			return SSHObservation{Ports: []int{22}}, nil
-		}
-		return SSHObservation{}, errors.New("sshd changed during preparation")
-	}
-	installUFWForFirewall = func() error { return nil }
-	rewritten := false
-	readUFWDefaultForFirewall = func() (string, error) { rewritten = true; return "", nil }
-	writeUFWDefaultForFirewall = func([]byte) error { rewritten = true; return nil }
-	runInitialFirewallCommand = func([]string) error { rewritten = true; return nil }
-	if err := ConfigureInitialFirewall(); err == nil {
-		t.Fatal("rewrite accepted failed final SSH observation")
-	}
-	if calls != 2 || rewritten {
-		t.Fatalf("calls=%d rewritten=%v", calls, rewritten)
 	}
 }

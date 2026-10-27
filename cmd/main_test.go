@@ -4,7 +4,9 @@ package main
 
 import (
 	"errors"
+	"os"
 	"os/user"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -146,5 +148,30 @@ func TestConsoleIdentityLookupFailureDoesNotLoadConfig(t *testing.T) {
 		func() (*config.AppConfig, error) { loaded = true; return config.Default(), nil })
 	if !errors.Is(err, errWrongTUIIdentity) || loaded {
 		t.Fatalf("lookup failure: loaded=%v err=%v", loaded, err)
+	}
+}
+
+// Before the install finishes there is no settings file. The TUI must say
+// the node is not installed yet, not that a file needs repair.
+func TestMissingSettingsMeansNotInstalled(t *testing.T) {
+	dir := t.TempDir()
+	missingDir := &config.Store{Dir: filepath.Join(dir, "vpn"), Path: filepath.Join(dir, "vpn", "config.json"), OwnerUID: os.Getuid(), GroupGID: os.Getgid()}
+	_, err := missingDir.Load()
+	if !notInstalled(err) {
+		t.Fatalf("a missing settings folder was not read as not installed: %v", err)
+	}
+	if err := os.Mkdir(missingDir.Dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	_, err = missingDir.Load()
+	if !notInstalled(err) {
+		t.Fatalf("a missing settings file was not read as not installed: %v", err)
+	}
+	if err := os.WriteFile(missingDir.Path, []byte("{"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	_, err = missingDir.Load()
+	if err == nil || notInstalled(err) {
+		t.Fatalf("a broken settings file was read as not installed: %v", err)
 	}
 }

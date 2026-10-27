@@ -2,53 +2,19 @@ package installer
 
 import (
 	"fmt"
-	"os"
 
-	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/host"
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/paths"
 )
 
-// StageBoardAll builds the complete board at install time:
-// every fact that exists on this box right now. Facts whose
-// source does not exist yet are SKIPPED, not failed. A fresh
-// box has no wallet macaroon until the operator creates the
-// wallet (that moment stages it), and no Syncthing facts until
-// Syncthing is installed.
-func StageBoardAll() error {
-	type fact struct {
-		name string
-		fn   func() error
-		skip func() bool // true = source legitimately absent
-	}
-	cfg, cfgErr := config.Load()
-	haveSyncthing := cfgErr == nil && cfg.SyncthingEnabled
-	haveWallet := false
-	if cfgErr == nil {
-		if profile, err := cfg.NetworkConfig(); err == nil {
-			_, statErr := os.Stat(paths.LNDMacaroon(profile.LNDNetwork))
-			haveWallet = statErr == nil
-		}
-	}
-
-	facts := []fact{
-		{"lnd-tls-cert", host.StageLNDTLSCert, nil},
-		{"lnd-admin-macaroon", host.StageLNDMacaroon,
-			func() bool { return !haveWallet }},
-		{"syncthing-api-key", host.StageSyncthingAPIKey,
-			func() bool { return !haveSyncthing }},
-	}
-	for _, f := range facts {
-		if f.skip != nil && f.skip() {
-			logger.Install(
-				"staging: %s skipped (source not present yet)",
-				f.name)
-			continue
-		}
-		if err := f.fn(); err != nil {
-			return fmt.Errorf("stage %s: %w", f.name, err)
-		}
+// stageBoard gives the TUI its copy of LND's TLS certificate, the one
+// credential that exists during the install. The wallet's macaroon is staged
+// when the owner creates the wallet, and Syncthing's key when Syncthing is
+// installed.
+func stageBoard() error {
+	if err := host.StageLNDTLSCert(); err != nil {
+		return fmt.Errorf("stage lnd-tls-cert: %w", err)
 	}
 	logger.Install("staging board complete at %s", paths.StateDir)
 	return nil

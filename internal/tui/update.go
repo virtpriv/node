@@ -732,6 +732,9 @@ func (m Model) handleKey(
 	key := msg.String()
 
 	if key == "ctrl+z" {
+		if !canSuspend() {
+			return m, nil
+		}
 		return m, tea.Suspend
 	}
 

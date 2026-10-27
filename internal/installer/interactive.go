@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/virtpriv/node/internal/host"
+	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/loginpassword"
 	"github.com/virtpriv/node/internal/system"
 )
@@ -49,8 +50,9 @@ type InstallEvent struct {
 	Result        RunResult
 	CompletionErr error
 	// RootLoginOff, on the final event, is set when the install record
-	// shows root's SSH login turned off.
-	RootLoginOff bool
+	// shows root's SSH login turned off. RootLoginMayBeOff is set when the
+	// SSH step failed after it may have turned it off.
+	RootLoginOff, RootLoginMayBeOff bool
 }
 
 // InstallSession owns one execution, independently of progress consumption.
@@ -72,6 +74,9 @@ type InstallSession struct {
 	completionErr error
 	// began bounds the SSH log read, so only a login during this run counts.
 	began time.Time
+	// startErr is why the last Start was refused, kept for the shell if
+	// the owner then leaves.
+	startErr error
 }
 
 func newInstallSession(r *stepRunner, dec *InstallDecisions,
@@ -109,20 +114,30 @@ func (s *InstallSession) Start(input InteractiveInput) error {
 		var err error
 		password, err = loginpassword.New(input.Password.Text())
 		if err != nil {
+			s.refuse(err)
 			return err
 		}
 	}
 	if s.needCache {
 		if err := s.persistDBCache(s.cacheMB); err != nil {
+			s.refuse(err)
 			return err
 		}
 	}
+	s.startErr = nil
 	if s.needIdentity {
 		s.dec.Password = password
 	}
 	s.started = true
 	go s.run()
 	return nil
+}
+
+// refuse keeps why Start was refused and logs it, because the screens point
+// to the log. The caller holds s.mu.
+func (s *InstallSession) refuse(err error) {
+	s.startErr = err
+	logger.Install("could not start the install: %v", err)
 }
 
 // Stop requests a stop after the admitted step and its ledger publication.
@@ -140,11 +155,19 @@ func (s *InstallSession) Stop() {
 	}
 }
 
-// finalEvent reports the outcome, and whether the install record now shows
-// root's SSH login turned off.
+// finalEvent reports the outcome, and whether root's SSH login is now off or
+// may be.
 func (s *InstallSession) finalEvent() InstallEvent {
+	off := s.runner.ledger.done(rootLoginOffStep)
 	return InstallEvent{Final: true, Result: s.result, CompletionErr: s.completionErr,
-		RootLoginOff: s.runner.ledger.done(rootLoginOffStep)}
+		RootLoginOff:      off,
+		RootLoginMayBeOff: !off && rootLoginMayBeOff(s.result.Err)}
+}
+
+// rootLoginMayBeOff reports whether a step's error says the SSH setting that
+// turns root's login off may have been written.
+func rootLoginMayBeOff(err error) bool {
+	return errors.Is(err, host.ErrSSHSettingNotConfirmed)
 }
 
 // Events supplies one ordered stream for the frontend's single observer.
@@ -198,6 +221,13 @@ func (s *InstallSession) run() {
 	if err := s.complete(); err != nil {
 		s.completionErr = fmt.Errorf("install steps complete but finalization failed: %w. Run sudo vpn install again to retry", err)
 	}
+}
+
+// refusal is why the last Start was refused, nil after a start.
+func (s *InstallSession) refusal() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.startErr
 }
 
 func runInstallInteractive(s *InstallSession, view InstallView, frontend InstallFrontend) (result RunResult, err error) {

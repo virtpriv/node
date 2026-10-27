@@ -8,10 +8,7 @@ import (
 )
 
 var (
-	observeSSHForFirewall = ObserveInitialSSHState
-	installUFWForFirewall = func() error {
-		return system.RunRoot("apt-get", "install", "-y", "-qq", "ufw")
-	}
+	observeSSHForFirewall     = ObserveInitialSSHState
 	readUFWDefaultForFirewall = func() (string, error) {
 		return system.RunRootOutput("cat", paths.UFWDefault)
 	}
@@ -28,19 +25,11 @@ var (
 // the Hybrid upgrade and the Syncthing add-on, add and verify only the rules
 // they own through the additive host operations and never call it.
 //
-// The initial operation re-observes sshd immediately before any firewall
-// mutation. Observation failure refuses the rewrite. There is no cached-port
-// or port-22 fallback.
+// The step observes sshd right before the rewrite and opens the ports it
+// listens on. Observation failure refuses the rewrite. There is no
+// cached-port or port-22 fallback. ufw itself comes from the first package
+// step.
 func ConfigureInitialFirewall() error {
-	if _, err := observeSSHForFirewall(); err != nil {
-		return fmt.Errorf("observe SSH ports before firewall preparation: %w", err)
-	}
-	if err := installUFWForFirewall(); err != nil {
-		return err
-	}
-	// Package installation can take long enough for sshd configuration to
-	// change. Re-observe at the last responsible moment. Only this fresh
-	// answer is allowed to shape the rewrite below.
 	obs, err := observeSSHForFirewall()
 	if err != nil {
 		return fmt.Errorf("observe SSH ports before firewall rewrite: %w", err)

@@ -38,13 +38,23 @@ func ensureOperatorAccount(lookup func(string) (*user.User, error), run func(str
 
 // ConfigureOperatorAutoLaunch opens the node TUI for interactive SSH logins.
 // Installer calls it after recording successful password application.
+//
+// Bash reads its login file without job control, so without set -m the TUI
+// would share the login session's process group: ctrl+z would stop it with
+// no shell able to bring it back. The color reset is for a TUI that ended
+// without restoring the window, after a crash Bubble Tea did not see. It
+// changes nothing when the colors are already back.
 func ConfigureOperatorAutoLaunch() error {
-	profile := `# Virtual Private Node, auto-launch
+	profile := `# Virtual Private Node opens when you log in over SSH.
 if [ -n "$SSH_CONNECTION" ] && [ -t 0 ]; then
+    # Run it as a job, so ctrl+z suspends it and fg brings it back.
+    set -m
     ` + paths.BinaryPath + `
+    # Give the window its own colors back if vpn stopped without doing it.
+    printf '\033]110\a\033]111\a'
 fi
 
-# Source .bashrc after the TUI exits (cli wrappers live there)
+# The bitcoin-cli and lncli shortcuts are in .bashrc.
 [ -f ~/.bashrc ] && source ~/.bashrc
 `
 	if err := system.WriteFileRootOwned(paths.AdminBashProfile, []byte(profile), 0644, paths.AdminUser, paths.AdminUser); err != nil {

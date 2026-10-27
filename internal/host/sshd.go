@@ -29,6 +29,17 @@ Match all
 `
 }
 
+// ErrSSHSettingNotConfirmed marks a failure after the new SSH setting may
+// have been written: sshd may already use it, or will at its next start.
+var ErrSSHSettingNotConfirmed = errors.New("the new SSH setting may be written but sshd did not confirm it")
+
+// notConfirmed adds ErrSSHSettingNotConfirmed to err and keeps its words, so
+// the screens that show it read as before.
+type notConfirmed struct{ err error }
+
+func (e notConfirmed) Error() string   { return e.err.Error() }
+func (e notConfirmed) Unwrap() []error { return []error{e.err, ErrSSHSettingNotConfirmed} }
+
 // ApplySSHHardening validates syntax and effective policy before restarting.
 // Both the installer and runtime use the same owner-scoped configuration.
 func ApplySSHHardening(passwordAuth string) error {
@@ -69,8 +80,9 @@ func applySSHHardening(passwordAuth string, ops sshdOps) error {
 	if err != nil && existed {
 		return fmt.Errorf("read current sshd drop-in: %w", err)
 	}
+	// The writer can fail after the new file took the old one's place.
 	if err = ops.write([]byte(buildHardeningDropIn(passwordAuth))); err != nil {
-		return fmt.Errorf("write sshd drop-in: %w", err)
+		return notConfirmed{fmt.Errorf("write sshd drop-in: %w", err)}
 	}
 	if out, err := ops.validate(); err != nil {
 		var restoreErr error
@@ -80,11 +92,14 @@ func applySSHHardening(passwordAuth string, ops sshdOps) error {
 			restoreErr = ops.remove()
 		}
 		if restoreErr != nil {
-			return fmt.Errorf("sshd rejected the config (%s); restoring %s failed (%v); sshd was not restarted; inspect the file before restarting", strings.TrimSpace(out), paths.SSHDDropIn, restoreErr)
+			return notConfirmed{fmt.Errorf("sshd rejected the config (%s), restoring %s failed (%v), sshd was not restarted. Inspect the file before restarting", strings.TrimSpace(out), paths.SSHDDropIn, restoreErr)}
 		}
-		return fmt.Errorf("sshd rejected the config; previous drop-in restored; sshd not restarted: %s", strings.TrimSpace(out))
+		return fmt.Errorf("sshd rejected the config, previous drop-in restored, sshd not restarted: %s", strings.TrimSpace(out))
 	}
-	return ops.restart()
+	if err := ops.restart(); err != nil {
+		return notConfirmed{err}
+	}
+	return nil
 }
 
 // RebuildSSHHardeningConfig checks fresh, structurally valid keys while holding
@@ -106,7 +121,7 @@ func rebuildSSHConfig(disabled bool, store sshkeys.Store, apply func(string) err
 				return err
 			}
 			if len(sshkeys.Keys(data)) == 0 {
-				return errors.New("refusing to disable password authentication with no supported SSH keys; add and test a key first")
+				return errors.New("refusing to disable password authentication with no supported SSH keys, add and test a key first")
 			}
 			auth = "no"
 		}
@@ -129,8 +144,8 @@ func rebuildSSHConfig(disabled bool, store sshkeys.Store, apply func(string) err
 }
 
 // EffectiveSSHPasswordAuth samples sshd's resolved configuration for the operator
-// at localhost. Address-specific Match rules can differ for an actual connection;
-// this observation is not proof that a remote password login will succeed.
+// at localhost. Address-specific Match rules can differ for an actual connection,
+// so this observation is not proof that a remote password login will succeed.
 func EffectiveSSHPasswordAuth() (bool, error) {
 	if os.Geteuid() != 0 {
 		return false, errors.New("SSH configuration requires the root helper")
@@ -169,7 +184,7 @@ func restartSSHD() error {
 }
 
 // Check localhost and, when inherited from SSH, the current remote connection.
-// These samples detect conflicting Match rules; only a new login proves access.
+// These samples detect conflicting Match rules. Only a new login proves access.
 func validateSSHPolicy(passwordAuth string) (string, error) {
 	out, err := system.RunRootCombinedOutput("sshd", "-t")
 	if err != nil {
@@ -179,13 +194,13 @@ func validateSSHPolicy(passwordAuth string) (string, error) {
 	if connection := os.Getenv("SSH_CONNECTION"); connection != "" {
 		fields := strings.Fields(connection)
 		if len(fields) != 4 {
-			return "invalid SSH_CONNECTION; cannot verify connection policy", errors.New("invalid SSH connection")
+			return "invalid SSH_CONNECTION, cannot verify connection policy", errors.New("invalid SSH connection")
 		}
 		remote, e1 := netip.ParseAddr(fields[0])
 		local, e2 := netip.ParseAddr(fields[2])
 		port, e3 := strconv.Atoi(fields[3])
 		if e1 != nil || e2 != nil || e3 != nil || port < 1 || port > 65535 {
-			return "invalid SSH_CONNECTION; cannot verify connection policy", errors.New("invalid SSH connection")
+			return "invalid SSH_CONNECTION, cannot verify connection policy", errors.New("invalid SSH connection")
 		}
 		contexts = append(contexts, "host="+remote.String()+",addr="+remote.String()+",laddr="+local.String()+",lport="+fields[3])
 	}

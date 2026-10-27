@@ -4,6 +4,8 @@ package installer
 
 import (
 	"fmt"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/paths"
@@ -239,41 +241,98 @@ const rootLoginOffStep = "ssh.harden"
 const RootLoginOffNotice = "Root can no longer log in over SSH, so if you close this terminal, log in as " +
 	paths.AdminUser + " first."
 
-// StopError reports an install that did not finish. Paused means it stopped
-// between steps with no step failed. Otherwise the step named failed with Err,
-// or, with no step named, finishing the install failed. RootLoginOff is set
-// once root's SSH login is off.
+// RootLoginMayBeOffNotice is for an SSH step that failed after it may have
+// written the setting that turns root's SSH login off.
+const RootLoginMayBeOffNotice = "Root's SSH login may already be off, so keep this terminal open and check in a new terminal that you can log in as " +
+	paths.AdminUser + "."
+
+// StopError reports an install that did not finish. NotStarted means no step
+// was ever recorded. Paused means it stopped between steps with no step
+// failed, and the step named is the one the next run does. Otherwise the
+// step named failed with Err, or, with no step named, finishing the install
+// failed. StartErr is why the last start was refused when the owner then
+// left. RootLoginOff is set once root's SSH login is off, RootLoginMayBeOff
+// when the SSH step failed after it may have turned it off.
 type StopError struct {
-	Paused         bool
-	StepName       string
-	StepNum, Total int
-	Err            error
-	RootLoginOff   bool
+	NotStarted        bool
+	Paused            bool
+	StepName          string
+	StepNum, Total    int
+	Err               error
+	StartErr          error
+	RootLoginOff      bool
+	RootLoginMayBeOff bool
 }
 
 func (e *StopError) Error() string {
-	if e.Paused {
+	switch {
+	case e.NotStarted && e.StartErr != nil:
+		return fmt.Sprintf("install did not start: %v", e.StartErr)
+	case e.NotStarted:
+		return "install did not start"
+	case e.Paused:
 		return fmt.Sprintf("install paused at step %d of %d (%s)", e.StepNum, e.Total, e.StepName)
-	}
-	if e.StepName == "" {
+	case e.StepName == "":
 		return e.Err.Error()
 	}
 	return fmt.Sprintf("%s: %v", e.StepName, e.Err)
 }
 
-func (e *StopError) Unwrap() error { return e.Err }
+func (e *StopError) Unwrap() []error {
+	var out []error
+	for _, err := range []error{e.Err, e.StartErr} {
+		if err != nil {
+			out = append(out, err)
+		}
+	}
+	return out
+}
+
+// RefusedStartText says that the install did not start and why, in the
+// words of the error that refused it. The screen and the shell add what to
+// do next.
+func RefusedStartText(err error) string {
+	why := err.Error()
+	r, n := utf8.DecodeRuneInString(why)
+	return "The install did not start. " + string(unicode.ToUpper(r)) + why[n:] + "."
+}
 
 // Lines are what the shell shows after the install screen closes.
 func (e *StopError) Lines() []string {
-	out := []string{"Failed: " + e.Error()}
-	if e.Paused {
-		out = []string{fmt.Sprintf("Install paused at step %d of %d (%s).", e.StepNum, e.Total, e.StepName),
-			"Run sudo vpn install to continue."}
+	var out []string
+	if e.StartErr != nil {
+		out = append(out, RefusedStartText(e.StartErr))
+	}
+	switch {
+	case e.NotStarted && e.StartErr != nil:
+		out = append(out, "Run sudo vpn install to try again.")
+	case e.NotStarted:
+		out = append(out, "The install did not start.", "Run sudo vpn install to start it.")
+	case e.Paused:
+		out = append(out, fmt.Sprintf("Install paused at step %d of %d (%s).", e.StepNum, e.Total, e.StepName),
+			"Run sudo vpn install to continue.")
+	default:
+		out = append(out, "Failed: "+e.Error())
 	}
 	if e.RootLoginOff {
 		out = append(out, RootLoginOffNotice)
+	} else if e.RootLoginMayBeOff {
+		out = append(out, RootLoginMayBeOffNotice)
 	}
 	return out
+}
+
+// nextStep returns the step the next run of steps against led starts with:
+// the first step the planner would run, leaving out gates, which run on
+// every pass anyway. A group whose last member is not recorded runs again
+// from its first member. ok is false when every step is recorded.
+func nextStep(steps []InstallStep, led *installLedger) (int, bool) {
+	for i, p := range planRun(steps, led) {
+		if p.Run && steps[i].Kind != StepGate {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 // classifyRun describes execution progress. RunComplete means every step

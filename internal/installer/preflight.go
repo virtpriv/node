@@ -45,6 +45,7 @@ type PreflightResult struct {
 const (
 	checkNameDebian    = "Debian version is exactly 13"
 	checkNameArch      = "CPU architecture is amd64"
+	checkNameVM        = "the machine is not a container"
 	checkNameIOLogging = "sudo I/O logging is disabled"
 	checkNameDpkg      = "package system is healthy (dpkg --audit)"
 	checkNameUfw       = "ufw is installable"
@@ -131,6 +132,7 @@ func runPreflightChecks() ([]PreflightResult, host.SSHObservation) {
 	results := []PreflightResult{
 		{checkNameDebian, checkDebian13()},
 		{checkNameArch, checkDebianArchitecture()},
+		{checkNameVM, checkVirtualMachine(detectContainer())},
 	}
 	results = append(results, machineResults()...)
 	results = append(results,
@@ -142,6 +144,25 @@ func runPreflightChecks() ([]PreflightResult, host.SSHObservation) {
 	results = append(results,
 		PreflightResult{checkNameSSHState, obsErr})
 	return results, obs
+}
+
+// detectContainer asks systemd which container the machine runs in. It is a
+// variable so tests can stand in for the machine.
+var detectContainer = func() (string, error) {
+	out, err := exec.Command("systemd-detect-virt", "--container").Output()
+	return strings.TrimSpace(string(out)), err
+}
+
+// checkVirtualMachine refuses a container plan (LXC, OpenVZ and the like).
+// A container shares its host's kernel, so the install's firewall, IPv6 and
+// swap steps cannot work there. systemd-detect-virt prints the container's
+// kind and exits 0 inside one, and prints "none" and exits 1 outside. Any
+// other answer cannot be read and passes, as for the other checks.
+func checkVirtualMachine(kind string, err error) error {
+	if err != nil || kind == "" || kind == "none" {
+		return nil
+	}
+	return fmt.Errorf("found the container type %s, use a virtual machine or a computer of its own", kind)
 }
 
 // checkArchitecture enforces the only artifact set certified by this
