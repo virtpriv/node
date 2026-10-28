@@ -95,10 +95,11 @@ func noStep(t *testing.T) func(*InstallSession, int) error {
 	}
 }
 
-// A pause names the step the next run actually does: the first step not
-// recorded, the first member of a download group whose last member is not
-// recorded, and never the Tor check, which runs again on every pass. With
-// nothing recorded the install did not start.
+// A pause names the last step finished and the step the next run actually
+// does: the first step not recorded, the first member of a download group
+// whose last member is not recorded, and the Tor check only before it first
+// ran, since it runs again on every pass. With nothing recorded the install
+// did not start.
 func TestRootPauseNamesTheStepTheNextRunDoes(t *testing.T) {
 	requireRootTestEnvironment(t)
 	stopped := func(t *testing.T, err error) *StopError {
@@ -121,8 +122,8 @@ func TestRootPauseNamesTheStepTheNextRunDoes(t *testing.T) {
 	t.Run("exit on a rerun", func(t *testing.T) {
 		run, _ := stopFixture(t, 5)
 		stop := stopped(t, run(false, noStep(t)))
-		if stop.NotStarted || !stop.Paused || stop.StepNum != 6 {
-			t.Fatalf("got %+v, want paused at step 6", stop)
+		if stop.NotStarted || !stop.Paused || stop.DoneNum != 5 || stop.StepNum != 6 {
+			t.Fatalf("got %+v, want paused after step 5, next step 6", stop)
 		}
 	})
 
@@ -135,8 +136,17 @@ func TestRootPauseNamesTheStepTheNextRunDoes(t *testing.T) {
 			}
 			return nil
 		}))
-		if !stop.Paused || stop.StepNum != first+1 {
-			t.Fatalf("got %+v, want paused at the download, step %d", stop, first+1)
+		if !stop.Paused || stop.DoneNum != first+1 || stop.StepNum != first+1 {
+			t.Fatalf("got %+v, want paused after the download, step %d, and the download next", stop, first+1)
+		}
+	})
+
+	t.Run("the Tor check is named before its first run", func(t *testing.T) {
+		gate := keyIndex(t, "tor.gate")
+		run, _ := stopFixture(t, gate)
+		stop := stopped(t, run(false, noStep(t)))
+		if !stop.Paused || stop.DoneNum != gate || stop.StepNum != gate+1 {
+			t.Fatalf("got %+v, want paused after step %d, the Tor check next", stop, gate)
 		}
 	})
 
@@ -144,8 +154,8 @@ func TestRootPauseNamesTheStepTheNextRunDoes(t *testing.T) {
 		gate := keyIndex(t, "tor.gate")
 		run, _ := stopFixture(t, gate+1)
 		stop := stopped(t, run(false, noStep(t)))
-		if !stop.Paused || stop.StepNum != gate+2 {
-			t.Fatalf("got %+v, want paused at step %d after the Tor check", stop, gate+2)
+		if !stop.Paused || stop.DoneNum != gate+1 || stop.StepNum != gate+2 {
+			t.Fatalf("got %+v, want paused after the Tor check, step %d, next step %d", stop, gate+1, gate+2)
 		}
 	})
 }

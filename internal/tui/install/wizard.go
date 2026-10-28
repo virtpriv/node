@@ -592,7 +592,8 @@ func (m wizardModel) statusBar() []string {
 		now = lipgloss.NewStyle().Foreground(theme.ColorSuccess).Render("✓") + " " + theme.Label.Render("All steps finished")
 		took = "in " + took
 	}
-	of := fmt.Sprintf(" %d of %d ", m.stepsDone(), len(m.steps))
+	// The step that runs or failed, the number a pause names in the shell.
+	of := fmt.Sprintf(" %d of %d ", min(m.stepsDone()+1, len(m.steps)), len(m.steps))
 	bar := m.bar
 	bar.SetWidth(frameInside - 2 - len(of))
 	return []string{
