@@ -3,15 +3,19 @@
 package installer
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
 
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 // ── Install engine core ──────────────────────────────────
@@ -333,6 +337,40 @@ func (e *StopError) Lines() []string {
 		out = append(out, run, "", "sudo vpn install")
 	}
 	return out
+}
+
+// PrintStop shows in the shell why an install ended without finishing, once
+// the install screen has closed: a pause, a refusal or a failure.
+func PrintStop(err error) {
+	lines := []string{"Failed: " + err.Error()}
+	var stop *StopError
+	if errors.As(err, &stop) {
+		lines = stop.Lines()
+	}
+	fmt.Fprintln(os.Stderr)
+	printShellLines(os.Stderr, lines)
+}
+
+// printShellLines prints lines indented. On a terminal a line wider than the
+// window is broken between words, as Python's argparse does for help text.
+// Saved to a file, every line is printed as it is.
+func printShellLines(w *os.File, lines []string) {
+	width := 0
+	if cols, _, err := term.GetSize(int(w.Fd())); err == nil {
+		// The indent and a margin, so a full line never touches the edge.
+		width = cols - 4
+	}
+	for _, line := range lines {
+		for _, part := range strings.Split(line, "\n") {
+			if width <= 0 || ansi.StringWidth(part) <= width {
+				fmt.Fprintln(w, strings.TrimRight("  "+part, " "))
+				continue
+			}
+			for _, l := range theme.Wrap(part, width) {
+				fmt.Fprintf(w, "  %s\n", l)
+			}
+		}
+	}
 }
 
 // nextStep returns the step the next run of steps against led starts with:

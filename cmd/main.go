@@ -13,41 +13,17 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
-
 	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/helperd"
 	"github.com/virtpriv/node/internal/host"
 	"github.com/virtpriv/node/internal/installer"
 	"github.com/virtpriv/node/internal/paths"
-	"github.com/virtpriv/node/internal/theme"
 	"github.com/virtpriv/node/internal/tui"
 	installui "github.com/virtpriv/node/internal/tui/install"
 	"github.com/virtpriv/node/internal/update"
 )
 
 var version = "dev"
-
-// shellWidth is where the install's shell lines break, so that they fit an
-// 80 column terminal with their indent.
-const shellWidth = 76
-
-// printShellLines prints the install's closing lines indented. A line too
-// long for the width is broken between words, others are printed as they
-// are, so the output of a command inside an error keeps its spacing.
-func printShellLines(lines []string) {
-	for _, line := range lines {
-		for _, part := range strings.Split(line, "\n") {
-			if ansi.StringWidth(part) <= shellWidth {
-				fmt.Fprintln(os.Stderr, strings.TrimRight("  "+part, " "))
-				continue
-			}
-			for _, l := range theme.Wrap(part, shellWidth) {
-				fmt.Fprintf(os.Stderr, "  %s\n", l)
-			}
-		}
-	}
-}
 
 // Explicit dispatch: what the binary does is decided by what
 // the operator TYPED, never by sniffing box state. `vpn` is the
@@ -78,13 +54,7 @@ func main() {
 		if err := installer.RunInstall(opts, installui.Run); err != nil {
 			// A paused install is not a failure, but it is not finished
 			// either, so the exit status stays 1.
-			lines := []string{"Failed: " + err.Error()}
-			var stop *installer.StopError
-			if errors.As(err, &stop) {
-				lines = stop.Lines()
-			}
-			fmt.Fprintln(os.Stderr)
-			printShellLines(lines)
+			installer.PrintStop(err)
 			os.Exit(1)
 		}
 	case cmdHelperd:
