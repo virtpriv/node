@@ -85,8 +85,7 @@ var newInstallStartupDependencies = productionInstallStartupDependencies
 // RunInstall is the `sudo vpn install` entry point.
 func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	if os.Geteuid() != 0 {
-		return errors.New(
-			"the installer must run as root, run: sudo vpn install")
+		return &StopError{NotStarted: true, StartErr: errors.New("the installer must run as root")}
 	}
 
 	// Package operations run without prompts for the whole run, as the
@@ -270,10 +269,15 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 		if i, ok := nextStep(steps, ledger); ok {
 			stop.StepNum, stop.StepName = i+1, steps[i].Name
 		}
+		for i, s := range steps {
+			if ledger.done(s.Key) {
+				stop.DoneNum, stop.DoneName = i+1, s.Name
+			}
+		}
 		logger.Install(
-			"install PAUSED at step %d of %d (%s), "+
-				"run sudo vpn install to continue", stop.StepNum, stop.Total,
-			stop.StepName)
+			"install PAUSED after step %d of %d (%s), "+
+				"run sudo vpn install to continue with step %d",
+			stop.DoneNum, stop.Total, stop.DoneName, stop.StepNum)
 		return stop
 	}
 
@@ -428,7 +432,7 @@ func publishTerminalLedger(ledger *installLedger) error {
 
 func printGeneratedPassword(password string) error {
 	_, err := fmt.Fprintf(os.Stdout,
-		"\n  Login password for %q (SAVE IT, it will not be shown again):\n\n    %s\n",
+		"\n  Login password for %q (SAVE IT, it will not be shown again):\n\n  %s\n",
 		paths.AdminUser, password)
 	if err != nil {
 		return fmt.Errorf("display generated login password: %w", err)

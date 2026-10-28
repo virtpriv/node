@@ -3,38 +3,41 @@
 package installer
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/x/ansi"
+	"golang.org/x/term"
+
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 // ── Install engine core ──────────────────────────────────
 //
-// The interactive session and unattended loop use the same
-// step runner for resume decisions, ledger recording, and
-// logging. The TUI observes progress without executing steps.
+// The interactive install and the unattended install run their steps
+// through one step runner, which decides what a rerun repeats, records each
+// finished step in the ledger and logs it. The install screen only shows
+// progress.
 //
-// Resume rules, in one place:
+// What a rerun repeats:
 //
-//   - MUTATION steps trust the ledger: a recorded completion
-//     is skipped. The ledger records completion, not present
-//     correctness, see the ledger.go header for the residual.
-//   - GATE steps assert a property of the world RIGHT NOW
-//     (Tor routing) and are ALWAYS re-executed, never
-//     ledger-skipped. No download step can run in a pass whose
-//     Tor routing was not verified in that same pass, by step
-//     type, not by ordering luck.
-//   - GROUP steps pass ephemeral material hand-to-hand (a
-//     MkdirTemp workdir captured in closures: download →
-//     verify → install). The workdir does not survive the
-//     process, so a group is ATOMIC for resume: it counts as
-//     complete only if its TERMINAL step (last member in list
-//     order) is recorded. Otherwise every member re-runs.
-//     Re-running a download pipeline is self-verifying by
-//     construction (fresh GPG + checksum).
+//   - A step that changes the machine runs once. Its recorded completion is
+//     trusted. The ledger records that a step finished, not that its result
+//     is still in place, see the ledger.go header.
+//   - A check (a gate) runs on every pass, because it checks the machine as
+//     it is now. So no download can run in a pass that did not check Tor's
+//     routing itself, whatever the order of the steps.
+//   - A group (download, verify, install) hands files over through a folder
+//     made with MkdirTemp and kept only in this process. A group counts as
+//     done only when its last member is recorded. Otherwise every member runs
+//     again, and the new download is verified again from the start, its
+//     signatures and checksum.
 
 // StepKind classifies a step for resume.
 type StepKind int
@@ -69,7 +72,7 @@ type InstallStep struct {
 	Name  string
 	Fn    func() error
 	Kind  StepKind
-	Group string // resume-atomic pipeline, "" for self-contained
+	Group string // steps that rerun together, "" for a step on its own
 
 	Status StepStatus
 	Err    error
@@ -101,12 +104,11 @@ type stepPlan struct {
 	Reason string // human-readable cause, logged verbatim
 }
 
-// planRun decides, for every step, run or skip. It is the
-// whole resume ruling as one pure function, unit-tested per
-// scenario, with no I/O and no clock.
+// planRun decides, for every step, run or skip. It holds every resume
+// decision as one function with no I/O and no clock, tested per scenario.
 func planRun(steps []InstallStep, led *installLedger) []stepPlan {
-	// Terminal member of each group = last in list order.
-	terminal := map[string]string{} // group → terminal key
+	// The last member of each group, in list order, by group.
+	terminal := map[string]string{}
 	for _, s := range steps {
 		if s.Group != "" {
 			terminal[s.Group] = s.Key
@@ -227,8 +229,8 @@ const (
 
 type RunResult struct {
 	Outcome  RunOutcome
-	StepName string // failed / interrupted-at step ("" if complete)
-	StepNum  int    // 1-based
+	StepName string // the step that failed or was not reached, "" if complete
+	StepNum  int    // counted from 1
 	Total    int
 	Err      error // the failed step's error
 }
@@ -248,16 +250,21 @@ const RootLoginMayBeOffNotice = "Root's SSH login may already be off, so keep th
 
 // StopError reports an install that did not finish. NotStarted means no step
 // was ever recorded. Paused means it stopped between steps with no step
-// failed, and the step named is the one the next run does. Otherwise the
-// step named failed with Err, or, with no step named, finishing the install
-// failed. StartErr is why the last start was refused when the owner then
-// left. RootLoginOff is set once root's SSH login is off, RootLoginMayBeOff
-// when the SSH step failed after it may have turned it off.
+// failed. DoneNum and DoneName name the last step recorded, and the step
+// named is the one the next run does, an earlier one when a download is done
+// again.
+// Otherwise the step named failed with Err, or, with no step named,
+// finishing the install failed. StartErr is why the last start was refused
+// when the owner then left. RootLoginOff is set once root's SSH login is
+// off, RootLoginMayBeOff when the SSH step failed after it may have turned
+// it off.
 type StopError struct {
 	NotStarted        bool
 	Paused            bool
 	StepName          string
 	StepNum, Total    int
+	DoneNum           int
+	DoneName          string
 	Err               error
 	StartErr          error
 	RootLoginOff      bool
@@ -271,7 +278,7 @@ func (e *StopError) Error() string {
 	case e.NotStarted:
 		return "install did not start"
 	case e.Paused:
-		return fmt.Sprintf("install paused at step %d of %d (%s)", e.StepNum, e.Total, e.StepName)
+		return fmt.Sprintf("install paused after step %d of %d (%s)", e.DoneNum, e.Total, e.DoneName)
 	case e.StepName == "":
 		return e.Err.Error()
 	}
@@ -297,20 +304,27 @@ func RefusedStartText(err error) string {
 	return "The install did not start. " + string(unicode.ToUpper(r)) + why[n:] + "."
 }
 
-// Lines are what the shell shows after the install screen closes.
+// Lines are what the shell shows after the install screen closes. A command
+// to type stands alone on the last line, after an empty one.
 func (e *StopError) Lines() []string {
 	var out []string
 	if e.StartErr != nil {
 		out = append(out, RefusedStartText(e.StartErr))
 	}
+	var run string
 	switch {
 	case e.NotStarted && e.StartErr != nil:
-		out = append(out, "Run sudo vpn install to try again.")
+		run = "To try again, run:"
 	case e.NotStarted:
-		out = append(out, "The install did not start.", "Run sudo vpn install to start it.")
+		out = append(out, "The install did not start.")
+		run = "To start it, run:"
 	case e.Paused:
-		out = append(out, fmt.Sprintf("Install paused at step %d of %d (%s).", e.StepNum, e.Total, e.StepName),
-			"Run sudo vpn install to continue.")
+		out = append(out, fmt.Sprintf("Install paused after step %d of %d (%s).", e.DoneNum, e.Total, e.DoneName))
+		run = fmt.Sprintf("To continue with step %d (%s), run:", e.StepNum, e.StepName)
+		if e.StepNum <= e.DoneNum {
+			out = append(out, fmt.Sprintf("For safety, the next run starts again at step %d (%s).", e.StepNum, e.StepName))
+			run = "To continue, run:"
+		}
 	default:
 		out = append(out, "Failed: "+e.Error())
 	}
@@ -319,16 +333,54 @@ func (e *StopError) Lines() []string {
 	} else if e.RootLoginMayBeOff {
 		out = append(out, RootLoginMayBeOffNotice)
 	}
+	if run != "" {
+		out = append(out, run, "", "sudo vpn install")
+	}
 	return out
 }
 
+// PrintStop shows in the shell why an install ended without finishing, once
+// the install screen has closed: a pause, a refusal or a failure.
+func PrintStop(err error) {
+	lines := []string{"Failed: " + err.Error()}
+	var stop *StopError
+	if errors.As(err, &stop) {
+		lines = stop.Lines()
+	}
+	fmt.Fprintln(os.Stderr)
+	printShellLines(os.Stderr, lines)
+}
+
+// printShellLines prints lines indented. On a terminal a line wider than the
+// window is broken between words, as Python's argparse does for help text.
+// Saved to a file, every line is printed as it is.
+func printShellLines(w *os.File, lines []string) {
+	width := 0
+	if cols, _, err := term.GetSize(int(w.Fd())); err == nil {
+		// The indent and a margin, so a full line never touches the edge.
+		width = cols - 4
+	}
+	for _, line := range lines {
+		for _, part := range strings.Split(line, "\n") {
+			if width <= 0 || ansi.StringWidth(part) <= width {
+				fmt.Fprintln(w, strings.TrimRight("  "+part, " "))
+				continue
+			}
+			for _, l := range theme.Wrap(part, width) {
+				fmt.Fprintf(w, "  %s\n", l)
+			}
+		}
+	}
+}
+
 // nextStep returns the step the next run of steps against led starts with:
-// the first step the planner would run, leaving out gates, which run on
-// every pass anyway. A group whose last member is not recorded runs again
-// from its first member. ok is false when every step is recorded.
+// the first step the planner would run, leaving out a gate that already
+// passed, since gates run again on every pass anyway. A group whose last
+// member is not recorded runs again from its first member. ok is false when
+// every step is recorded.
 func nextStep(steps []InstallStep, led *installLedger) (int, bool) {
 	for i, p := range planRun(steps, led) {
-		if p.Run && steps[i].Kind != StepGate {
+		if p.Run && (steps[i].Kind != StepGate || !led.done(steps[i].Key)) {
 			return i, true
 		}
 	}
@@ -353,9 +405,8 @@ func classifyRun(
 				}
 			}
 		}
-		// Marked failed with no failed step recorded. Impossible
-		// by construction, so refuse to call it complete
-		// (fail-safe direction).
+		// Marked failed with no failed step recorded. That cannot happen,
+		// and the safe answer is to never call it complete.
 		return RunResult{Outcome: RunFailed, Total: total,
 			Err: fmt.Errorf("install failed (step unknown)")}
 	}
@@ -376,11 +427,10 @@ func classifyRun(
 
 // ── Unattended front-end ─────────────────────────────────
 
-// RunInstallUnattended executes steps with no TUI: one plain
-// line per step to stdout, same runner, same ledger, same log
-// trail. Its consumer is `vpn install --unattended`.
-// Interruption needs no handling here: a killed process leaves
-// the ledger truthful by write ordering.
+// RunInstallUnattended runs the steps without the install screen for
+// `vpn install --unattended`, with the same runner, ledger and log, and one
+// line per step on stdout. A killed process needs no handling here, because
+// a step is recorded only after it finished.
 func RunInstallUnattended(
 	steps []InstallStep, version string, ledger *installLedger,
 	ledgerPath string,
@@ -390,8 +440,19 @@ func RunInstallUnattended(
 		return RunResult{}, err
 	}
 	total := len(steps)
+	// On a terminal the running step shows [....] until it ends, then its
+	// line is written again in place. Saved to a file, each line is written
+	// once, when its step ends, so the file holds no rewrites.
+	live := term.IsTerminal(int(os.Stdout.Fd()))
 	for i := range steps {
+		shown := live && r.plan[i].Run
+		if shown {
+			fmt.Printf("  [....] [%d/%d] %s", i+1, total, steps[i].Name)
+		}
 		skipped, err := r.runIndex(i)
+		if shown {
+			fmt.Print("\r")
+		}
 		switch {
 		case err != nil:
 			steps[i].Status = StepFailed

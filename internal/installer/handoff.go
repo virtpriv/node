@@ -15,5 +15,5 @@ func printConnectInstructions() {
 	if ip != "" {
 		target = paths.AdminUser + "@" + ip
 	}
-	fmt.Printf("\n  Install complete.\n\n  Connect to your node:\n\n    ssh %s\n\n", target)
+	fmt.Printf("\n  Install complete. Connect to your node with:\n\n  ssh %s\n\n", target)
 }
