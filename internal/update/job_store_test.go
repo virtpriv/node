@@ -2,10 +2,12 @@ package update
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/virtpriv/node/internal/update/protocol"
 )
@@ -279,5 +281,59 @@ func TestInstalledSideRefusesDamagedRecord(t *testing.T) {
 	}
 	if r, err := loadRecord(root); err == nil {
 		t.Fatal("truncated record was accepted", r)
+	}
+}
+
+// The installed helper passes the screen's newer fields only in a shape it
+// can read, and the next step and advice only with the error they explain.
+// A later worker may add next values, which pass by shape so the screen can
+// ignore them. Anything else is left out and status stays readable.
+func TestStatusPassesOnlyReadableStepTimesAndAdvice(t *testing.T) {
+	now := time.Now().UTC()
+	at := func(d time.Duration) string { return now.Add(d).Format(time.RFC3339Nano) }
+	advice := "LND was busy.\n\nSelect Continue."
+	for _, tc := range []struct {
+		name   string
+		set    map[string]any
+		err    string
+		times  int
+		next   protocol.Next
+		advice string
+	}{
+		{"all readable", map[string]any{"step_times": []any{at(-time.Minute), at(0)}, "next": "continue", "advice": advice}, "x", 2, protocol.NextContinue, advice},
+		{"next and advice without an error", map[string]any{"step_times": []any{at(0)}, "next": "continue", "advice": advice}, "", 1, "", ""},
+		{"a later next value", map[string]any{"next": "wait_for_owner"}, "x", 0, "wait_for_owner", ""},
+		{"next in capitals", map[string]any{"next": "Continue"}, "x", 0, "", ""},
+		{"next of another shape", map[string]any{"next": 1}, "x", 0, "", ""},
+		{"advice that clears the screen", map[string]any{"advice": "a\x1b[2Jb"}, "x", 0, "", ""},
+		{"advice too long", map[string]any{"advice": strings.Repeat("a", 401)}, "x", 0, "", ""},
+		{"a step time in the future", map[string]any{"step_times": []any{at(time.Hour)}}, "x", 0, "", ""},
+		{"more times than steps", map[string]any{"step_times": []any{at(0), at(0), at(0), at(0)}}, "x", 0, "", ""},
+		{"times of another shape", map[string]any{"step_times": "yesterday"}, "x", 0, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			j := workflowFixture()
+			j.Phase, j.Error = "failed", tc.err
+			j.Steps, j.StepNumber = []string{"Check the node", "Download and verify release files", "Finish VPN update"}, 2
+			if err := saveJob(root, j); err != nil {
+				t.Fatal(err)
+			}
+			rewriteRecord(t, root, func(m map[string]any) { maps.Copy(m, tc.set) })
+			r, err := loadRecord(root)
+			if err != nil || r == nil {
+				t.Fatal("record unreadable:", err)
+			}
+			s := r.status()
+			if len(s.StepTimes) != tc.times || s.Next != tc.next || s.Advice != tc.advice {
+				t.Fatalf("status passed %d times, next %q, advice %q", len(s.StepTimes), s.Next, s.Advice)
+			}
+			if len(s.Steps) != 3 || s.Error != tc.err || s.Phase != "failed" {
+				t.Fatal("the new fields changed the rest of the status", s)
+			}
+		})
 	}
 }

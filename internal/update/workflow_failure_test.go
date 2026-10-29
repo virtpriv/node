@@ -155,3 +155,18 @@ func TestRetryLeavesNoOldCode(t *testing.T) {
 		})
 	}
 }
+
+// The worker saves the screen's next step and words with each failure, so a
+// later release can lead an installed screen with its own advice.
+func TestFailuresSaveTheirNextStep(t *testing.T) {
+	stop := failedWith(t, func(h *workflowHarness) {
+		h.failure, h.failWith = "stop:lnd", fmt.Errorf("lnd %w", host.ErrUpdateServiceStop)
+	})
+	if stop.Next != protocol.NextContinue || stop.Advice == "" {
+		t.Fatalf("an LND stop saved next %q, advice %q", stop.Next, stop.Advice)
+	}
+	other := failedWith(t, func(h *workflowHarness) { h.failure = "install" })
+	if other.Next != protocol.NextRetry || other.Advice == "" {
+		t.Fatalf("a failure without a code saved next %q, advice %q", other.Next, other.Advice)
+	}
+}

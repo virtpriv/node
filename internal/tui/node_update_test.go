@@ -458,50 +458,6 @@ func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 	}
 }
 
-// A v0.7.0 node keeps this lookup for its first update. A failure the worker
-// names with a code gets its exact next step only where that step is true.
-// The locked wallet explains only an lnd stop, and a service is named as the
-// System tab shows it, where the operator starts or restarts it. Anything
-// else, a code from a later release included, gets the general advice.
-func TestKnownFailureGivesStepsOnlyWhereTheyApply(t *testing.T) {
-	for _, tc := range []struct {
-		code    protocol.FailureCode
-		service protocol.Component
-		step    bool
-		name    string // the service a start or restart step names
-	}{
-		{protocol.FailureStopFailed, protocol.LND, true, ""},
-		{protocol.FailureStopFailed, protocol.Bitcoin, false, ""},
-		{protocol.FailureStopFailed, protocol.Syncthing, false, ""},
-		{protocol.FailureStartInterrupted, protocol.LND, true, ""},
-		{protocol.FailureStartInterrupted, protocol.Bitcoin, true, ""},
-		{protocol.FailureServiceNotRunning, protocol.Bitcoin, true, "bitcoind"},
-		{protocol.FailureServiceNotRunning, protocol.Syncthing, true, "syncthing"},
-		{protocol.FailureServiceChanged, protocol.LND, true, "lnd"},
-		{protocol.FailureServiceChanged, protocol.Bitcoin, true, "bitcoind"},
-		{protocol.FailureServiceNotRunning, "tor", false, ""},
-		{protocol.FailureServiceNotRunning, "", false, ""},
-		{"snapshot_failed", protocol.LND, false, ""},
-	} {
-		t.Run(fmt.Sprintf("%s %s", tc.code, tc.service), func(t *testing.T) {
-			step := knownFailure(&protocol.Failure{Code: tc.code, Service: tc.service})
-			if (step != "") != tc.step {
-				t.Fatalf("step %q, want a step %v", step, tc.step)
-			}
-			words := strings.Fields(step)
-			if tc.name != "" && !slices.Contains(words, tc.name) {
-				t.Fatalf("step %q does not name %q", step, tc.name)
-			}
-			if tc.service == protocol.Bitcoin && slices.Contains(words, "bitcoin") {
-				t.Fatalf("step %q uses a name the System tab does not show", step)
-			}
-		})
-	}
-	if knownFailure(nil) != "" {
-		t.Fatal("a failure without a code got an exact step")
-	}
-}
-
 func TestStepNamesCannotControlTheTerminal(t *testing.T) {
 	s := NewNodeUpdateScreen(&ScreenContext{Version: "0.7.0"})
 	s.status = protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "running", Active: true, Running: true,
@@ -531,5 +487,38 @@ func TestRefreshDoesNotMoveFocus(t *testing.T) {
 	s.HandleMsg(s.request("status")())
 	if s.button != 0 {
 		t.Fatal("a refresh moved the focus")
+	}
+}
+
+func TestNextFromTheUpdateProgramLeadsAnUnknownStop(t *testing.T) {
+	// A later release's own stop of normal use, unknown to this screen,
+	// reaches it with its next step and words.
+	client := &nodeUpdateClientStub{status: protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "failed", Active: true,
+		Error: "syncthing was busy", Failure: &protocol.Failure{Code: "syncthing_busy", Service: protocol.Syncthing},
+		Next: protocol.NextContinue, Advice: "Syncthing was busy and has stopped now.\n\nSelect Continue."}}
+	s := NewNodeUpdateScreen(&ScreenContext{NodeUpdates: client, Version: "0.7.0"})
+	s.HandleMsg(s.Init()())
+	s.button = slices.Index(s.buttons(), "Continue")
+	if s.button < 0 {
+		t.Fatal("next continue offers no Continue")
+	}
+	_, cmd := s.HandleKey("enter", tea.KeyPressMsg{})
+	s.HandleMsg(cmd())
+	if client.resumed != client.status.ID {
+		t.Fatal("Continue did not resume the update")
+	}
+}
+
+func TestNextWithoutItsAdviceIsNotFollowed(t *testing.T) {
+	// The helper drops advice it cannot show. A next step left alone would
+	// pair the update program's button with this screen's own words, so
+	// the screen then uses its own pair.
+	client := &nodeUpdateClientStub{status: protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "failed", Active: true,
+		Error: "syncthing was busy", Failure: &protocol.Failure{Code: "syncthing_busy", Service: protocol.Syncthing},
+		Next: protocol.NextContinue}}
+	s := NewNodeUpdateScreen(&ScreenContext{NodeUpdates: client, Version: "0.7.0"})
+	s.HandleMsg(s.Init()())
+	if slices.Contains(s.buttons(), "Continue") {
+		t.Fatal("a next step without its advice was followed")
 	}
 }

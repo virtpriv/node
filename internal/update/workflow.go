@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"time"
 
 	"github.com/virtpriv/node/internal/host"
 	"github.com/virtpriv/node/internal/update/protocol"
@@ -31,6 +32,8 @@ type workflowOps struct {
 	backup     func() error
 	quarantine func([]protocol.Component) error
 }
+
+var now = time.Now
 
 // The steps Node Updates draws. Each run writes the list again from its own
 // affected services, so a Retry or a repair release shows its own steps.
@@ -87,7 +90,24 @@ func runJob(j *job, ops workflowOps) error {
 		return nil
 	}
 	affected := j.Affected
-	mark := func(step string) { j.StepNumber = slices.Index(j.Steps, step) + 1 }
+	// mark makes step the one in progress. A step that begins gets its time
+	// and a journal line, and the steps after it have not begun. Marking the
+	// step in progress again keeps its time.
+	mark := func(step string) {
+		n := slices.Index(j.Steps, step) + 1
+		if n < 1 {
+			j.StepNumber = 0
+			return
+		}
+		if n == j.StepNumber && n <= len(j.StepTimes) && !j.StepTimes[n-1].IsZero() {
+			return
+		}
+		times := make([]time.Time, len(j.Steps))
+		copy(times, j.StepTimes[:min(len(j.StepTimes), n-1)])
+		times[n-1] = now().UTC()
+		j.StepNumber, j.StepTimes = n, times
+		fmt.Fprintf(os.Stderr, "step %d of %d: %s\n", n, len(j.Steps), step)
+	}
 	// publish records the phase, the step text older screens show, and the
 	// step of the list that is now in progress.
 	publish := func(phase, step, listed string) error {
@@ -96,7 +116,8 @@ func runJob(j *job, ops workflowOps) error {
 		return ops.save(j)
 	}
 	if steps := stepList(affected); !slices.Equal(steps, j.Steps) {
-		j.Steps, j.StepNumber = steps, 1
+		j.Steps, j.StepNumber, j.StepTimes = steps, 0, nil
+		mark(steps[0])
 	}
 	if j.Phase == "committing" {
 		mark(stepFinish)
@@ -109,6 +130,7 @@ func runJob(j *job, ops workflowOps) error {
 	saveFailure := func(cause error, f *protocol.Failure) error {
 		j.Phase = "failed"
 		j.Error, j.Failure = cause.Error(), f
+		j.Next, j.Advice = protocol.Advise(f, !j.HostChanges)
 		return errors.Join(cause, ops.save(j))
 	}
 	// refuse records a failure without touching services.
@@ -142,7 +164,11 @@ func runJob(j *job, ops workflowOps) error {
 	if j.Phase == "retry" {
 		// The installed helper only records the request. Starts are attempted
 		// afresh. Downloads and the history of what may have run are kept.
+		// The step that failed begins again with its own time when marked.
 		j.Started = map[protocol.Component]bool{}
+		if n := j.StepNumber; n >= 1 && n <= len(j.StepTimes) {
+			j.StepTimes[n-1] = time.Time{}
+		}
 		j.Phase = "accepted"
 		if j.Completed["staged"] {
 			j.Phase = "installing"
@@ -266,7 +292,7 @@ func runJob(j *job, ops workflowOps) error {
 	if err := ops.backup(); err != nil {
 		fmt.Fprintln(os.Stderr, "LND backup copy failed after the update:", err)
 	}
-	j.Error, j.Failure = "", nil
+	j.Error, j.Failure, j.Next, j.Advice = "", nil, "", ""
 	if err := publish("complete", "Update complete", stepFinish); err != nil {
 		return err
 	}

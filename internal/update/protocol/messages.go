@@ -1,5 +1,12 @@
 package protocol
 
+import (
+	"fmt"
+	"time"
+	"unicode"
+	"unicode/utf8"
+)
+
 // WorkerUnit is the systemd unit that runs an update. Its journal holds the
 // full text of a worker failure.
 const WorkerUnit = "vpn-update.service"
@@ -28,14 +35,106 @@ type Status struct {
 	Step    string `json:"step"`
 	// Steps and StepNumber are the worker's list and the step in progress,
 	// counted from 1. Both are empty when the record holds no usable list.
-	Steps         []string `json:"steps,omitempty"`
-	StepNumber    int      `json:"step_number,omitempty"`
-	Error         string   `json:"error,omitempty"`
-	Failure       *Failure `json:"failure,omitempty"`
-	Active        bool     `json:"active"`
-	Running       bool     `json:"running"`
-	Cancellable   bool     `json:"cancellable"`
-	WalletNetwork string   `json:"wallet_network,omitempty"`
+	// StepTimes holds when each listed step began, in the list's order, the
+	// zero time for a step that has not begun.
+	Steps      []string    `json:"steps,omitempty"`
+	StepNumber int         `json:"step_number,omitempty"`
+	StepTimes  []time.Time `json:"step_times,omitempty"`
+	Error      string      `json:"error,omitempty"`
+	Failure    *Failure    `json:"failure,omitempty"`
+	// Next and Advice are the worker's next step and words for a failure. An
+	// installed screen uses them before its own, so a later release can lead
+	// a failure this release does not know.
+	Next          Next   `json:"next,omitempty"`
+	Advice        string `json:"advice,omitempty"`
+	Active        bool   `json:"active"`
+	Running       bool   `json:"running"`
+	Cancellable   bool   `json:"cancellable"`
+	WalletNetwork string `json:"wallet_network,omitempty"`
+}
+
+// Next names the button a failure's advice leads to. A value keeps its
+// meaning in every release. A worker sends a next step and its advice
+// together, and the advice names only the button its next step leads to.
+// An installed screen uses them only as a pair it can follow, else its own.
+type Next string
+
+const (
+	// NextContinue leads to Continue, for a stop of normal use. The screen
+	// draws it without an error.
+	NextContinue Next = "continue"
+	// NextRetry leads to Retry, for a failure.
+	NextRetry Next = "retry"
+	// NextCancel leads to Cancel update, for a failure before host changes
+	// that the operator fixes outside the update first. Never after host
+	// changes began: Cancel is no longer offered then.
+	NextCancel Next = "cancel"
+)
+
+// Readable reports whether n has the shape an installed reader accepts. A
+// later worker may send a value this release does not know, and the screen
+// ignores it.
+func (n Next) Readable() bool { return shortName(string(n), '_') }
+
+// MaxAdvice is the most characters of advice an installed reader accepts.
+const MaxAdvice = 400
+
+// ReadableAdvice reports whether advice is plain text an installed screen
+// may show: printable characters and line breaks, at most MaxAdvice.
+func ReadableAdvice(advice string) bool {
+	if advice == "" || !utf8.ValidString(advice) || utf8.RuneCountInString(advice) > MaxAdvice {
+		return false
+	}
+	for _, r := range advice {
+		if r != '\n' && (unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp)) {
+			return false
+		}
+	}
+	return true
+}
+
+// ServiceName is the name the System tab gives an updated service, and
+// whether the System tab shows it.
+func ServiceName(c Component) (string, bool) {
+	switch c {
+	case Bitcoin:
+		return "bitcoind", true
+	case LND, Syncthing:
+		return string(c), true
+	}
+	return "", false
+}
+
+// Advise gives a failure's next step and the words Node Updates shows for
+// it. The worker saves both with the failure, and an installed screen falls
+// back to its own release's Advise when the worker sent none. A known code
+// gets its exact next step, anything else whether the update had begun
+// changing services: cancellable is true before host changes began. The
+// sentence that names the button follows an empty line.
+func Advise(f *Failure, cancellable bool) (Next, string) {
+	if f != nil {
+		name, onSystemTab := ServiceName(f.Service)
+		switch f.Code {
+		case FailureStopFailed:
+			if f.Service == LND {
+				return NextContinue, "This happens when the LND wallet is locked or not created yet.\n\nSelect Continue."
+			}
+		case FailureStartInterrupted:
+			return NextContinue, "The update was interrupted, for example by a restart.\n\nSelect Continue."
+		case FailureServiceNotRunning:
+			if onSystemTab {
+				return NextCancel, fmt.Sprintf("%s is not running.\n\nSelect Cancel update, start %s on the System tab, then review again.", name, name)
+			}
+		case FailureServiceChanged:
+			if onSystemTab {
+				return NextCancel, fmt.Sprintf("%s is not running the installed version.\n\nSelect Cancel update, restart %s on the System tab, then review again.", name, name)
+			}
+		}
+	}
+	if cancellable {
+		return NextRetry, "No services were changed.\n\nSelect Retry, or Cancel update to leave the node as it was."
+	}
+	return NextRetry, "Services may have been changed.\n\nSelect Retry to try again."
 }
 
 // Failure names an update failure that Node Updates knows how to explain.
