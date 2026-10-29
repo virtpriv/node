@@ -7,6 +7,22 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// PadTo fills styled text with spaces to w cells, or cuts it with "…" when
+// it is wider.
+func PadTo(s string, w int) string {
+	if ansi.StringWidth(s) > w {
+		return ansi.Truncate(s, w, "…")
+	}
+	return s + strings.Repeat(" ", w-ansi.StringWidth(s))
+}
+
+// Spread puts left at the start of w cells and right at their end, with at
+// least one space between them.
+func Spread(left, right string, w int) string {
+	gap := max(1, w-ansi.StringWidth(left)-ansi.StringWidth(right))
+	return PadTo(left+strings.Repeat(" ", gap)+right, w)
+}
+
 // PlainText keeps observed comments and host metadata from controlling the
 // terminal or disguising their displayed order. Stored key bytes stay intact.
 func PlainText(text string) string {

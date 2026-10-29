@@ -175,7 +175,7 @@ service stops. The status then reads "Check free space". Each filesystem is
 counted once: its required free space plus the executables still to be
 installed there must fit. A refusal leaves every service as it was and can be
 retried after freeing space. Before host changes have begun it also removes the
-downloaded component files and can be cancelled. A successful update also removes its downloaded
+downloaded component files and can be canceled. A successful update also removes its downloaded
 component files, and the release plan and job record remain.
 
 Temporary systemd drop-ins disable automatic restarts and require a permit under
@@ -188,7 +188,7 @@ absent, an explicit Retry is required. Retry uses the same approved release and
 preserves the history that database changes may have occurred.
 
 The worker records that host changes have begun before it guards the first
-service. Until then a failed or refused update can be cancelled, releasing the
+service. Until then a failed or refused update can be canceled, releasing the
 maintenance restriction without changing the running node. Afterwards
 cancellation is refused, and completion or repair is required instead. A corrective
 job starts with the failed update's record of this, so it stays uncancellable
@@ -197,7 +197,7 @@ even if its own download fails.
 When an update starts, and at a Retry before any change, the worker requires
 each affected service to be running its installed program, and records the
 wallet and device identity. A stopped service refuses the update while it can
-still be cancelled. A download resumed after a reboot does not ask again. This
+still be canceled. A download resumed after a reboot does not ask again. This
 rule belongs to the worker of each release, not to the installed helper, so a
 release that repairs a service which cannot start can leave it out. A repair of
 a failed update uses the identity recorded before that update changed the node,
@@ -226,7 +226,7 @@ The helper and launcher on a node are older than the worker of every update
 they start. They read only these fields of the job record: `schema`,
 `review.digest`, `review.manifest.version`, `review.network`, `worker_hash`,
 `config_hash`, `phase`, `step`, `error` and `host_changes_begun`. They act on
-four phase words, `failed`, `complete`, `cancelled` and `waiting-unlock`, and
+four phase words, `failed`, `complete`, `canceled` and `waiting-unlock`, and
 treat any other as work in progress. Retry only sets `phase` to `retry`, and the
 worker decides where to resume. Retry and Cancel remove `error`, `failure`,
 `next` and `advice` and keep every other field as the worker wrote it. A worker
@@ -234,19 +234,19 @@ may add fields, phases and components, but must keep these meanings for as
 long as its plan admits a source with this helper.
 
 For Node Updates only, the helper also passes `steps`, `step_number`,
-`step_times`, `failure`, `next` and `advice`, each only in a shape it can read,
-and the last three only with an error. `step_times` holds one start time per
-listed step, no more entries than steps and none more than a minute ahead of
-the node's clock. `advice` is at most 400 characters of printable text and
-line breaks, its last part, after an empty line, the sentence that names the
-button. A worker sends `next` and `advice` together. `next` is `continue`,
+`step_starts`, `step_ends`, `failure`, `next` and `advice`, each only in a
+shape it can read, and the last three only with an error. `step_starts` and
+`step_ends` hold when each listed step began and ended, no more entries than
+steps, none more than a minute ahead of the node's clock, no end before its
+start, and no end for a step that has not begun. `advice` is at most 400
+characters of printable text and line breaks, its last part, after an empty
+line, the sentence that names the button. A worker sends `next` and `advice` together. `next` is `continue`,
 `retry` or `cancel`, the button the advice names, and `cancel` only before
 host changes began. Each value keeps its meaning in every release. A later
 worker may add failure codes and `next` values: the helper passes them, and a
 screen that does not know the value, or did not get both, uses its own
-release's next step and words for the failure. An update of all three
-services fills v0.7.0's limit of 12 listed steps, so a worker that lists more
-steps loses the list on that screen.
+release's next step and words for the failure. The screen scrolls the list,
+so a worker may list as many steps as it needs.
 
 Once a job exists, the launcher, Retry and Cancel no longer check the Debian
 version or read the node configuration. They hand the job to the worker, which

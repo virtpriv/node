@@ -2,6 +2,7 @@ package update
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -190,7 +191,7 @@ func TestInstalledSideHandlesLaterWorkerRecord(t *testing.T) {
 				t.Fatal("wrong cancellation boundary:", err)
 			}
 			m := kept("Cancel")
-			if (m["phase"] == "cancelled") == tc.begun {
+			if (m["phase"] == "canceled") == tc.begun {
 				t.Fatal("cancellation outcome was not recorded as decided", m["phase"])
 			}
 			if !tc.begun && m["failure"] != nil {
@@ -297,19 +298,26 @@ func TestStatusPassesOnlyReadableStepTimesAndAdvice(t *testing.T) {
 		set    map[string]any
 		err    string
 		times  int
+		ends   int
 		next   protocol.Next
 		advice string
 	}{
-		{"all readable", map[string]any{"step_times": []any{at(-time.Minute), at(0)}, "next": "continue", "advice": advice}, "x", 2, protocol.NextContinue, advice},
-		{"next and advice without an error", map[string]any{"step_times": []any{at(0)}, "next": "continue", "advice": advice}, "", 1, "", ""},
-		{"a later next value", map[string]any{"next": "wait_for_owner"}, "x", 0, "wait_for_owner", ""},
-		{"next in capitals", map[string]any{"next": "Continue"}, "x", 0, "", ""},
-		{"next of another shape", map[string]any{"next": 1}, "x", 0, "", ""},
-		{"advice that clears the screen", map[string]any{"advice": "a\x1b[2Jb"}, "x", 0, "", ""},
-		{"advice too long", map[string]any{"advice": strings.Repeat("a", 401)}, "x", 0, "", ""},
-		{"a step time in the future", map[string]any{"step_times": []any{at(time.Hour)}}, "x", 0, "", ""},
-		{"more times than steps", map[string]any{"step_times": []any{at(0), at(0), at(0), at(0)}}, "x", 0, "", ""},
-		{"times of another shape", map[string]any{"step_times": "yesterday"}, "x", 0, "", ""},
+		{"all readable", map[string]any{"step_starts": []any{at(-time.Minute), at(0)}, "step_ends": []any{at(0)}, "next": "continue", "advice": advice}, "x", 2, 1, protocol.NextContinue, advice},
+		{"next and advice without an error", map[string]any{"step_starts": []any{at(0)}, "next": "continue", "advice": advice}, "", 1, 0, "", ""},
+		{"starts without ends", map[string]any{"step_starts": []any{at(-time.Minute), at(0)}}, "x", 2, 0, "", ""},
+		{"an end before its start", map[string]any{"step_starts": []any{at(0)}, "step_ends": []any{at(-time.Minute)}}, "x", 1, 0, "", ""},
+		{"an end without its start", map[string]any{"step_starts": []any{at(0)}, "step_ends": []any{at(0), at(0)}}, "x", 1, 0, "", ""},
+		{"an end in the future", map[string]any{"step_starts": []any{at(0)}, "step_ends": []any{at(time.Hour)}}, "x", 1, 0, "", ""},
+		{"more ends than steps", map[string]any{"step_starts": []any{at(0)}, "step_ends": []any{at(0), at(0), at(0), at(0)}}, "x", 1, 0, "", ""},
+		{"ends of another shape", map[string]any{"step_starts": []any{at(0)}, "step_ends": "later"}, "x", 1, 0, "", ""},
+		{"a later next value", map[string]any{"next": "wait_for_owner"}, "x", 0, 0, "wait_for_owner", ""},
+		{"next in capitals", map[string]any{"next": "Continue"}, "x", 0, 0, "", ""},
+		{"next of another shape", map[string]any{"next": 1}, "x", 0, 0, "", ""},
+		{"advice that clears the screen", map[string]any{"advice": "a\x1b[2Jb"}, "x", 0, 0, "", ""},
+		{"advice too long", map[string]any{"advice": strings.Repeat("a", 401)}, "x", 0, 0, "", ""},
+		{"a start in the future", map[string]any{"step_starts": []any{at(time.Hour)}}, "x", 0, 0, "", ""},
+		{"more starts than steps", map[string]any{"step_starts": []any{at(0), at(0), at(0), at(0)}}, "x", 0, 0, "", ""},
+		{"starts of another shape", map[string]any{"step_starts": "yesterday"}, "x", 0, 0, "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, err := filepath.EvalSymlinks(t.TempDir())
@@ -328,12 +336,37 @@ func TestStatusPassesOnlyReadableStepTimesAndAdvice(t *testing.T) {
 				t.Fatal("record unreadable:", err)
 			}
 			s := r.status()
-			if len(s.StepTimes) != tc.times || s.Next != tc.next || s.Advice != tc.advice {
-				t.Fatalf("status passed %d times, next %q, advice %q", len(s.StepTimes), s.Next, s.Advice)
+			if len(s.StepStarts) != tc.times || len(s.StepEnds) != tc.ends || s.Next != tc.next || s.Advice != tc.advice {
+				t.Fatalf("status passed %d starts, %d ends, next %q, advice %q", len(s.StepStarts), len(s.StepEnds), s.Next, s.Advice)
 			}
 			if len(s.Steps) != 3 || s.Error != tc.err || s.Phase != "failed" {
 				t.Fatal("the new fields changed the rest of the status", s)
 			}
 		})
+	}
+}
+
+// The screen scrolls, so a later worker may list as many steps as it needs.
+// A list longer than any update of this release has still reaches it.
+func TestStatusPassesALongStepList(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := workflowFixture()
+	j.Phase = "installing"
+	for i := range 20 {
+		j.Steps = append(j.Steps, fmt.Sprintf("Step %d", i+1))
+	}
+	j.StepNumber = 15
+	if err := saveJob(root, j); err != nil {
+		t.Fatal(err)
+	}
+	r, err := loadRecord(root)
+	if err != nil || r == nil {
+		t.Fatal("record unreadable:", err)
+	}
+	if s := r.status(); len(s.Steps) != 20 || s.StepNumber != 15 {
+		t.Fatalf("status passed %d steps at step %d, want 20 at 15", len(s.Steps), s.StepNumber)
 	}
 }

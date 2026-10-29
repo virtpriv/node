@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -417,6 +418,16 @@ func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 			},
 			buttons: []string{"Close", "Retry", "Select release"}, shown: []string{"first", "second", "third", "fourth"},
 			absent: []string{"\r", "\t", "\a", "\x1b[2J"}},
+		{name: "long list with a failure late in it", latest: "0.7.1",
+			prepare: func(_ *testing.T, s *NodeUpdateScreen) {
+				s.status = failed("disk full while installing new files", false)
+				for i := range 24 {
+					s.status.Steps = append(s.status.Steps, fmt.Sprintf("Step %d of the update", i+1))
+				}
+				s.status.StepNumber = 20
+			},
+			buttons: []string{"Close", "Retry", "Select release"},
+			shown:   []string{"Step 20 of the update", "disk full while installing new files", "Select Retry to try again."}},
 		{name: "release to install first, with long names",
 			prepare: func(t *testing.T, s *NodeUpdateScreen) {
 				s.ctx.NodeUpdates = &nodeUpdateClientStub{updateFirst: map[string]string{"0.7.2-rc.12": "0.7.2-rc.11"}}
@@ -458,20 +469,98 @@ func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 	}
 }
 
-func TestStepNamesCannotControlTheTerminal(t *testing.T) {
+// A record without a usable list shows the step's own text, which comes
+// from the update program and must not control the terminal. The list's
+// names are the shared step list's.
+func TestStatusTextCannotControlTheTerminal(t *testing.T) {
 	s := NewNodeUpdateScreen(&ScreenContext{Version: "0.7.0"})
-	s.status = protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "running", Active: true, Running: true,
-		Steps: []string{"Check the node\x1b[2J", "Clear\x1b[H"}, StepNumber: 2}
-	p := newPane(80)
-	s.drawSteps(p)
-	out := strings.Join(p.lines, "\n")
-	if strings.Contains(out, "\x1b[2J") || strings.Contains(out, "\x1b[H") {
-		t.Fatal("a step name reached the terminal with its control characters")
-	}
-	// Without a list the screen shows the step's text instead.
-	s.status.Steps, s.status.StepNumber, s.status.Step = nil, 0, "Install\x1b[2J"
+	s.status = protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "running", Active: true, Running: true, Step: "Install\x1b[2J"}
 	if strings.Contains(s.View(80, 40), "\x1b[2J") {
 		t.Fatal("the step text reached the terminal with its control characters")
+	}
+}
+
+// messagesWithin runs cmd as Bubble Tea would and returns the messages that
+// arrive within d. Commands that take longer, such as the 2 second poll,
+// are left running.
+func messagesWithin(cmd tea.Cmd, d time.Duration) []tea.Msg {
+	out := make(chan tea.Msg, 64)
+	var run func(tea.Cmd)
+	run = func(c tea.Cmd) {
+		if c == nil {
+			return
+		}
+		go func() {
+			msg := c()
+			if batch, ok := msg.(tea.BatchMsg); ok {
+				for _, b := range batch {
+					run(b)
+				}
+				return
+			}
+			out <- msg
+		}()
+	}
+	run(cmd)
+	var msgs []tea.Msg
+	deadline := time.After(d)
+	for {
+		select {
+		case msg := <-out:
+			msgs = append(msgs, msg)
+		case <-deadline:
+			return msgs
+		}
+	}
+}
+
+// spinTick is the first message in msgs that is s's spinner tick.
+func spinTick(s *NodeUpdateScreen, msgs []tea.Msg) tea.Msg {
+	for _, msg := range msgs {
+		if s.spin.Owns(msg) {
+			return msg
+		}
+	}
+	return nil
+}
+
+// A step list's spinner ticks only while its screen is on screen. A tick
+// for a hidden screen starts no next tick, so nothing redraws for it, and
+// the spinner starts again once its screen shows.
+func TestStepSpinnerTicksOnlyWhileItsScreenShows(t *testing.T) {
+	running := protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "installing", Active: true, Running: true,
+		Steps: []string{"Check the node", "Stop lnd"}, StepNumber: 2}
+	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: &nodeUpdateClientStub{status: running}, Version: "0.7.0"}
+	s := NewNodeUpdateScreen(ctx)
+	m := Model{cfg: ctx.Cfg, state: &RuntimeState{}, screenCtx: ctx, nav: NewNavSidebar(), activeTab: 1,
+		tabs: []openTab{{Kind: tabNodeUpdates, Section: secSystem, Screen: s}}}
+	show := func(on bool) {
+		m.nav.ActiveItem, m.nav.Cursor, m.activeTab = secChannels, secChannels, 0
+		if on {
+			m.nav.ActiveItem, m.nav.Cursor, m.activeTab = secSystem, secSystem, 1
+		}
+	}
+	update := func(msg tea.Msg) tea.Msg {
+		t.Helper()
+		next, cmd := m.Update(msg)
+		m = next.(Model)
+		return spinTick(s, messagesWithin(cmd, 400*time.Millisecond))
+	}
+	show(true)
+	tick := update(s.Init()())
+	if tick == nil {
+		t.Fatal("a running step on screen started no spinner")
+	}
+	if tick = update(tick); tick == nil {
+		t.Fatal("the spinner stopped while its screen shows")
+	}
+	show(false)
+	if update(tick) != nil {
+		t.Fatal("the spinner kept ticking for a hidden screen")
+	}
+	show(true)
+	if update(tea.WindowSizeMsg{Width: 100, Height: 40}) == nil {
+		t.Fatal("the spinner did not start again when its screen showed")
 	}
 }
 

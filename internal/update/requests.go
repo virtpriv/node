@@ -398,11 +398,6 @@ func retryUpdate(root, id string) error {
 	return amendRecord(root, map[string]any{"phase": "retry", "error": nil, "failure": nil, "next": nil, "advice": nil})
 }
 
-// maxListedSteps is the most steps Node Updates draws. It is the list of an
-// update of all three services, the most that fits the fixed screen with a
-// failure. A longer list is left out and the screen shows the step text.
-const maxListedSteps = 12
-
 func Status() (protocol.Status, error) {
 	if err := requireRoot(); err != nil {
 		return protocol.Status{}, err
@@ -428,15 +423,19 @@ func Status() (protocol.Status, error) {
 func (r *record) status() protocol.Status {
 	s := protocol.Status{ID: r.Review.Digest, Version: r.Review.Manifest.Version, Phase: r.Phase, Step: r.Step, Error: r.Error, Active: r.active()}
 	// A list the screen cannot draw sensibly is left out, and the screen
-	// shows the step text instead.
+	// shows the step text instead. The screen scrolls, so a list may be of
+	// any length. Times are passed only in a shape the screen can show.
 	var steps []string
 	var number int
 	if json.Unmarshal(r.Steps, &steps) == nil && json.Unmarshal(r.StepNumber, &number) == nil &&
-		len(steps) <= maxListedSteps && number >= 1 && number <= len(steps) {
+		number >= 1 && number <= len(steps) {
 		s.Steps, s.StepNumber = steps, number
-		var times []time.Time
-		if json.Unmarshal(r.StepTimes, &times) == nil && readableTimes(times, len(steps), time.Now()) {
-			s.StepTimes = times
+		var starts, ends []time.Time
+		if json.Unmarshal(r.StepStarts, &starts) == nil && readableTimes(starts, len(steps), time.Now()) {
+			s.StepStarts = starts
+			if json.Unmarshal(r.StepEnds, &ends) == nil && readableEnds(ends, starts, time.Now()) {
+				s.StepEnds = ends
+			}
 		}
 	}
 	// A code is passed only with the error it explains, and only in a shape
@@ -456,6 +455,24 @@ func (r *record) status() protocol.Status {
 		s.Advice = advice
 	}
 	return s
+}
+
+// readableEnds reports whether each end belongs to a step that began, is
+// not before its start and not ahead of the node's clock. A zero end is a
+// step that has not ended.
+func readableEnds(ends, starts []time.Time, now time.Time) bool {
+	if len(ends) == 0 || len(ends) > len(starts) {
+		return false
+	}
+	for i, end := range ends {
+		if end.IsZero() {
+			continue
+		}
+		if starts[i].IsZero() || end.Before(starts[i]) || end.After(now.Add(time.Minute)) {
+			return false
+		}
+	}
+	return true
 }
 
 // readableTimes reports step times the screen can use: no more than the
@@ -512,5 +529,5 @@ func cancelUpdate(root, id string) error {
 	if !j.active() || j.HostChanges {
 		return errors.New("host changes may have begun, complete or repair this update")
 	}
-	return amendRecord(root, map[string]any{"phase": "cancelled", "step": "Update cancelled before host changes", "error": nil, "failure": nil, "next": nil, "advice": nil})
+	return amendRecord(root, map[string]any{"phase": "canceled", "step": "Update canceled before host changes", "error": nil, "failure": nil, "next": nil, "advice": nil})
 }

@@ -3,9 +3,11 @@ package tui
 import (
 	"errors"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/virtpriv/node/internal/theme"
+	"github.com/virtpriv/node/internal/tui/steplist"
 )
 
 // ── Focus helpers ────────────────────────────────────────
@@ -75,7 +77,63 @@ func (m *Model) activateTab() tea.Cmd {
 	return cmd
 }
 
+// stepSpinner is a screen with a step list. Its spinner runs only while a
+// step runs and the screen shows, so a hidden screen causes no redraws.
+type stepSpinner interface {
+	spinner() *steplist.Spinner
+	stepRuns() bool
+}
+
+// shownStepSpinner is the step list screen on screen, if any.
+func (m Model) shownStepSpinner() stepSpinner {
+	// The QR and full URL views cover the screen.
+	if len(m.tabs) == 0 || m.subview != svNone {
+		return nil
+	}
+	tabs := m.effectiveTabs()
+	if m.activeTab <= 0 || m.activeTab >= len(tabs) {
+		return nil
+	}
+	screen := tabs[m.activeTab].Screen
+	if progress := helperProgress(screen); progress != nil {
+		screen = progress
+	}
+	owner, _ := screen.(stepSpinner)
+	return owner
+}
+
+// Update hands a step list's spinner tick to its screen while the screen
+// shows. A tick for a hidden screen stops its spinner. After every other
+// message the screen on screen gets its spinner started or stopped, which
+// covers every way a tab comes back into view.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if tick, ok := msg.(spinner.TickMsg); ok {
+		for _, tab := range m.tabs {
+			screen := tab.Screen
+			if progress := helperProgress(screen); progress != nil {
+				screen = progress
+			}
+			owner, ok := screen.(stepSpinner)
+			if !ok || !owner.spinner().Owns(tick) {
+				continue
+			}
+			if owner == m.shownStepSpinner() && owner.stepRuns() {
+				return m, owner.spinner().Update(tick)
+			}
+			owner.spinner().Set(false)
+			return m, nil
+		}
+		return m, nil
+	}
+	next, cmd := m.update(msg)
+	updated := next.(Model)
+	if owner := updated.shownStepSpinner(); owner != nil {
+		cmd = tea.Batch(cmd, owner.spinner().Set(owner.stepRuns()))
+	}
+	return updated, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case relaunchMsg:
 		m.relaunch = true

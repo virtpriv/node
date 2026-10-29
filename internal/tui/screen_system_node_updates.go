@@ -11,10 +11,10 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/virtpriv/node/internal/app"
 	"github.com/virtpriv/node/internal/release"
 	"github.com/virtpriv/node/internal/theme"
+	"github.com/virtpriv/node/internal/tui/steplist"
 	"github.com/virtpriv/node/internal/update/protocol"
 )
 
@@ -41,6 +41,7 @@ type NodeUpdateScreen struct {
 	notice string
 	// lead is the next step button focused when its state appeared.
 	lead string
+	spin steplist.Spinner
 }
 
 type nodeUpdateMsg struct {
@@ -54,7 +55,7 @@ type nodeUpdateMsg struct {
 type nodeUpdateTick struct{ owner *NodeUpdateScreen }
 
 func NewNodeUpdateScreen(ctx *ScreenContext) *NodeUpdateScreen {
-	s := &NodeUpdateScreen{ctx: ctx}
+	s := &NodeUpdateScreen{ctx: ctx, spin: steplist.NewSpinner()}
 	s.selectStable()
 	return s
 }
@@ -167,7 +168,7 @@ func (s *NodeUpdateScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 }
 func (s *NodeUpdateScreen) hasTarget() bool {
 	newer, err := release.Newer(s.ctx.Version, s.target)
-	return err == nil && newer && !s.olderThanUpdate() && (s.target != s.status.Version || s.status.Phase == "cancelled")
+	return err == nil && newer && !s.olderThanUpdate() && (s.target != s.status.Version || s.status.Phase == "canceled")
 }
 func (s *NodeUpdateScreen) buttons() []string {
 	if s.busy != "" {
@@ -425,15 +426,6 @@ func (s *NodeUpdateScreen) showLog() tea.Cmd {
 	return tea.ExecProcess(c, func(error) tea.Msg { return nodeUpdateTick{owner: s} })
 }
 
-// indented adds text below a step, lined up under the step's name.
-func indented(p *paneBuilder, style lipgloss.Style, text string, rows int) {
-	q := newPane(p.w - 2)
-	q.fitText(style, text, rows)
-	for _, row := range q.lines[1:] {
-		p.lines = append(p.lines, "  "+row)
-	}
-}
-
 // nodeUpdateAdviceRows is the most rows a failure's advice takes, so advice
 // from a later release cannot push the buttons off the screen.
 const nodeUpdateAdviceRows = 6
@@ -521,37 +513,48 @@ func (s *NodeUpdateScreen) failure() string {
 	return "Error: " + strings.TrimSpace(s.status.Error)
 }
 
-// drawSteps draws the worker's list of steps with the install screen's
-// marks: a green check when done, an orange mark on the running step, a red
-// cross and the error on a failure, and a faint dot for the steps ahead. A
-// step the update stopped at for the operator, an expected stop or a worker
-// that is not running, gets a gray mark. An expected stop shows no error,
-// the log keeps it.
-func (s *NodeUpdateScreen) drawSteps(p *paneBuilder) {
+// stepRows draws the worker's list on the shared step list: a green check
+// when done, the spinner on the running step, a red cross and the error on a
+// failure, and a faint dot for the steps ahead. A step the update stopped at
+// for the operator, an expected stop or a worker that is not running, gets a
+// gray mark. An expected stop shows no error, the log keeps it. from and to
+// are the rows to keep in view.
+func (s *NodeUpdateScreen) stepRows(w int) (rows []string, from, to int) {
 	st := s.status
-	faint := lipgloss.NewStyle().Foreground(theme.ColorFaint)
-	for i, step := range st.Steps {
+	at := func(times []time.Time, i int) time.Time {
+		if i < len(times) {
+			return times[i]
+		}
+		return time.Time{}
+	}
+	steps := make([]steplist.Step, len(st.Steps))
+	for i, name := range st.Steps {
 		number := i + 1
-		step = theme.PlainText(step)
-		mark, name := faint.Render("·"), faint.Render(step)
+		step := steplist.Step{Name: name, Started: at(st.StepStarts, i), Ended: at(st.StepEnds, i)}
 		switch {
 		case st.Phase == "complete" || number < st.StepNumber:
-			mark, name = lipgloss.NewStyle().Foreground(theme.ColorSuccess).Render("✓"), theme.Label.Render(step)
+			step.State = steplist.Done
 		case number > st.StepNumber:
 		case expectedStop(st):
-			mark, name = theme.Dim.Render("›"), theme.Label.Render(step)
+			step.State = steplist.Stopped
 		case st.Phase == "failed":
-			mark, name = theme.Warning.Render("✗"), theme.Warning.Render(step)
+			step.State, step.Err = steplist.Failed, strings.TrimSpace(st.Error)
 		case st.Running:
-			mark, name = theme.Bitcoin.Render("›"), theme.Header.Render(step)
+			step.State = steplist.Running
 		default:
-			mark, name = theme.Dim.Render("›"), theme.Label.Render(step)
+			step.State = steplist.Stopped
 		}
-		p.line(ansi.Truncate(" "+mark+" "+name, max(p.w-1, 16), "…"))
-		if number == st.StepNumber && st.Phase == "failed" && !expectedStop(st) {
-			indented(p, theme.Warning, s.failure(), nodeUpdateFailureRows)
-		}
+		steps[i] = step
 	}
+	return steplist.Rows(steps, max(w-1, 16), s.spin.View(), time.Now(), nodeUpdateFailureRows)
+}
+
+// spinner and stepRuns let the model run the spinner while a step runs and
+// the screen shows.
+func (s *NodeUpdateScreen) spinner() *steplist.Spinner { return &s.spin }
+func (s *NodeUpdateScreen) stepRuns() bool {
+	return s.review == nil && s.releaseInput == nil && s.status.Active && s.status.Running &&
+		s.status.Phase != "failed" && len(s.status.Steps) > 0
 }
 
 func (s *NodeUpdateScreen) View(w, h int) string {
@@ -573,6 +576,11 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 		return p.renderWithBottomButtons(s.buttons(), s.button, s.ctx.ContentFocused && !s.releaseInput.Focused(), h)
 	}
 	p.title(theme.Header, "Node Updates")
+	// list is the step list, from and to its rows to keep in view, and after
+	// what the screen shows below it.
+	var list []string
+	var from, to int
+	after := newPane(w)
 	if s.review != nil {
 		r := s.review
 		m := r.Manifest
@@ -599,10 +607,10 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 		p.line(" Affected services will restart. Downloads use Tor.")
 		p.line(" Databases are preserved. A failed update may need repair.")
 	} else if s.status.ID != "" && !s.status.Active && !s.olderThanUpdate() {
-		// A finished or cancelled update is history, shown in one line.
+		// A finished or canceled update is history, shown in one line.
 		outcome := "complete"
-		if s.status.Phase == "cancelled" {
-			outcome = "cancelled before host changes"
+		if s.status.Phase == "canceled" {
+			outcome = "canceled before host changes"
 		}
 		p.field("Last update: ", fmt.Sprintf("v%s, %s.", s.status.Version, outcome))
 	} else if s.status.ID != "" {
@@ -610,7 +618,7 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 		p.field("Release: ", "v"+s.status.Version)
 		if len(s.status.Steps) > 0 {
 			p.blank()
-			s.drawSteps(p)
+			list, from, to = s.stepRows(p.w)
 		} else if s.status.Phase != "complete" {
 			// A record without a list comes from an update that stopped before its
 			// worker wrote one, or one started by an older release.
@@ -619,21 +627,23 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 				p.fitText(theme.Warning, s.failure(), nodeUpdateFailureRows)
 			}
 		}
+		// What follows the list is drawn first, so the list gets only the
+		// rows left and never pushes the sentence that names a button off.
 		if s.olderThanUpdate() {
-			p.blank()
-			paragraphs(p, "Update complete.\n\nSelect Relaunch to open the new version.", 0)
+			after.blank()
+			paragraphs(after, "Update complete.\n\nSelect Relaunch to open the new version.", 0)
 		} else if s.status.Phase == "waiting-unlock" && s.status.Running && len(s.status.Steps) > 0 {
-			p.blank()
-			paragraphs(p, "Unlock the LND wallet to finish.\n\nSelect Unlock wallet.", 0)
+			after.blank()
+			paragraphs(after, "Unlock the LND wallet to finish.\n\nSelect Unlock wallet.", 0)
 		} else if failed && !s.status.Running {
 			// While the worker still finishes its cleanup neither Retry nor
 			// Cancel is offered, so no advice is given yet.
-			p.blank()
+			after.blank()
 			_, words := advice(s.status)
-			paragraphs(p, words, nodeUpdateAdviceRows)
+			paragraphs(after, words, nodeUpdateAdviceRows)
 		} else if s.status.Active && !s.status.Running {
-			p.blank()
-			p.line(" The update is not running. Retry continues it.")
+			after.blank()
+			after.line(" The update is not running. Retry continues it.")
 		}
 	} else if s.statusErr == nil && !s.hasTarget() {
 		switch {
@@ -647,13 +657,21 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 	}
 	buttons := s.buttons()
 	index := min(s.button, len(buttons)-1)
-	room := h - lipgloss.Height(renderButtons(buttons, index, s.ctx.ContentFocused, w)) - paneRows(p)
+	below := after.lines[1:]
+	// The list keeps at least its running or failed step's rows, or all of
+	// a short list, when the messages under it are fitted.
+	keep := min(len(list), to-from+2)
+	room := h - lipgloss.Height(renderButtons(buttons, index, s.ctx.ContentFocused, w)) - paneRows(p) - len(below)
 	var lower []string
 	for _, fit := range nodeUpdateFits() {
-		if lower = s.messages(w, fit); len(lower) <= room {
+		if lower = s.messages(w, fit); len(lower) <= room-keep {
 			break
 		}
 	}
+	if len(list) > 0 {
+		p.lines = append(p.lines, steplist.Window(list, from, to, room-len(lower), s.status.Phase == "complete")...)
+	}
+	p.lines = append(p.lines, below...)
 	p.lines = append(p.lines, lower...)
 	return p.renderWithBottomButtons(buttons, index, s.ctx.ContentFocused, h)
 }

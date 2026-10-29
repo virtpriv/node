@@ -3,13 +3,22 @@ package install
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/virtpriv/node/internal/installer"
 	"github.com/virtpriv/node/internal/loginpassword"
 )
+
+// TestMain shortens the screen's own timers, so tests that follow them run
+// in milliseconds.
+func TestMain(m *testing.M) {
+	frameEvery, typeEvery, finishHold = time.Millisecond, time.Millisecond, time.Millisecond
+	os.Exit(m.Run())
+}
 
 type fakeSession struct {
 	input         installer.InteractiveInput
@@ -35,30 +44,109 @@ type loginStub struct {
 
 func (l *loginStub) check() (bool, error) { l.calls++; return l.seen, l.err }
 
-func wizardFixture() (wizardModel, *fakeSession) {
-	m, session, _ := wizardFixtureWithLogin()
+func wizardFixture(t *testing.T) (wizardModel, *fakeSession) {
+	m, session, _ := wizardFixtureWithLogin(t)
 	return m, session
 }
 
-func wizardFixtureWithLogin() (wizardModel, *fakeSession, *loginStub) {
+func wizardFixtureWithLogin(t *testing.T) (wizardModel, *fakeSession, *loginStub) {
 	session := &fakeSession{events: make(chan installer.InstallEvent, 10)}
 	info := installer.InstallView{NeedIdentity: true,
 		Steps: []installer.InstallStepView{{Name: "First"}, {Name: "Second"}}}
 	login := &loginStub{}
-	return showDialog(newWizardModel(info, session, login.check)), session, login
+	return showDialog(t, newWizardModel(info, session, login.check)), session, login
+}
+
+// follow runs cmd and then the commands the screen itself asks for, one
+// message at a time as Bubble Tea does, until done reports true or nothing
+// is left to wait for. It reports whether the screen asked to quit, and
+// fails the test when done never comes.
+func follow(t *testing.T, m wizardModel, cmd tea.Cmd, done func(wizardModel) bool) (wizardModel, bool) {
+	t.Helper()
+	out := make(chan tea.Msg)
+	pending := 0
+	run := func(c tea.Cmd) {
+		if c != nil {
+			pending++
+			go func() { out <- c() }()
+		}
+	}
+	run(cmd)
+	quit := false
+	timeout := time.After(5 * time.Second)
+	for done == nil || !done(m) {
+		if pending == 0 {
+			if done != nil {
+				t.Fatal("the screen stopped before it got there")
+			}
+			return m, quit
+		}
+		select {
+		case msg := <-out:
+			pending--
+			switch msg := msg.(type) {
+			case tea.BatchMsg:
+				for _, c := range msg {
+					run(c)
+				}
+			case tea.QuitMsg:
+				quit = true
+			default:
+				var next tea.Cmd
+				m, next = updateWizard(t, m, msg)
+				run(next)
+			}
+		case <-timeout:
+			t.Fatal("the screen never got there")
+		}
+	}
+	return m, quit
+}
+
+// take runs cmd as Bubble Tea would and returns its first message of type
+// T, the one a test is about. The screen may batch it with its timers.
+func take[T tea.Msg](t *testing.T, cmd tea.Cmd) tea.Msg {
+	t.Helper()
+	out := make(chan tea.Msg, 16)
+	var run func(tea.Cmd)
+	run = func(c tea.Cmd) {
+		if c == nil {
+			return
+		}
+		go func() {
+			msg := c()
+			if batch, ok := msg.(tea.BatchMsg); ok {
+				for _, b := range batch {
+					run(b)
+				}
+				return
+			}
+			out <- msg
+		}()
+	}
+	run(cmd)
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case msg := <-out:
+			if _, ok := msg.(T); ok {
+				return msg
+			}
+		case <-timeout:
+			var want T
+			t.Fatalf("no %T came", want)
+			return nil
+		}
+	}
 }
 
 // showDialog runs the opening until the password dialog is on screen, as the
 // owner sees it before typing.
-func showDialog(m wizardModel) wizardModel {
-	for range 1000 {
-		if m.dialogShown() {
-			return m
-		}
-		next, _ := m.Update(frameTick{})
-		m = next.(wizardModel)
-	}
-	panic("the password dialog never showed")
+func showDialog(t *testing.T, m wizardModel) wizardModel {
+	t.Helper()
+	m, cmd := updateWizard(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	m, _ = follow(t, m, cmd, wizardModel.dialogShown)
+	return m
 }
 func updateWizard(t *testing.T, m wizardModel, msg tea.Msg) (wizardModel, tea.Cmd) {
 	t.Helper()
@@ -86,7 +174,7 @@ func TestWizardPasswordPastePreservesOrRejects(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m, session := wizardFixture()
+			m, session := wizardFixture(t)
 			for focus := 0; focus < 2; focus++ {
 				var cmd tea.Cmd
 				m, cmd = updateWizard(t, m, tea.PasteMsg{Content: tc.value})
@@ -141,7 +229,7 @@ func TestWizardPasswordIgnoresInputBeforeDialog(t *testing.T) {
 	if m.pwInput.Value() != "" || m.pwConfirm.Value() != "" || m.pwFocus != focusPassword || m.pwErr != "" || session.starts != 0 {
 		t.Fatal("input reached the password dialog before it showed")
 	}
-	m = showDialog(m)
+	m = showDialog(t, m)
 	m, _ = updateWizard(t, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
 	if m.pwInput.Value() != "x" {
 		t.Fatal("input did not reach the shown dialog")
@@ -149,7 +237,7 @@ func TestWizardPasswordIgnoresInputBeforeDialog(t *testing.T) {
 }
 
 func TestWizardPasswordMinimumMismatchAndRecovery(t *testing.T) {
-	m, session := wizardFixture()
+	m, session := wizardFixture(t)
 	m.pwFocus = 2
 	for _, values := range [][2]string{{"abcdefghijklmno", "abcdefghijklmno"}, {"abcdefghijklmnop", "abcdefghijklmnopX"}} {
 		m.pwInput.SetValue(values[0])
@@ -169,7 +257,7 @@ func TestWizardPasswordMinimumMismatchAndRecovery(t *testing.T) {
 }
 
 func TestWizardStopWaitsForEngineResult(t *testing.T) {
-	m, session := wizardFixture()
+	m, session := wizardFixture(t)
 	m.phase = wzSteps
 	pw, _ := loginpassword.New("abcdefghijklmnop")
 	m.input.Password = pw
@@ -190,19 +278,19 @@ func TestWizardStopWaitsForEngineResult(t *testing.T) {
 	}
 	event := installer.InstallEvent{Index: 0, Status: installer.StepDone}
 	session.events <- event
-	m, wait = updateWizard(t, m, wait())
+	m, wait = updateWizard(t, m, take[wizardProgressMsg](t, wait))
 	if m.steps[0].Status != installer.StepDone || wait == nil {
 		t.Fatal("admitted step result lost")
 	}
 	session.events <- installer.InstallEvent{Final: true, Result: installer.RunResult{Outcome: installer.RunInterrupted}}
-	m, cmd = updateWizard(t, m, wait())
+	m, cmd = updateWizard(t, m, take[wizardProgressMsg](t, wait))
 	assertQuit(t, cmd)
 }
 
 // A start the installer refuses, for example because the cache decision was
 // not saved, returns to the password screen with the error and can be retried.
 func TestWizardDecisionRetryAndCompletionFailure(t *testing.T) {
-	m, session := wizardFixture()
+	m, session := wizardFixture(t)
 	m.pwInput.SetValue("abcdefghijklmnop")
 	m.pwConfirm.SetValue("abcdefghijklmnop")
 	m.pwFocus = 2
@@ -227,14 +315,14 @@ func TestWizardDecisionRetryAndCompletionFailure(t *testing.T) {
 	}
 	event := installer.InstallEvent{Index: 0, Status: installer.StepSkipped}
 	session.events <- event
-	m, wait = updateWizard(t, m, wait())
+	m, wait = updateWizard(t, m, take[wizardProgressMsg](t, wait))
 	if m.steps[0].Status != installer.StepSkipped || wait == nil {
 		t.Fatal("skip evidence lost")
 	}
 	failure := errors.New("terminal ledger publication failed")
 	session.events <- installer.InstallEvent{Final: true, Result: installer.RunResult{Outcome: installer.RunComplete}, CompletionErr: failure}
-	m, cmd = updateWizard(t, m, wait())
-	if m.phase != wzDone || m.completeErr != failure.Error() || cmd != nil {
+	m, cmd = updateWizard(t, m, take[wizardProgressMsg](t, wait))
+	if m, _ = follow(t, m, cmd, nil); m.phase != wzDone || m.completeErr != failure.Error() {
 		t.Fatal("finalization failure lost")
 	}
 	m, cmd = updateWizard(t, m, enter())
@@ -248,19 +336,13 @@ func TestWizardDecisionRetryAndCompletionFailure(t *testing.T) {
 func reachConnect(t *testing.T, m wizardModel) wizardModel {
 	t.Helper()
 	m.phase = wzSteps
-	m, _ = updateWizard(t, m, wizardProgressMsg{ok: true, event: installer.InstallEvent{Final: true, Result: installer.RunResult{Outcome: installer.RunComplete}}})
-	for range 1000 {
-		if m.phase == wzConnect {
-			return m
-		}
-		m, _ = updateWizard(t, m, frameTick{})
-	}
-	t.Fatal("a complete install never reached the connect dialog")
+	m, cmd := updateWizard(t, m, wizardProgressMsg{ok: true, event: installer.InstallEvent{Final: true, Result: installer.RunResult{Outcome: installer.RunComplete}}})
+	m, _ = follow(t, m, cmd, func(m wizardModel) bool { return m.phase == wzConnect })
 	return m
 }
 
 func TestWizardCompletionWaitsForSSHLogin(t *testing.T) {
-	m, _, login := wizardFixtureWithLogin()
+	m, _, login := wizardFixtureWithLogin(t)
 	m = reachConnect(t, m)
 	if login.calls != 0 {
 		t.Fatal("login checked before the connect dialog asked")
@@ -309,7 +391,7 @@ func TestWizardExitAsksOnceBeforeLoginOnly(t *testing.T) {
 	for _, key := range []tea.KeyPressMsg{enter(), ctrlC()} {
 		// asked reaches the connect dialog and presses key once, which asks.
 		asked := func() wizardModel {
-			m, _, _ := wizardFixtureWithLogin()
+			m, _, _ := wizardFixtureWithLogin(t)
 			m = reachConnect(t, m)
 			m, cmd := updateWizard(t, m, key)
 			assertStays(t, cmd)
@@ -348,7 +430,7 @@ func TestWizardExitAsksOnceBeforeLoginOnly(t *testing.T) {
 func TestWizardCompleteInstallAsksBeforeLeaving(t *testing.T) {
 	complete := wizardProgressMsg{ok: true, event: installer.InstallEvent{Final: true, Result: installer.RunResult{Outcome: installer.RunComplete}}}
 
-	m, _, login := wizardFixtureWithLogin()
+	m, _, login := wizardFixtureWithLogin(t)
 	m.phase = wzSteps
 	m, _ = updateWizard(t, m, complete)
 	m, check := updateWizard(t, m, ctrlC())
@@ -360,20 +442,33 @@ func TestWizardCompleteInstallAsksBeforeLeaving(t *testing.T) {
 	// The login check started there: its result, a login, lets the key
 	// leave at once.
 	login.seen = true
-	m, _ = updateWizard(t, m, check())
+	m, _ = updateWizard(t, m, take[loginResultMsg](t, check))
 	_, cmd = updateWizard(t, m, enter())
 	assertQuit(t, cmd)
 
-	m, _, _ = wizardFixtureWithLogin()
+	m, _, _ = wizardFixtureWithLogin(t)
 	m.phase = wzSteps
 	m, _ = updateWizard(t, m, ctrlC())
 	m, cmd = updateWizard(t, m, complete)
-	assertStays(t, cmd)
-	for range 1000 {
-		m, _ = updateWizard(t, m, frameTick{})
+	m, quit := follow(t, m, cmd, func(m wizardModel) bool { return m.phase == wzConnect })
+	if quit {
+		t.Fatal("left without asking")
 	}
 	_, cmd = updateWizard(t, m, enter())
 	assertStays(t, cmd)
+}
+
+// The finish title types itself with its own timer. Leaving it with ctrl+c
+// before it is typed out must end that timer, or the connect dialog redraws
+// for nothing as long as it is open.
+func TestTitleTimerEndsWhenTheTitleLeavesTheScreen(t *testing.T) {
+	m, _, _ := wizardFixtureWithLogin(t)
+	m.phase = wzSteps
+	m, _ = updateWizard(t, m, wizardProgressMsg{ok: true, event: installer.InstallEvent{Final: true, Result: installer.RunResult{Outcome: installer.RunComplete}}})
+	m, _ = updateWizard(t, m, ctrlC())
+	if _, next := updateWizard(t, m, typeTick{title: m.typed}); next != nil {
+		t.Fatal("the title's timer went on after the title left the screen")
+	}
 }
 
 // assertStays fails if cmd ends the program.
@@ -392,20 +487,18 @@ func TestWizardFailuresNeverReachConnect(t *testing.T) {
 	unfinished := wizardProgressMsg{ok: true, event: installer.InstallEvent{Final: true, Result: installer.RunResult{Outcome: installer.RunComplete}, CompletionErr: errors.New("terminal ledger publication failed")}}
 	closed := wizardProgressMsg{ok: false}
 	for _, end := range []wizardProgressMsg{failed, unfinished, closed} {
-		m, _, login := wizardFixtureWithLogin()
+		m, _, login := wizardFixtureWithLogin(t)
 		m.phase = wzSteps
-		m, _ = updateWizard(t, m, end)
-		for range 1000 {
-			m, _ = updateWizard(t, m, frameTick{})
-			m, _ = updateWizard(t, m, loginTick{})
-		}
+		m, cmd := updateWizard(t, m, end)
+		m, _ = follow(t, m, cmd, nil)
+		m, _ = updateWizard(t, m, loginTick{})
 		if m.phase == wzConnect || login.calls != 0 {
 			t.Fatal("an install that did not finish reached the connect dialog")
 		}
-		_, cmd := updateWizard(t, m, ctrlC())
+		_, cmd = updateWizard(t, m, ctrlC())
 		assertQuit(t, cmd)
 	}
-	m, session := wizardFixture()
+	m, session := wizardFixture(t)
 	_, cmd := updateWizard(t, m, ctrlC())
 	assertQuit(t, cmd)
 	if session.starts != 0 {
@@ -430,7 +523,7 @@ func assertQuit(t *testing.T, cmd tea.Cmd) {
 func TestWizardStartKeepsTheDialogUntilItSucceeds(t *testing.T) {
 	start := func(t *testing.T) (wizardModel, *fakeSession, tea.Cmd) {
 		t.Helper()
-		m, session := wizardFixture()
+		m, session := wizardFixture(t)
 		m.pwInput.SetValue("abcdefghijklmnop")
 		m.pwConfirm.SetValue("abcdefghijklmnop")
 		m.pwFocus = focusStart
@@ -452,11 +545,8 @@ func TestWizardStartKeepsTheDialogUntilItSucceeds(t *testing.T) {
 		if m.pwFocus != focusStart {
 			t.Fatal("a key moved the focus during the start")
 		}
-		for range 100 {
-			m, _ = updateWizard(t, m, frameTick{})
-			if !m.dialogShown() {
-				t.Fatal("the dialog left the screen during the start")
-			}
+		if !m.dialogShown() {
+			t.Fatal("the dialog left the screen during the start")
 		}
 		m, wait := updateWizard(t, m, startCmd())
 		if m.phase != wzSteps || wait == nil || session.starts != 1 {

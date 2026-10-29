@@ -144,12 +144,22 @@ func TestRetryChecksTheNodeOnItsOwnStep(t *testing.T) {
 	}
 }
 
-// Each step keeps the time it began across the saves made while it runs, so
-// the screen can show how long a step runs and how long each one took.
-func TestEachStepKeepsTheTimeItBegan(t *testing.T) {
+// fakeClock makes the worker's clock move one second on each reading, and
+// returns a way to move it further, as time passing between two runs.
+func fakeClock(t *testing.T) (wait func(time.Duration)) {
 	tick := time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)
-	defer func(old func() time.Time) { now = old }(now)
+	old := now
+	t.Cleanup(func() { now = old })
 	now = func() time.Time { tick = tick.Add(time.Second); return tick }
+	return func(d time.Duration) { tick = tick.Add(d) }
+}
+
+// Each step keeps when it began across the saves made while it runs, and
+// gets when it ended once the next step begins or the update ends, so the
+// screen can show how long each step took without working it out from the
+// step after it.
+func TestEachStepKeepsWhenItBeganAndEnded(t *testing.T) {
+	fakeClock(t)
 	j := workflowFixture()
 	h := newHarness(t, j)
 	began := map[string]time.Time{}
@@ -160,24 +170,74 @@ func TestEachStepKeepsTheTimeItBegan(t *testing.T) {
 		}
 		saved := h.reload()
 		i := slices.Index(saved.Steps, step)
-		if i < 0 || i >= len(saved.StepTimes) || saved.StepTimes[i].IsZero() {
-			t.Fatalf("step %q has no time during %s", step, event)
+		if i < 0 || i >= len(saved.StepStarts) || saved.StepStarts[i].IsZero() {
+			t.Fatalf("step %q has no start during %s", step, event)
 		}
-		if first, ok := began[step]; ok && !first.Equal(saved.StepTimes[i]) {
-			t.Fatalf("step %q's time moved during %s", step, event)
+		if first, ok := began[step]; ok && !first.Equal(saved.StepStarts[i]) {
+			t.Fatalf("step %q's start moved during %s", step, event)
 		}
-		began[step] = saved.StepTimes[i]
+		began[step] = saved.StepStarts[i]
+		if i < len(saved.StepEnds) && !saved.StepEnds[i].IsZero() {
+			t.Fatalf("step %q has an end while it runs", step)
+		}
+		for k := range i {
+			if k >= len(saved.StepEnds) || saved.StepEnds[k].IsZero() {
+				t.Fatalf("step %q has no end while %q runs", saved.Steps[k], step)
+			}
+		}
 	}
 	if err := runJob(j, h.ops()); err != nil {
 		t.Fatal(err)
 	}
 	saved := h.reload()
-	if len(saved.StepTimes) != len(saved.Steps) {
-		t.Fatalf("%d times for %d steps", len(saved.StepTimes), len(saved.Steps))
+	if len(saved.StepStarts) != len(saved.Steps) || len(saved.StepEnds) != len(saved.Steps) {
+		t.Fatalf("%d starts and %d ends for %d steps", len(saved.StepStarts), len(saved.StepEnds), len(saved.Steps))
 	}
-	for i := 1; i < len(saved.StepTimes); i++ {
-		if !saved.StepTimes[i].After(saved.StepTimes[i-1]) {
-			t.Fatalf("step %d began before the one ahead of it", i+1)
+	for i := range saved.Steps {
+		if saved.StepEnds[i].Before(saved.StepStarts[i]) || saved.StepEnds[i].IsZero() {
+			t.Fatalf("step %q ended before it began, or never", saved.Steps[i])
 		}
+		if i > 0 && saved.StepStarts[i].Before(saved.StepEnds[i-1]) {
+			t.Fatalf("step %d began before the one ahead of it ended", i+1)
+		}
+	}
+}
+
+// A Retry after host changes does not redo the node check and the download.
+// Those steps keep the times of the run that did them, however long the
+// owner waited before Retry. The failed step begins again.
+func TestRetryKeepsTheTimesOfStepsItDoesNotRedo(t *testing.T) {
+	wait := fakeClock(t)
+	j := workflowFixture()
+	h := newHarness(t, j)
+	h.failure = "stop:lnd"
+	if err := runJob(j, h.ops()); err == nil {
+		t.Fatal("injected failure did not fail the update")
+	}
+	failed := h.reload()
+	stop := slices.Index(failed.Steps, "Stop lnd")
+	if stop < 0 || stop >= len(failed.StepEnds) || failed.StepEnds[stop].IsZero() {
+		t.Fatal("the failed step has no end")
+	}
+	starts, ends := slices.Clone(failed.StepStarts), slices.Clone(failed.StepEnds)
+	wait(40 * time.Minute)
+	j = h.reload()
+	j.Phase, j.Error = "retry", ""
+	h.failure = ""
+	if err := runJob(j, h.ops()); err != nil {
+		t.Fatal(err)
+	}
+	done := h.reload()
+	for _, step := range []string{"Check the node", "Download and verify release files"} {
+		i := slices.Index(done.Steps, step)
+		if !done.StepStarts[i].Equal(starts[i]) || !done.StepEnds[i].Equal(ends[i]) {
+			t.Fatalf("%q lost the times of the run that did it", step)
+		}
+		if took := done.StepEnds[i].Sub(done.StepStarts[i]); took > time.Minute {
+			t.Fatalf("%q took %s, which counts the wait before Retry", step, took)
+		}
+	}
+	if !done.StepStarts[stop].After(ends[stop]) {
+		t.Fatal("the failed step did not begin again")
 	}
 }

@@ -246,7 +246,7 @@ func recordWorkerFailure(j *job, cause error) error {
 	// These checks run before this worker writes its list of steps, so the
 	// list from an earlier run would mark the wrong step. Without a list the
 	// screen shows the error under the saved step text.
-	j.Steps, j.StepNumber, j.StepTimes = nil, 0, nil
+	j.Steps, j.StepNumber, j.StepStarts, j.StepEnds = nil, 0, nil, nil
 	return errors.Join(cause, saveJob(Root, j))
 }
 
