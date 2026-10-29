@@ -66,6 +66,29 @@ func TestSavedUpdateCanBeResumedWithoutReleaseDiscovery(t *testing.T) {
 	}
 }
 
+func TestContinueResumesAnExpectedStop(t *testing.T) {
+	for _, f := range []protocol.Failure{
+		{Code: protocol.FailureStopFailed, Service: protocol.LND},
+		{Code: protocol.FailureStartInterrupted, Service: protocol.LND},
+	} {
+		client := &nodeUpdateClientStub{status: protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "failed", Active: true, Error: "stopped", Failure: &f}}
+		s := NewNodeUpdateScreen(&ScreenContext{NodeUpdates: client, Version: "0.7.0"})
+		s.HandleMsg(s.Init()())
+		s.button = slices.Index(s.buttons(), "Continue")
+		if s.button < 0 {
+			t.Fatalf("%s offers no Continue", f.Code)
+		}
+		_, cmd := s.HandleKey("enter", tea.KeyPressMsg{})
+		if cmd == nil {
+			t.Fatalf("Continue did nothing after %s", f.Code)
+		}
+		s.HandleMsg(cmd())
+		if client.resumed != client.status.ID {
+			t.Fatalf("Continue did not resume the update after %s", f.Code)
+		}
+	}
+}
+
 type nodeUpdateClientStub struct {
 	prepared, started string
 	starts            int
@@ -345,8 +368,8 @@ func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 	}
 	summary := strings.TrimSpace(strings.Repeat("Updates LND for a channel-closing fix and restarts it. ", 9))
 	firstStop := strings.SplitN(stop, "\n", 2)[0]
-	changed := []string{firstStop, "Services may have been changed.", "Press l to see the update log."}
-	unchanged := []string{"not enough free space", "No services were changed.", "Press l to see the update log."}
+	changed := []string{firstStop, "Services may have been changed."}
+	unchanged := []string{"not enough free space", "No services were changed."}
 
 	cases := []struct {
 		name    string
@@ -372,13 +395,13 @@ func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 		{name: "failure longer than the screen", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) { s.status = failed(endless.String(), false) },
 			buttons: []string{"Close", "Retry", "Select release"},
-			shown:   []string{"step 0: the unit reported a failure", "Press l to see the update log."}},
+			shown:   []string{"step 0: the unit reported a failure"}},
 		{name: "saved failure, action error and status error together", latest: "0.7.2",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) {
 				s.status, s.err, s.statusErr = failed(stop, true), errors.New(refusal), errors.New(outage)
 			},
 			buttons: []string{"Close", "Retry", "Cancel update", "Review", "Select release"},
-			shown:   []string{firstStop, "Press l to see the update log.", refusal, "update-status: helper unreachable"}},
+			shown:   []string{firstStop, refusal, "update-status: helper unreachable"}},
 		{name: "refused review without a job", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) { s.err = errors.New(refusal) },
 			buttons: []string{"Close", "Review", "Select release"}, shown: []string{refusal}},
@@ -476,5 +499,37 @@ func TestKnownFailureGivesStepsOnlyWhereTheyApply(t *testing.T) {
 	}
 	if knownFailure(nil) != "" {
 		t.Fatal("a failure without a code got an exact step")
+	}
+}
+
+func TestStepNamesCannotControlTheTerminal(t *testing.T) {
+	s := NewNodeUpdateScreen(&ScreenContext{Version: "0.7.0"})
+	s.status = protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "running", Active: true, Running: true,
+		Steps: []string{"Check the node\x1b[2J", "Clear\x1b[H"}, StepNumber: 2}
+	p := newPane(80)
+	s.drawSteps(p)
+	out := strings.Join(p.lines, "\n")
+	if strings.Contains(out, "\x1b[2J") || strings.Contains(out, "\x1b[H") {
+		t.Fatal("a step name reached the terminal with its control characters")
+	}
+	// Without a list the screen shows the step's text instead.
+	s.status.Steps, s.status.StepNumber, s.status.Step = nil, 0, "Install\x1b[2J"
+	if strings.Contains(s.View(80, 40), "\x1b[2J") {
+		t.Fatal("the step text reached the terminal with its control characters")
+	}
+}
+
+func TestRefreshDoesNotMoveFocus(t *testing.T) {
+	// Focus moves when a state appears. A refresh of the same state leaves
+	// the operator's own choice alone, so Enter never does what they did not
+	// choose.
+	f := protocol.Failure{Code: protocol.FailureStopFailed, Service: protocol.LND}
+	client := &nodeUpdateClientStub{status: protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "failed", Active: true, Error: "stopped", Failure: &f}}
+	s := NewNodeUpdateScreen(&ScreenContext{NodeUpdates: client, Version: "0.7.0"})
+	s.HandleMsg(s.Init()())
+	s.button = 0
+	s.HandleMsg(s.request("status")())
+	if s.button != 0 {
+		t.Fatal("a refresh moved the focus")
 	}
 }

@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/virtpriv/node/internal/app"
 	"github.com/virtpriv/node/internal/release"
 	"github.com/virtpriv/node/internal/theme"
@@ -37,6 +39,8 @@ type NodeUpdateScreen struct {
 	releaseInput *textinput.Model
 	// notice explains why target is not the release the operator selected.
 	notice string
+	// lead is the next step button focused when its state appeared.
+	lead string
 }
 
 type nodeUpdateMsg struct {
@@ -153,6 +157,7 @@ func (s *NodeUpdateScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 				s.review = nil
 				s.button = 0
 			}
+			s.focusLead()
 		}
 		if s.review == nil && s.releaseInput == nil {
 			return s, s.poll()
@@ -180,7 +185,11 @@ func (s *NodeUpdateScreen) buttons() []string {
 			return append(out, "Unlock wallet")
 		}
 		if !s.status.Running {
-			out = append(out, "Retry")
+			if expectedStop(s.status) {
+				out = append(out, "Continue")
+			} else {
+				out = append(out, "Retry")
+			}
 		}
 		if s.status.Cancellable {
 			out = append(out, "Cancel update")
@@ -190,7 +199,7 @@ func (s *NodeUpdateScreen) buttons() []string {
 		out = append(out, "Review")
 	}
 	if s.olderThanUpdate() {
-		return append(out, "Quit")
+		return append(out, "Relaunch")
 	}
 	if !s.status.Active || s.status.Phase == "failed" {
 		out = append(out, "Select release")
@@ -198,10 +207,37 @@ func (s *NodeUpdateScreen) buttons() []string {
 	return out
 }
 
-// olderThanUpdate reports a finished update of another version than this
+// focusLead moves the focus to the button the screen's message names when
+// that state appears, not on every refresh, so it never moves under the
+// operator. A state whose message names no button focuses the first one.
+func (s *NodeUpdateScreen) focusLead() {
+	lead := ""
+	st := s.status
+	switch {
+	case s.olderThanUpdate():
+		lead = "Relaunch"
+	case !st.Active:
+	case st.Running && st.Phase == "waiting-unlock":
+		lead = "Unlock wallet"
+	case st.Running:
+	case expectedStop(st):
+		lead = "Continue"
+	case st.Phase == "failed" && knownFailure(st.Failure) != "":
+		lead = "Cancel update"
+	default:
+		lead = "Retry"
+	}
+	if lead != s.lead {
+		s.lead = lead
+		s.button = max(slices.Index(s.buttons(), lead), 0)
+	}
+}
+
+// olderThanUpdate reports a finished update of a newer version than this
 // running program, so the operator has to start the new program.
 func (s *NodeUpdateScreen) olderThanUpdate() bool {
-	return s.status.Phase == "complete" && s.status.Version != s.ctx.Version
+	newer, err := release.Newer(s.ctx.Version, s.status.Version)
+	return s.status.Phase == "complete" && err == nil && newer
 }
 func (s *NodeUpdateScreen) HandleKey(k string, msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	if s.releaseInput != nil {
@@ -238,8 +274,8 @@ func (s *NodeUpdateScreen) HandleKey(k string, msg tea.KeyPressMsg) (Screen, tea
 		switch buttons[s.button] {
 		case "Close":
 			return s, emitCloseTab
-		case "Quit":
-			return s, tea.Quit
+		case "Relaunch":
+			return s, emitRelaunch
 		case "Cancel":
 			s.review = nil
 			s.err = nil
@@ -260,7 +296,7 @@ func (s *NodeUpdateScreen) HandleKey(k string, msg tea.KeyPressMsg) (Screen, tea
 			return s, input.Focus()
 		case "Install":
 			return s, s.request("start")
-		case "Retry":
+		case "Retry", "Continue":
 			return s, s.request("resume")
 		case "Cancel update":
 			return s, s.request("cancel")
@@ -350,17 +386,17 @@ const (
 type nodeUpdateFit struct {
 	actionRows, statusRows int
 	// Lines left out, the least needed first.
-	noCloseHint, noBusy, noAvailable bool
+	noBusy, noAvailable bool
 }
 
 // nodeUpdateFits lists the ways to draw the messages, from all of them in
 // full to the least that is still useful, one row of the operator's own
-// action error. The closing hint, the busy line and the Available block go
+// action error. The busy line and the Available block go
 // first, then the errors shrink. The screen uses the first way that fits.
 func nodeUpdateFits() []nodeUpdateFit {
-	f := nodeUpdateFit{nodeUpdateActionRows, nodeUpdateStatusRows, false, false, false}
+	f := nodeUpdateFit{nodeUpdateActionRows, nodeUpdateStatusRows, false, false}
 	fits := []nodeUpdateFit{f}
-	for _, drop := range []*bool{&f.noCloseHint, &f.noBusy, &f.noAvailable} {
+	for _, drop := range []*bool{&f.noBusy, &f.noAvailable} {
 		*drop = true
 		fits = append(fits, f)
 	}
@@ -390,13 +426,38 @@ func (s *NodeUpdateScreen) showLog() tea.Cmd {
 	return tea.ExecProcess(c, func(error) tea.Msg { return nodeUpdateTick{owner: s} })
 }
 
-// indented adds text below a step, lined up under the step's number.
+// indented adds text below a step, lined up under the step's name.
 func indented(p *paneBuilder, style lipgloss.Style, text string, rows int) {
-	q := newPane(p.w - 7)
+	q := newPane(p.w - 2)
 	q.fitText(style, text, rows)
 	for _, row := range q.lines[1:] {
-		p.lines = append(p.lines, "       "+row)
+		p.lines = append(p.lines, "  "+row)
 	}
+}
+
+// paragraphs adds a message whose parts are split by an empty line, keeping
+// that line, so the sentence that names a button stands apart.
+func paragraphs(p *paneBuilder, text string) {
+	for i, part := range strings.Split(text, "\n\n") {
+		if i > 0 {
+			p.blank()
+		}
+		p.fitText(lipgloss.NewStyle(), part, 0)
+	}
+}
+
+// expectedStop reports a failure the update meets in normal use and that
+// Continue gets past: LND exits with an error when it is stopped while its
+// wallet is locked or not created yet, and a start cut off by a restart is
+// not repeated without the operator. Continue sends the same request as
+// Retry. Only the screen's words and colors differ.
+func expectedStop(st protocol.Status) bool {
+	f := st.Failure
+	if st.Phase != "failed" || f == nil {
+		return false
+	}
+	return f.Code == protocol.FailureStartInterrupted ||
+		(f.Code == protocol.FailureStopFailed && f.Service == protocol.LND)
 }
 
 // knownFailure gives the exact next step for a failure the worker named with
@@ -410,17 +471,17 @@ func knownFailure(f *protocol.Failure) string {
 	switch f.Code {
 	case protocol.FailureStopFailed:
 		if f.Service == protocol.LND {
-			return "This is expected when the LND wallet is locked or not created yet.\nSelect Retry once to continue."
+			return "This happens when the LND wallet is locked or not created yet.\n\nSelect Continue."
 		}
 	case protocol.FailureStartInterrupted:
-		return "The update was interrupted, for example by a restart.\nSelect Retry to continue."
+		return "The update was interrupted, for example by a restart.\n\nSelect Continue."
 	case protocol.FailureServiceNotRunning:
 		if onSystemTab {
-			return fmt.Sprintf("%s is not running. Select Cancel update, start %s on the System tab, then review again.", name, name)
+			return fmt.Sprintf("%s is not running.\n\nSelect Cancel update, start %s on the System tab, then review again.", name, name)
 		}
 	case protocol.FailureServiceChanged:
 		if onSystemTab {
-			return fmt.Sprintf("%s is not running the installed version. Select Cancel update, restart %s on the System tab, then review again.", name, name)
+			return fmt.Sprintf("%s is not running the installed version.\n\nSelect Cancel update, restart %s on the System tab, then review again.", name, name)
 		}
 	}
 	return ""
@@ -442,23 +503,34 @@ func (s *NodeUpdateScreen) failure() string {
 	return "Error: " + strings.TrimSpace(s.status.Error)
 }
 
-// drawSteps draws the worker's list of steps the way the install screens do.
+// drawSteps draws the worker's list of steps with the install screen's
+// marks: a green check when done, an orange mark on the running step, a red
+// cross and the error on a failure, and a faint dot for the steps ahead. A
+// step the update stopped at for the operator, an expected stop or a worker
+// that is not running, gets a gray mark. An expected stop shows no error,
+// the log keeps it.
 func (s *NodeUpdateScreen) drawSteps(p *paneBuilder) {
 	st := s.status
-	for i, name := range st.Steps {
+	faint := lipgloss.NewStyle().Foreground(theme.ColorFaint)
+	for i, step := range st.Steps {
 		number := i + 1
-		ind, sty := "[wait]", theme.Dim
+		step = theme.PlainText(step)
+		mark, name := faint.Render("·"), faint.Render(step)
 		switch {
 		case st.Phase == "complete" || number < st.StepNumber:
-			ind, sty = "[done]", theme.Good
+			mark, name = lipgloss.NewStyle().Foreground(theme.ColorSuccess).Render("✓"), theme.Label.Render(step)
 		case number > st.StepNumber:
+		case expectedStop(st):
+			mark, name = theme.Dim.Render("›"), theme.Label.Render(step)
 		case st.Phase == "failed":
-			ind, sty = "[FAIL]", theme.Warning
+			mark, name = theme.Warning.Render("✗"), theme.Warning.Render(step)
 		case st.Running:
-			ind, sty = "[....]", theme.Value
+			mark, name = theme.Bitcoin.Render("›"), theme.Header.Render(step)
+		default:
+			mark, name = theme.Dim.Render("›"), theme.Label.Render(step)
 		}
-		p.fitText(sty, fmt.Sprintf("%s [%2d/%d] %s", ind, number, len(st.Steps), name), 1)
-		if number == st.StepNumber && st.Phase == "failed" {
+		p.line(ansi.Truncate(" "+mark+" "+name, max(p.w-1, 16), "…"))
+		if number == st.StepNumber && st.Phase == "failed" && !expectedStop(st) {
 			indented(p, theme.Warning, s.failure(), nodeUpdateFailureRows)
 		}
 	}
@@ -524,17 +596,17 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 		} else if s.status.Phase != "complete" {
 			// A record without a list comes from an update that stopped before its
 			// worker wrote one, or one started by an older release.
-			p.field("Status: ", s.status.Step)
-			if failed {
+			p.field("Status: ", theme.PlainText(s.status.Step))
+			if failed && !expectedStop(s.status) {
 				p.fitText(theme.Warning, s.failure(), nodeUpdateFailureRows)
 			}
 		}
 		if s.olderThanUpdate() {
 			p.blank()
-			p.fitText(plain, fmt.Sprintf("Update complete. Select Quit,\nthen type vpn and press Enter to start v%s.", s.status.Version), 0)
+			paragraphs(p, "Update complete.\n\nSelect Relaunch to open the new version.")
 		} else if s.status.Phase == "waiting-unlock" && s.status.Running && len(s.status.Steps) > 0 {
 			p.blank()
-			p.line(" Unlock the LND wallet to finish. Select Unlock wallet.")
+			paragraphs(p, "Unlock the LND wallet to finish.\n\nSelect Unlock wallet.")
 		} else if failed && !s.status.Running {
 			// A known failure gets its exact next step. Otherwise only whether
 			// the update had begun changing services, which is when Cancel is
@@ -542,17 +614,15 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 			// Retry nor Cancel is offered, so no advice is given yet.
 			p.blank()
 			if known := knownFailure(s.status.Failure); known != "" {
-				p.fitText(plain, known, 0)
+				paragraphs(p, known)
 			} else if s.status.Cancellable {
-				p.fitText(plain, "No services were changed. Select Retry, or Cancel update to leave the node as it was.", 0)
+				paragraphs(p, "No services were changed.\n\nSelect Retry, or Cancel update to leave the node as it was.")
 			} else {
-				p.fitText(plain, "Services may have been changed. Select Retry to try again.", 0)
+				paragraphs(p, "Services may have been changed.\n\nSelect Retry to try again.")
 			}
-			p.line(" Press l to see the update log.")
 		} else if s.status.Active && !s.status.Running {
 			p.blank()
 			p.line(" The update is not running. Retry continues it.")
-			p.line(" If Retry does not start it, press l to see the update log.")
 		}
 	} else if s.statusErr == nil && !s.hasTarget() {
 		switch {
@@ -607,10 +677,6 @@ func (s *NodeUpdateScreen) messages(w int, fit nodeUpdateFit) []string {
 	if s.statusErr != nil && fit.statusRows > 0 {
 		p.blank()
 		p.fitText(theme.Warning, s.statusErr.Error(), fit.statusRows)
-	}
-	if s.status.ID != "" && s.status.Active && !fit.noCloseHint {
-		p.blank()
-		p.dim("You can close this screen and return to the saved update.")
 	}
 	if len(p.lines) == 1 {
 		return nil

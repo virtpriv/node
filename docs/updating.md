@@ -22,8 +22,8 @@ approval.
    Downloads use Tor, and your databases are kept.
 4. You can close the screen while the update runs. It continues, and the
    screen shows it again when you come back.
-5. When the screen says "Update complete", select **Quit**, then type `vpn`
-   and press Enter to start the new version.
+5. When the screen says "Update complete", select **Relaunch** to open the
+   new version.
 
 If your wallet is locked when LND starts again, the screen says "Unlock the
 LND wallet to finish." Select **Unlock wallet** and type your wallet
@@ -32,13 +32,14 @@ password. The keys you type are not shown.
 ## If an update stops
 
 A failed step shows its error under the step, and for the cases vpn knows,
-the next step to take:
+the next step to take. The first two are part of normal use, so the screen
+shows them without an error:
 
-- **LND did not stop:** the screen says this is expected when the wallet is
-  locked or not created yet. Select **Retry** once to continue. If it fails
-  again, read the error before you retry.
-- **The update was interrupted, for example by a restart:** select **Retry**
-  to continue.
+- **LND did not stop:** this happens when the wallet is locked or not
+  created yet. Select **Continue**. If the update then stops again, read the
+  error before you retry.
+- **The update was interrupted, for example by a restart:** select
+  **Continue**.
 - **A service is not running, or not running its installed version:** select
   **Cancel update**, start or restart that service on **System**, then review
   again.

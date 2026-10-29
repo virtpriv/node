@@ -77,6 +77,9 @@ func (m *Model) activateTab() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case relaunchMsg:
+		m.relaunch = true
+		return m, tea.Quit
 	case nodeUpdateMsg:
 		return m.routeNodeUpdate(msg.owner, msg)
 	case nodeUpdateTick:

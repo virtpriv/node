@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"syscall"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -199,6 +200,9 @@ type Model struct {
 	// shared context for screen components
 	screenCtx *ScreenContext
 
+	// relaunch asks Show to start the installed vpn once this one has ended.
+	relaunch bool
+
 	// section home screens (nil = legacy path)
 	sectionScreens [numSections]Screen
 
@@ -311,6 +315,16 @@ func (m Model) pollInterval() time.Duration {
 func Show(
 	cfg *config.AppConfig, prefs *config.Preferences, version string,
 ) {
+	// The TUI's readers are closed before a relaunch replaces this program.
+	if err := finishRun(run(cfg, prefs, version), syscall.Exec); err != nil {
+		relaunchFailed(err)
+	}
+}
+
+// run shows the TUI until it ends and returns its final model.
+func run(
+	cfg *config.AppConfig, prefs *config.Preferences, version string,
+) tea.Model {
 	state := observeRuntimeState(cfg)
 	m := NewModel(cfg, prefs, state, version)
 	// Bubble Tea does not cancel or join commands on exit. The workflow owner
@@ -357,9 +371,11 @@ func Show(
 		}
 	}()
 	p := tea.NewProgram(m)
-	if _, err := p.Run(); err != nil {
+	final, err := p.Run()
+	if err != nil {
 		logger.TUI("terminal session: %v", err)
 	}
+	return final
 }
 
 func observeRuntimeState(cfg *config.AppConfig) *RuntimeState {
