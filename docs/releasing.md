@@ -216,8 +216,9 @@ do not request a host reboot.
 
 A stop of LND while its wallet is locked or not yet created fails the "Stop
 lnd" step with a failure code, and no binary has been replaced yet. The screen
-then says this is expected and asks for one Retry, on which LND counts as
-stopped and the update continues.
+shows it as a stop of normal use, without an error, and asks for Continue.
+Continue sends the same request as Retry, on which LND counts as stopped and
+the update continues.
 
 ## Installed helper and later releases
 
@@ -227,9 +228,25 @@ they start. They read only these fields of the job record: `schema`,
 `config_hash`, `phase`, `step`, `error` and `host_changes_begun`. They act on
 four phase words, `failed`, `complete`, `cancelled` and `waiting-unlock`, and
 treat any other as work in progress. Retry only sets `phase` to `retry`, and the
-worker decides where to resume. Retry and Cancel keep every other field as the
-worker wrote it. A worker may add fields, phases and components, but must keep
-these meanings for as long as its plan admits a source with this helper.
+worker decides where to resume. Retry and Cancel remove `error`, `failure`,
+`next` and `advice` and keep every other field as the worker wrote it. A worker
+may add fields, phases and components, but must keep these meanings for as
+long as its plan admits a source with this helper.
+
+For Node Updates only, the helper also passes `steps`, `step_number`,
+`step_times`, `failure`, `next` and `advice`, each only in a shape it can read,
+and the last three only with an error. `step_times` holds one start time per
+listed step, no more entries than steps and none more than a minute ahead of
+the node's clock. `advice` is at most 400 characters of printable text and
+line breaks, its last part, after an empty line, the sentence that names the
+button. A worker sends `next` and `advice` together. `next` is `continue`,
+`retry` or `cancel`, the button the advice names, and `cancel` only before
+host changes began. Each value keeps its meaning in every release. A later
+worker may add failure codes and `next` values: the helper passes them, and a
+screen that does not know the value, or did not get both, uses its own
+release's next step and words for the failure. An update of all three
+services fills v0.7.0's limit of 12 listed steps, so a worker that lists more
+steps loses the list on that screen.
 
 Once a job exists, the launcher, Retry and Cancel no longer check the Debian
 version or read the node configuration. They hand the job to the worker, which

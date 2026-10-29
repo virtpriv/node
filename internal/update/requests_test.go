@@ -1,6 +1,7 @@
 package update
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -340,5 +341,42 @@ func TestKeyServerNoticeIsApprovedButNotKeptInTheJob(t *testing.T) {
 	}
 	if strings.Contains(string(record), "key_server_unreachable") {
 		t.Fatal("job record gained a field that later workers do not expect")
+	}
+}
+
+// Retry and Cancel clear the next step and advice with the error, so the
+// screen never shows advice about a failure that is gone.
+func TestRetryAndCancelLeaveNoOldAdvice(t *testing.T) {
+	for _, action := range []string{"retry", "cancel"} {
+		t.Run(action, func(t *testing.T) {
+			j := workflowFixture()
+			h := newHarness(t, j)
+			h.failure = "stage"
+			if err := runJob(j, h.ops()); err == nil {
+				t.Fatal("fixture did not reach the failure")
+			}
+			rewriteRecord(t, h.root, func(m map[string]any) { m["next"], m["advice"] = "retry", "Select Retry." })
+			act := retryUpdate
+			if action == "cancel" {
+				act = cancelUpdate
+			}
+			if err := act(h.root, j.Review.Digest); err != nil {
+				t.Fatal(err)
+			}
+			b, err := os.ReadFile(filepath.Join(h.root, "current.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var m map[string]any
+			if err := json.Unmarshal(b, &m); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := m["next"]; ok {
+				t.Fatalf("%s kept the next step", action)
+			}
+			if _, ok := m["advice"]; ok {
+				t.Fatalf("%s kept the advice", action)
+			}
+		})
 	}
 }

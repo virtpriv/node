@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/host"
@@ -394,7 +395,7 @@ func retryUpdate(root, id string) error {
 	if j == nil || !j.active() || j.Review.Digest != id {
 		return errors.New("update identity changed, refresh its status")
 	}
-	return amendRecord(root, map[string]any{"phase": "retry", "error": nil, "failure": nil})
+	return amendRecord(root, map[string]any{"phase": "retry", "error": nil, "failure": nil, "next": nil, "advice": nil})
 }
 
 // maxListedSteps is the most steps Node Updates draws. It is the list of an
@@ -433,6 +434,10 @@ func (r *record) status() protocol.Status {
 	if json.Unmarshal(r.Steps, &steps) == nil && json.Unmarshal(r.StepNumber, &number) == nil &&
 		len(steps) <= maxListedSteps && number >= 1 && number <= len(steps) {
 		s.Steps, s.StepNumber = steps, number
+		var times []time.Time
+		if json.Unmarshal(r.StepTimes, &times) == nil && readableTimes(times, len(steps), time.Now()) {
+			s.StepTimes = times
+		}
 	}
 	// A code is passed only with the error it explains, and only in a shape
 	// this release can read. Anything else gets the screen's general advice.
@@ -440,7 +445,32 @@ func (r *record) status() protocol.Status {
 	if r.Error != "" && json.Unmarshal(r.Failure, &f) == nil && f.Readable() {
 		s.Failure = &f
 	}
+	// The next step and advice pass the same way, so later values reach the
+	// screen, which ignores a next step it does not know.
+	var next protocol.Next
+	if r.Error != "" && json.Unmarshal(r.Next, &next) == nil && next.Readable() {
+		s.Next = next
+	}
+	var advice string
+	if r.Error != "" && json.Unmarshal(r.Advice, &advice) == nil && protocol.ReadableAdvice(advice) {
+		s.Advice = advice
+	}
 	return s
+}
+
+// readableTimes reports step times the screen can use: no more than the
+// steps, none later than a minute from now, which allows for a clock that
+// was set back a little after the worker saved them.
+func readableTimes(times []time.Time, steps int, now time.Time) bool {
+	if len(times) == 0 || len(times) > steps {
+		return false
+	}
+	for _, t := range times {
+		if t.After(now.Add(time.Minute)) {
+			return false
+		}
+	}
+	return true
 }
 
 func verifyHash(path, want string) error {
@@ -482,5 +512,5 @@ func cancelUpdate(root, id string) error {
 	if !j.active() || j.HostChanges {
 		return errors.New("host changes may have begun, complete or repair this update")
 	}
-	return amendRecord(root, map[string]any{"phase": "cancelled", "step": "Update cancelled before host changes", "error": nil, "failure": nil})
+	return amendRecord(root, map[string]any{"phase": "cancelled", "step": "Update cancelled before host changes", "error": nil, "failure": nil, "next": nil, "advice": nil})
 }

@@ -242,10 +242,11 @@ func commitJob(root, binary string, j *job, running func(protocol.Component) err
 func recordWorkerFailure(j *job, cause error) error {
 	j.Phase = "failed"
 	j.Error, j.Failure = cause.Error(), nil
+	j.Next, j.Advice = protocol.Advise(nil, !j.HostChanges)
 	// These checks run before this worker writes its list of steps, so the
 	// list from an earlier run would mark the wrong step. Without a list the
 	// screen shows the error under the saved step text.
-	j.Steps, j.StepNumber = nil, 0
+	j.Steps, j.StepNumber, j.StepTimes = nil, 0, nil
 	return errors.Join(cause, saveJob(Root, j))
 }
 

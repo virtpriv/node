@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/virtpriv/node/internal/update/protocol"
 )
@@ -140,5 +141,43 @@ func TestRetryChecksTheNodeOnItsOwnStep(t *testing.T) {
 	}
 	if got := savedStep(t, h); got != "Check the node" {
 		t.Fatalf("the failed node check marked %q", got)
+	}
+}
+
+// Each step keeps the time it began across the saves made while it runs, so
+// the screen can show how long a step runs and how long each one took.
+func TestEachStepKeepsTheTimeItBegan(t *testing.T) {
+	tick := time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)
+	defer func(old func() time.Time) { now = old }(now)
+	now = func() time.Time { tick = tick.Add(time.Second); return tick }
+	j := workflowFixture()
+	h := newHarness(t, j)
+	began := map[string]time.Time{}
+	h.seen = func(event string) {
+		step := stepOwner(event)
+		if step == "" {
+			return
+		}
+		saved := h.reload()
+		i := slices.Index(saved.Steps, step)
+		if i < 0 || i >= len(saved.StepTimes) || saved.StepTimes[i].IsZero() {
+			t.Fatalf("step %q has no time during %s", step, event)
+		}
+		if first, ok := began[step]; ok && !first.Equal(saved.StepTimes[i]) {
+			t.Fatalf("step %q's time moved during %s", step, event)
+		}
+		began[step] = saved.StepTimes[i]
+	}
+	if err := runJob(j, h.ops()); err != nil {
+		t.Fatal(err)
+	}
+	saved := h.reload()
+	if len(saved.StepTimes) != len(saved.Steps) {
+		t.Fatalf("%d times for %d steps", len(saved.StepTimes), len(saved.Steps))
+	}
+	for i := 1; i < len(saved.StepTimes); i++ {
+		if !saved.StepTimes[i].After(saved.StepTimes[i-1]) {
+			t.Fatalf("step %d began before the one ahead of it", i+1)
+		}
 	}
 }

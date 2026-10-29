@@ -220,10 +220,9 @@ func (s *NodeUpdateScreen) focusLead() {
 	case st.Running && st.Phase == "waiting-unlock":
 		lead = "Unlock wallet"
 	case st.Running:
-	case expectedStop(st):
-		lead = "Continue"
-	case st.Phase == "failed" && knownFailure(st.Failure) != "":
-		lead = "Cancel update"
+	case st.Phase == "failed":
+		next, _ := advice(st)
+		lead = map[protocol.Next]string{protocol.NextContinue: "Continue", protocol.NextRetry: "Retry", protocol.NextCancel: "Cancel update"}[next]
 	default:
 		lead = "Retry"
 	}
@@ -435,67 +434,86 @@ func indented(p *paneBuilder, style lipgloss.Style, text string, rows int) {
 	}
 }
 
+// nodeUpdateAdviceRows is the most rows a failure's advice takes, so advice
+// from a later release cannot push the buttons off the screen.
+const nodeUpdateAdviceRows = 6
+
 // paragraphs adds a message whose parts are split by an empty line, keeping
-// that line, so the sentence that names a button stands apart.
-func paragraphs(p *paneBuilder, text string) {
-	for i, part := range strings.Split(text, "\n\n") {
-		if i > 0 {
-			p.blank()
+// that line, so the sentence that names a button stands apart. With maxRows
+// above zero, at most that many rows are added: the last part, the one that
+// names the button, is kept first, and the parts before it get the rows
+// left, the last one shown ending with "…" when it is cut.
+func paragraphs(p *paneBuilder, text string, maxRows int) {
+	plain := lipgloss.NewStyle()
+	parts := strings.Split(text, "\n\n")
+	if maxRows <= 0 {
+		for i, part := range parts {
+			if i > 0 {
+				p.blank()
+			}
+			p.fitText(plain, part, 0)
 		}
-		p.fitText(lipgloss.NewStyle(), part, 0)
+		return
 	}
+	rows := make([]int, len(parts))
+	for i, part := range parts {
+		q := newPane(p.w)
+		q.fitText(plain, part, 0)
+		rows[i] = len(q.lines) - 1
+	}
+	last := len(parts) - 1
+	keep := min(rows[last], maxRows)
+	left := maxRows - keep
+	if last > 0 {
+		left-- // the empty line before the last part
+	}
+	shown := false
+	for i := 0; i < last && left > 0; i++ {
+		if shown {
+			if left < 2 {
+				break
+			}
+			p.blank()
+			left--
+		}
+		n := min(rows[i], left)
+		p.fitText(plain, parts[i], n)
+		left -= n
+		shown = true
+		if n < rows[i] {
+			break
+		}
+	}
+	if shown {
+		p.blank()
+	}
+	p.fitText(plain, parts[last], keep)
+}
+
+// advice is a failure's next step and words. The worker's are used as a
+// pair, and only when this release knows the next step and can offer its
+// button. Otherwise this release's own pair is used, so the words never
+// name another button than the one offered.
+func advice(st protocol.Status) (protocol.Next, string) {
+	switch {
+	case st.Advice == "":
+	case st.Next == protocol.NextContinue, st.Next == protocol.NextRetry,
+		st.Next == protocol.NextCancel && st.Cancellable:
+		return st.Next, st.Advice
+	}
+	return protocol.Advise(st.Failure, st.Cancellable)
 }
 
 // expectedStop reports a failure the update meets in normal use and that
-// Continue gets past: LND exits with an error when it is stopped while its
-// wallet is locked or not created yet, and a start cut off by a restart is
-// not repeated without the operator. Continue sends the same request as
-// Retry. Only the screen's words and colors differ.
+// Continue gets past, such as LND that exits with an error when it is
+// stopped while its wallet is locked or not created yet. Continue sends the
+// same request as Retry. Only the screen's words and colors differ.
 func expectedStop(st protocol.Status) bool {
-	f := st.Failure
-	if st.Phase != "failed" || f == nil {
+	if st.Phase != "failed" {
 		return false
 	}
-	return f.Code == protocol.FailureStartInterrupted ||
-		(f.Code == protocol.FailureStopFailed && f.Service == protocol.LND)
-}
-
-// knownFailure gives the exact next step for a failure the worker named with
-// a code. Anything else gets the general advice, which stays true for codes a
-// later release adds.
-func knownFailure(f *protocol.Failure) string {
-	if f == nil {
-		return ""
-	}
-	name, onSystemTab := systemTabName(f.Service)
-	switch f.Code {
-	case protocol.FailureStopFailed:
-		if f.Service == protocol.LND {
-			return "This happens when the LND wallet is locked or not created yet.\n\nSelect Continue."
-		}
-	case protocol.FailureStartInterrupted:
-		return "The update was interrupted, for example by a restart.\n\nSelect Continue."
-	case protocol.FailureServiceNotRunning:
-		if onSystemTab {
-			return fmt.Sprintf("%s is not running.\n\nSelect Cancel update, start %s on the System tab, then review again.", name, name)
-		}
-	case protocol.FailureServiceChanged:
-		if onSystemTab {
-			return fmt.Sprintf("%s is not running the installed version.\n\nSelect Cancel update, restart %s on the System tab, then review again.", name, name)
-		}
-	}
-	return ""
-}
-
-// systemTabName is the name the System tab gives an updated service.
-func systemTabName(c protocol.Component) (string, bool) {
-	switch c {
-	case protocol.Bitcoin:
-		return "bitcoind", true
-	case protocol.LND, protocol.Syncthing:
-		return string(c), true
-	}
-	return "", false
+	next, _ := advice(st)
+	return next == protocol.NextContinue
 }
 
 // failure is the saved failure as the install screens show it.
@@ -603,23 +621,16 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 		}
 		if s.olderThanUpdate() {
 			p.blank()
-			paragraphs(p, "Update complete.\n\nSelect Relaunch to open the new version.")
+			paragraphs(p, "Update complete.\n\nSelect Relaunch to open the new version.", 0)
 		} else if s.status.Phase == "waiting-unlock" && s.status.Running && len(s.status.Steps) > 0 {
 			p.blank()
-			paragraphs(p, "Unlock the LND wallet to finish.\n\nSelect Unlock wallet.")
+			paragraphs(p, "Unlock the LND wallet to finish.\n\nSelect Unlock wallet.", 0)
 		} else if failed && !s.status.Running {
-			// A known failure gets its exact next step. Otherwise only whether
-			// the update had begun changing services, which is when Cancel is
-			// refused. While the worker still finishes its cleanup neither
-			// Retry nor Cancel is offered, so no advice is given yet.
+			// While the worker still finishes its cleanup neither Retry nor
+			// Cancel is offered, so no advice is given yet.
 			p.blank()
-			if known := knownFailure(s.status.Failure); known != "" {
-				paragraphs(p, known)
-			} else if s.status.Cancellable {
-				paragraphs(p, "No services were changed.\n\nSelect Retry, or Cancel update to leave the node as it was.")
-			} else {
-				paragraphs(p, "Services may have been changed.\n\nSelect Retry to try again.")
-			}
+			_, words := advice(s.status)
+			paragraphs(p, words, nodeUpdateAdviceRows)
 		} else if s.status.Active && !s.status.Running {
 			p.blank()
 			p.line(" The update is not running. Retry continues it.")
