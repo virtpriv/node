@@ -35,11 +35,12 @@ type Status struct {
 	Step    string `json:"step"`
 	// Steps and StepNumber are the worker's list and the step in progress,
 	// counted from 1. Both are empty when the record holds no usable list.
-	// StepTimes holds when each listed step began, in the list's order, the
-	// zero time for a step that has not begun.
+	// StepStarts and StepEnds hold when each listed step began and when it
+	// finished or failed, in the list's order, the zero time when it has not.
 	Steps      []string    `json:"steps,omitempty"`
 	StepNumber int         `json:"step_number,omitempty"`
-	StepTimes  []time.Time `json:"step_times,omitempty"`
+	StepStarts []time.Time `json:"step_starts,omitempty"`
+	StepEnds   []time.Time `json:"step_ends,omitempty"`
 	Error      string      `json:"error,omitempty"`
 	Failure    *Failure    `json:"failure,omitempty"`
 	// Next and Advice are the worker's next step and words for a failure. An

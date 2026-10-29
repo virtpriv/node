@@ -9,16 +9,15 @@ import (
 	"unicode/utf8"
 
 	"charm.land/bubbles/v2/progress"
-	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/harmonica"
 
 	"github.com/virtpriv/node/internal/installer"
 	"github.com/virtpriv/node/internal/loginpassword"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/theme"
+	"github.com/virtpriv/node/internal/tui/steplist"
 )
 
 type wizardPhase int
@@ -42,23 +41,24 @@ const (
 	focusExit
 )
 
-// One clock drives every animation: the opening, the typed titles, the
-// spinner and the bar. It starts with the first window size and runs while
-// the screen is open. Bubble Tea only sends the cells that changed, so a
-// still picture costs nothing on the link.
-const (
-	frameRate = 30
-	// spinEvery advances the spinner every third frame, ten times a second.
-	spinEvery = 3
+// Each animation has its own timer, which stops when the animation ends: the
+// opening, a typed title, the bar's glide and the spinner, the last two
+// Charm's. A still screen redraws only for a key or an event.
+var (
+	// frameEvery is the opening's frame, 30 a second.
+	frameEvery = time.Second / 30
+	// typeEvery is how long each letter of a title takes to appear.
+	typeEvery = time.Second / 15
 	// finishHold keeps the finished install in view before the connect dialog.
-	finishHold = 24
-	// typeEvery is how many frames each letter of a title takes to appear.
-	typeEvery = 2
-	// loginEvery is how often the connect dialog reads SSH's log.
-	loginEvery = 3 * time.Second
+	finishHold = 800 * time.Millisecond
 )
 
+// loginEvery is how often the connect dialog reads SSH's log.
+const loginEvery = 3 * time.Second
+
 type frameTick struct{}
+type typeTick struct{ title string }
+type finishTick struct{}
 type loginTick struct{}
 type loginResultMsg struct {
 	seen bool
@@ -96,23 +96,20 @@ type wizardModel struct {
 	pwFocus   int
 	pwErr     string
 
-	// The animations: whether the clock runs, the frame count, the opening's
-	// progress and the frames held after a complete install. typed is the
-	// title being typed out, from frame typedFrom.
-	clock               bool
-	frames, drawn, held int
-	typed               string
-	typedFrom           int
+	// The animations: whether the opening runs, its frames drawn, and the
+	// title being typed out with its letters shown so far.
+	opening bool
+	drawn   int
+	typed   string
+	letters int
 
-	spinFrames []string
-	bar        progress.Model
-	// The bar glides to its share of finished steps on a spring.
-	spring                     harmonica.Spring
-	barAt, barSpeed, barTarget float64
-	started                    time.Time
-	finished                   time.Time
-	stepFrom                   []time.Time
-	stepTook                   []time.Duration
+	spin steplist.Spinner
+	// The bar glides to its share of finished steps on Charm's spring.
+	bar      progress.Model
+	started  time.Time
+	finished time.Time
+	// times holds when each step began and ended, noted as events arrive.
+	times []steplist.Step
 
 	login           func() (bool, error)
 	loggedIn        bool
@@ -128,30 +125,19 @@ type wizardModel struct {
 
 func newWizardModel(info installer.InstallView, session installSession, login func() (bool, error)) wizardModel {
 	m := wizardModel{info: info, session: session, steps: info.Steps, login: login, rootLoginOff: info.RootLoginOff,
-		stepFrom: make([]time.Time, len(info.Steps)), stepTook: make([]time.Duration, len(info.Steps))}
+		times: make([]steplist.Step, len(info.Steps))}
 	m.pwInput = newWizardPasswordInput("Password")
 	m.pwConfirm = newWizardPasswordInput("Confirm password")
-	m.spinFrames = trimmed(spinner.Dot.Frames)
+	m.spin = steplist.NewSpinner()
 	m.bar = progress.New(progress.WithColors(theme.ColorPrimary), progress.WithFillCharacters('━', '━'),
-		progress.WithoutPercentage())
+		progress.WithoutPercentage(), progress.WithSpringOptions(6, 1))
 	m.bar.EmptyColor = theme.ColorFaint
-	m.spring = harmonica.NewSpring(harmonica.FPS(frameRate), 6, 1)
 	if m.info.NeedIdentity {
 		m.enterPasswordScreen()
 	} else {
 		m.phase = wzSteps
 	}
 	return m
-}
-
-// The spinner's frames carry a trailing space that would push the step name
-// one column right of the finished rows.
-func trimmed(frames []string) []string {
-	out := make([]string, len(frames))
-	for i, f := range frames {
-		out[i] = strings.TrimSpace(f)
-	}
-	return out
 }
 
 func newWizardPasswordInput(placeholder string) textinput.Model {
@@ -206,7 +192,11 @@ func (m wizardModel) Init() tea.Cmd {
 }
 
 func nextFrame() tea.Cmd {
-	return tea.Tick(time.Second/frameRate, func(time.Time) tea.Msg { return frameTick{} })
+	return tea.Tick(frameEvery, func(time.Time) tea.Msg { return frameTick{} })
+}
+
+func typeNext(title string) tea.Cmd {
+	return tea.Tick(typeEvery, func(time.Time) tea.Msg { return typeTick{title: title} })
 }
 
 // A start resolves before input is enabled again. Success starts one reader
@@ -229,18 +219,48 @@ func (m wizardModel) checkLogin() tea.Cmd {
 func (m wizardModel) Update(
 	msg tea.Msg,
 ) (tea.Model, tea.Cmd) {
+	if m.spin.Owns(msg) {
+		return m, m.spin.Update(msg)
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		if !m.clock {
-			m.clock = true
+		if !m.opening {
+			m.opening = true
 			return m, nextFrame()
 		}
 		return m, nil
 
 	case frameTick:
-		return m.advanceFrame()
+		return m.advanceOpening()
+
+	case typeTick:
+		// A title that changed or has no place on screen any more, such as
+		// on the connect dialog, ends its timer.
+		if msg.title != m.typed || m.typed != m.title() || m.titleDone() {
+			return m, nil
+		}
+		m.letters++
+		if !m.titleDone() {
+			return m, typeNext(m.typed)
+		}
+		if m.phase == wzFinish {
+			return m, tea.Tick(finishHold, func(time.Time) tea.Msg { return finishTick{} })
+		}
+		return m, nil
+
+	case finishTick:
+		if m.phase != wzFinish {
+			return m, nil
+		}
+		m.phase = wzConnect
+		return m, tea.Batch(m.checkLogin(), m.connectSpin())
+
+	case progress.FrameMsg:
+		var cmd tea.Cmd
+		m.bar, cmd = m.bar.Update(msg)
+		return m, cmd
 
 	case loginTick:
 		if m.phase != wzConnect || m.loggedIn {
@@ -257,7 +277,7 @@ func (m wizardModel) Update(
 		if msg.err == nil && msg.seen {
 			m.loggedIn = true
 			m.asking = false
-			return m, nil
+			return m, m.connectSpin()
 		}
 		return m, tea.Tick(loginEvery, func(time.Time) tea.Msg { return loginTick{} })
 
@@ -275,7 +295,7 @@ func (m wizardModel) Update(
 			if !m.info.NeedIdentity {
 				m.completeErr = installer.RefusedStartText(msg.err)
 				m.phase = wzDone
-				return m, nil
+				return m, m.retype()
 			}
 			m.pwErr = installer.RefusedStartText(msg.err) + " Choose Start install to try again."
 			return m, nil
@@ -285,7 +305,7 @@ func (m wizardModel) Update(
 		m.pwInput.Reset()
 		m.pwConfirm.Reset()
 		m.started = time.Now()
-		return m, m.waitProgress()
+		return m, tea.Batch(m.waitProgress(), m.retype())
 	case wizardProgressMsg:
 		return m.updateSteps(msg)
 
@@ -303,7 +323,7 @@ func (m wizardModel) Update(
 			// Leaving goes through the question, as on the connect dialog.
 			m.phase = wzConnect
 			m.asking, m.askExit = true, false
-			return m, m.checkLogin()
+			return m, tea.Batch(m.checkLogin(), m.connectSpin())
 		}
 		if m.phase == wzConnect && !m.loggedIn {
 			return m.updateConnect(msg)
@@ -341,7 +361,7 @@ func (m wizardModel) updateConnect(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if key == "enter" || key == "ctrl+c" {
 			m.asking, m.askExit = true, false
 		}
-		return m, nil
+		return m, m.connectSpin()
 	}
 	switch key {
 	case "left":
@@ -355,36 +375,40 @@ func (m wizardModel) updateConnect(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.asking = false
+		return m, m.connectSpin()
 	}
 	return m, nil
 }
 
-// advanceFrame moves every animation one frame.
-func (m wizardModel) advanceFrame() (tea.Model, tea.Cmd) {
-	m.frames++
+// connectSpin runs the connect dialog's spinner only while the dialog shows
+// "Waiting for your login".
+func (m *wizardModel) connectSpin() tea.Cmd {
+	return m.spin.Set(m.phase == wzConnect && !m.loggedIn && !m.asking)
+}
+
+// advanceOpening draws the frame's lines one frame further, then starts
+// typing the title.
+func (m wizardModel) advanceOpening() (tea.Model, tea.Cmd) {
 	if m.drawn < namesShown {
 		m.drawn++
 	}
-	// A title types itself out once the frame is drawn, and again whenever
-	// the title changes.
-	if m.drawn >= namesShown && m.typed != m.title() {
-		m.typed, m.typedFrom = m.title(), m.frames
+	if m.drawn < namesShown {
+		return m, nextFrame()
 	}
-	m.barAt, m.barSpeed = m.spring.Update(m.barAt, m.barSpeed, m.barTarget)
-	if m.phase == wzFinish && m.titleDone() {
-		m.held++
-		if m.held >= finishHold {
-			m.phase = wzConnect
-			return m, tea.Batch(nextFrame(), m.checkLogin())
-		}
-	}
-	return m, nextFrame()
+	return m, m.retype()
 }
 
-func (m wizardModel) spinnerView() string {
-	frame := m.spinFrames[(m.frames/spinEvery)%len(m.spinFrames)]
-	return lipgloss.NewStyle().Foreground(theme.ColorBitcoin).Render(frame)
+// retype starts typing the title once the frame is drawn and whenever the
+// title changes. The connect dialog has no title.
+func (m *wizardModel) retype() tea.Cmd {
+	if m.drawn < namesShown || m.typed == m.title() || m.phase == wzConnect {
+		return nil
+	}
+	m.typed, m.letters = m.title(), 0
+	return typeNext(m.typed)
 }
+
+func (m wizardModel) spinnerView() string { return m.spin.View() }
 
 func (m wizardModel) handlePaste(
 	msg tea.PasteMsg,
@@ -492,7 +516,8 @@ func (m wizardModel) updateSteps(msg wizardProgressMsg) (tea.Model, tea.Cmd) {
 	if !msg.ok {
 		m.completeErr = "Installation observation ended without a final result."
 		m.phase = wzDone
-		return m, nil
+		m.spin.Set(false)
+		return m, m.retype()
 	}
 	e := msg.event
 	if e.Final {
@@ -508,31 +533,32 @@ func (m wizardModel) updateSteps(msg wizardProgressMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.finished = time.Now()
+		m.spin.Set(false)
 		if m.failed || m.completeErr != "" || e.Result.Outcome != installer.RunComplete {
 			m.phase = wzDone
-			return m, nil
+			return m, m.retype()
 		}
 		// A complete install shows its last title, then moves on to the
 		// connect dialog by itself. The install terminal never opens the TUI.
 		m.phase = wzFinish
-		m.barTarget = 1
-		return m, nil
+		return m, tea.Batch(m.retype(), m.bar.SetPercent(1))
 	}
 	if e.Index < 0 || e.Index >= len(m.steps) {
 		return m, nil
 	}
 	m.steps[e.Index].Status = e.Status
 	m.steps[e.Index].Err = e.Err
-	switch e.Status {
-	case installer.StepRunning:
-		m.stepFrom[e.Index] = time.Now()
-	default:
-		if !m.stepFrom[e.Index].IsZero() {
-			m.stepTook[e.Index] = time.Since(m.stepFrom[e.Index])
-		}
+	cmds := []tea.Cmd{m.waitProgress()}
+	if e.Status == installer.StepRunning {
+		m.times[e.Index].Start(time.Now())
+		cmds = append(cmds, m.spin.Set(true))
+	} else {
+		m.times[e.Index].End(time.Now())
+		m.spin.Set(false)
+		// The bar glides only when a step ends, the one time it moves.
+		cmds = append(cmds, m.bar.SetPercent(float64(m.stepsDone())/float64(max(1, len(m.steps)))))
 	}
-	m.barTarget = float64(m.stepsDone()) / float64(max(1, len(m.steps)))
-	return m, m.waitProgress()
+	return m, tea.Batch(cmds...)
 }
 
 func (m wizardModel) stepsDone() int {
@@ -550,11 +576,6 @@ func (m wizardModel) sshTarget() string {
 		return "ssh " + paths.AdminUser + "@" + m.info.Address
 	}
 	return "ssh " + paths.AdminUser + "@<your-server-ip>"
-}
-
-func clock(d time.Duration) string {
-	d = d.Round(time.Second)
-	return fmt.Sprintf("%d:%02d", int(d.Minutes()), int(d.Seconds())%60)
 }
 
 func count(n int, unit string) string {
@@ -575,10 +596,10 @@ func (m wizardModel) statusBar() []string {
 	}
 	now, took := "", ""
 	if !m.started.IsZero() {
-		took = clock(time.Since(m.started))
+		took = steplist.Clock(time.Since(m.started))
 	}
 	if !m.finished.IsZero() {
-		took = clock(m.finished.Sub(m.started))
+		took = steplist.Clock(m.finished.Sub(m.started))
 	}
 	for _, s := range m.steps {
 		switch s.Status {
@@ -597,8 +618,8 @@ func (m wizardModel) statusBar() []string {
 	bar := m.bar
 	bar.SetWidth(frameInside - 2 - len(of))
 	return []string{
-		spread(" "+now, theme.Dim.Render(took)+" ", frameInside),
-		" " + bar.ViewAs(min(1, max(0, m.barAt))) + theme.Dim.Render(of),
+		theme.Spread(" "+now, theme.Dim.Render(took)+" ", frameInside),
+		" " + bar.View() + theme.Dim.Render(of),
 	}
 }
 
@@ -619,7 +640,7 @@ func (m wizardModel) title() string {
 
 // titleDone reports whether the current title has been typed out.
 func (m wizardModel) titleDone() bool {
-	return m.typed == m.title() && (m.frames-m.typedFrom)/typeEvery >= utf8.RuneCountInString(m.typed)
+	return m.typed == m.title() && m.letters >= utf8.RuneCountInString(m.typed)
 }
 
 // titleRows types the title out letter by letter, with a thin cursor while
@@ -629,7 +650,7 @@ func (m wizardModel) titleRows() []string {
 	shown := ""
 	if m.typed == full {
 		r := []rune(full)
-		shown = string(r[:min(len(r), (m.frames-m.typedFrom)/typeEvery)])
+		shown = string(r[:min(len(r), m.letters)])
 	}
 	t := lipgloss.NewStyle().Bold(true).Foreground(theme.ColorPrimary).Render(shown)
 	if m.typed == full && !m.titleDone() {
@@ -638,59 +659,38 @@ func (m wizardModel) titleRows() []string {
 	return []string{"", strings.Repeat(" ", (contentW-lipgloss.Width(full))/2) + t}
 }
 
-// stepRows lists every step: a mark, the name and, once it ran, its time.
-// from and to are the first and last rows of the running or failed step,
-// its error included.
-func (m wizardModel) stepRows(w int) (rows []string, from, to int) {
-	done := lipgloss.NewStyle().Foreground(theme.ColorSuccess).Render("✓")
-	faint := lipgloss.NewStyle().Foreground(theme.ColorFaint)
+// listSteps is the install's steps as the shared step list draws them.
+func (m wizardModel) listSteps() []steplist.Step {
+	out := make([]steplist.Step, len(m.steps))
 	for i, s := range m.steps {
-		var mark, name, took string
+		out[i] = m.times[i]
+		out[i].Name = s.Name
 		switch s.Status {
 		case installer.StepDone:
-			mark, name = done, theme.Label.Render(s.Name)
-			took = faint.Render(clock(m.stepTook[i]))
+			out[i].State = steplist.Done
 		case installer.StepRunning:
-			mark = m.spinnerView()
-			name = lipgloss.NewStyle().Bold(true).Foreground(theme.ColorPrimary).Render(s.Name)
-			took = theme.Dim.Render(clock(time.Since(m.stepFrom[i])))
+			out[i].State = steplist.Running
 		case installer.StepFailed:
-			mark, name = theme.Warning.Render("✗"), theme.Warning.Render(s.Name)
+			out[i].State = steplist.Failed
+			if s.Err != nil {
+				out[i].Err = s.Err.Error()
+			}
 		case installer.StepSkipped:
 			// Done in an earlier run: a gray check and no time.
-			mark, name = theme.Grayed.Render("✓"), theme.Dim.Render(s.Name)
-		default:
-			mark, name = faint.Render("·"), faint.Render(s.Name)
-		}
-		start := len(rows)
-		rows = append(rows, spread(" "+mark+" "+name, took, w))
-		if s.Status == installer.StepFailed && s.Err != nil {
-			for _, l := range wrap("Error: "+s.Err.Error(), w-6, theme.Warning) {
-				rows = append(rows, "   "+l)
-			}
-		}
-		if s.Status == installer.StepRunning || s.Status == installer.StepFailed {
-			from, to = start, len(rows)-1
+			out[i].State = steplist.Earlier
 		}
 	}
-	return rows, from, to
+	return out
 }
 
 // stepWindow shows as many steps as fit in h rows and keeps the running or
-// failed step in view, with a few of the steps after it.
+// failed step and its whole error in view, with a few of the steps after
+// it. After a complete install the list shows its end.
 func (m wizardModel) stepWindow(h int) []string {
 	const colW = 65
-	rows, from, to := m.stepRows(colW)
-	fits := max(1, h-1)
-	// The running or failed step and its whole error stay in view, with a
-	// few steps after it. An error longer than the window keeps its step's
-	// name. After a complete install the list shows its end.
-	first := min(max(0, to-fits+4), max(0, len(rows)-fits), from)
-	if m.phase == wzFinish {
-		first = max(0, len(rows)-fits)
-	}
+	rows, from, to := steplist.Rows(m.listSteps(), colW, m.spinnerView(), time.Now(), 0)
 	out := []string{""}
-	for _, r := range rows[first:min(len(rows), first+fits)] {
+	for _, r := range steplist.Window(rows, from, to, max(1, h-1), m.phase == wzFinish) {
 		out = append(out, strings.Repeat(" ", (contentW-colW)/2)+r)
 	}
 	return out

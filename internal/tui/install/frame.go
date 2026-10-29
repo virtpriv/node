@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/virtpriv/node/internal/theme"
 )
@@ -33,18 +32,6 @@ const (
 	namesShown    = sectionsDrawn + 3*len(theme.Sections)
 )
 
-func padTo(s string, w int) string {
-	if lipgloss.Width(s) > w {
-		return ansi.Truncate(s, w, "…")
-	}
-	return s + strings.Repeat(" ", w-lipgloss.Width(s))
-}
-
-func spread(left, right string, w int) string {
-	gap := max(1, w-lipgloss.Width(left)-lipgloss.Width(right))
-	return padTo(left+strings.Repeat(" ", gap)+right, w)
-}
-
 // center places lines in the middle of a w by h area.
 func center(lines []string, w, h int) []string {
 	out := make([]string, 0, h)
@@ -58,7 +45,7 @@ func center(lines []string, w, h int) []string {
 		out = append(out, "")
 	}
 	for i := range out {
-		out[i] = padTo(out[i], w)
+		out[i] = theme.PadTo(out[i], w)
 	}
 	return out[:h]
 }
@@ -87,7 +74,7 @@ func dialog(title, desc string, body []string, buttons string) []string {
 	inner := dialogW - 2
 	const margin = "  "
 	row := func(s string) string {
-		return border.Render("│") + padTo(margin+s, inner) + border.Render("│")
+		return border.Render("│") + theme.PadTo(margin+s, inner) + border.Render("│")
 	}
 	edge := func(l, r string) string { return border.Render(l + strings.Repeat("─", inner) + r) }
 	bold := lipgloss.NewStyle().Bold(true).Foreground(theme.ColorPrimary)
@@ -100,7 +87,7 @@ func dialog(title, desc string, body []string, buttons string) []string {
 		out = append(out, row(l))
 	}
 	out = append(out, row(""))
-	out = append(out, border.Render("│")+padTo(strings.Repeat(" ", max(0, inner-len(margin)-lipgloss.Width(buttons)))+buttons, inner)+border.Render("│"))
+	out = append(out, border.Render("│")+theme.PadTo(strings.Repeat(" ", max(0, inner-len(margin)-lipgloss.Width(buttons)))+buttons, inner)+border.Render("│"))
 	return append(out, row(""), edge("╰", "╯"))
 }
 
@@ -157,7 +144,7 @@ func frame(bar []string, f int, lit bool, content []string, help string) string 
 	cells, divider, sections := sidebar(h, f, lit)
 	out := []string{border.Render("╭" + strings.Repeat("─", frameInside) + "╮")}
 	for _, b := range bar {
-		out = append(out, border.Render("│")+padTo(b, frameInside)+border.Render("│"))
+		out = append(out, border.Render("│")+theme.PadTo(b, frameInside)+border.Render("│"))
 	}
 	// The top bar's line runs across first, then joins the divider.
 	across := min(frameInside, f*frameInside/lineAcross)
@@ -182,7 +169,7 @@ func frame(bar []string, f int, lit bool, content []string, help string) string 
 		if r < len(content) {
 			c = content[r]
 		}
-		out = append(out, border.Render(edge)+cells[r]+divider[r]+padTo(c, contentW)+border.Render("│"))
+		out = append(out, border.Render(edge)+cells[r]+divider[r]+theme.PadTo(c, contentW)+border.Render("│"))
 	}
 	bottom := strings.Repeat("─", frameInside)
 	if f >= dividerDown {

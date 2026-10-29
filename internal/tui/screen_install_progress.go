@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"fmt"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -10,6 +10,7 @@ import (
 	"github.com/virtpriv/node/internal/app"
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/theme"
+	"github.com/virtpriv/node/internal/tui/steplist"
 )
 
 // helperProgressMsg identifies one operation and its ordered application event.
@@ -24,6 +25,9 @@ type progressStep struct {
 	Name   string
 	Status int
 	Err    error
+	// times holds when the step began and ended. The helper's events carry
+	// no times, so the screen notes them as the events arrive.
+	times steplist.Step
 }
 
 const (
@@ -47,6 +51,7 @@ type InstallProgressScreen struct {
 	failed          bool
 	helperSucceeded bool
 	nothingChanged  bool
+	spin            steplist.Spinner
 }
 
 func NewInstallProgressScreen(ctx *ScreenContext, operation *app.HelperOperation, onDone, onFail func() tea.Cmd) *InstallProgressScreen {
@@ -55,7 +60,7 @@ func NewInstallProgressScreen(ctx *ScreenContext, operation *app.HelperOperation
 	for i, name := range names {
 		steps[i].Name = name
 	}
-	return &InstallProgressScreen{ctx: ctx, operation: operation, steps: steps, onDone: onDone, onFail: onFail}
+	return &InstallProgressScreen{ctx: ctx, operation: operation, steps: steps, onDone: onDone, onFail: onFail, spin: steplist.NewSpinner()}
 }
 
 func (s *InstallProgressScreen) Init() tea.Cmd {
@@ -65,6 +70,7 @@ func (s *InstallProgressScreen) Init() tea.Cmd {
 	s.started = true
 	if len(s.steps) > 0 {
 		s.steps[0].Status = progressRunning
+		s.steps[0].times.Start(time.Now())
 	}
 	return s.waitProgress()
 }
@@ -131,6 +137,7 @@ func (s *InstallProgressScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 			if s.current < len(s.steps) {
 				s.steps[s.current].Status = progressFailed
 				s.steps[s.current].Err = result.Err
+				s.steps[s.current].times.End(time.Now())
 			}
 			logger.Install("helper workflow: %v", result.Err)
 			if s.onFail != nil {
@@ -145,9 +152,11 @@ func (s *InstallProgressScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 		return s, nil
 	}
 	s.steps[s.current].Status = progressDone
+	s.steps[s.current].times.End(time.Now())
 	s.current++
 	if s.current < len(s.steps) {
 		s.steps[s.current].Status = progressRunning
+		s.steps[s.current].times.Start(time.Now())
 	}
 	return s, s.waitProgress()
 }
@@ -159,33 +168,25 @@ func (s *InstallProgressScreen) View(
 ) string {
 	p := newPane(w)
 
+	steps := make([]steplist.Step, len(s.steps))
 	for i, step := range s.steps {
-		var ind string
-		var sty = theme.Dim
+		steps[i] = step.times
+		steps[i].Name = step.Name
 		switch step.Status {
 		case progressDone:
-			ind = "[done]"
-			sty = theme.Good
+			steps[i].State = steplist.Done
 		case progressRunning:
-			ind = "[....]"
-			sty = theme.Value
+			steps[i].State = steplist.Running
 		case progressFailed:
-			ind = "[FAIL]"
-			sty = theme.Warn
-		default:
-			ind = "[wait]"
-		}
-
-		p.line(" " + sty.Render(fmt.Sprintf(
-			"%s [%d/%d] %s",
-			ind, i+1, len(s.steps), step.Name)))
-
-		if step.Status == progressFailed &&
-			step.Err != nil {
-			p.warnWrap(fmt.Sprintf(
-				"    Error: %v", step.Err))
+			steps[i].State = steplist.Failed
+			if step.Err != nil {
+				steps[i].Err = step.Err.Error()
+			}
 		}
 	}
+	rows, from, to := steplist.Rows(steps, max(p.w-1, 16), s.spin.View(), time.Now(), 0)
+	// The outcome below the list and the button row stay in view.
+	p.lines = append(p.lines, steplist.Window(rows, from, to, max(1, h-progressBelowRows), s.done && !s.failed)...)
 
 	p.blank()
 
@@ -211,6 +212,17 @@ func (s *InstallProgressScreen) View(
 	p.dim("Do not close the terminal.")
 	return p.renderWithBottomButtons(
 		[]string{"Installing..."}, 0, false, h)
+}
+
+// progressBelowRows is what the screen shows under its list at most: an
+// empty row, the outcome in up to three rows, and the button row.
+const progressBelowRows = 6
+
+// spinner and stepRuns let the model run the spinner while a step runs and
+// the screen shows.
+func (s *InstallProgressScreen) spinner() *steplist.Spinner { return &s.spin }
+func (s *InstallProgressScreen) stepRuns() bool {
+	return s.started && !s.done && s.current < len(s.steps)
 }
 
 // ── HelpBindings ────────────────────────────────────────

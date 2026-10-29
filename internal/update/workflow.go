@@ -90,23 +90,36 @@ func runJob(j *job, ops workflowOps) error {
 		return nil
 	}
 	affected := j.Affected
-	// mark makes step the one in progress. A step that begins gets its time
-	// and a journal line, and the steps after it have not begun. Marking the
-	// step in progress again keeps its time.
+	// mark makes step the one in progress. A step that begins gets its start
+	// and a journal line, the step in progress before it ends then, and the
+	// steps after it have not begun. Steps before it keep their times, also
+	// those a Retry does not redo. Marking the step in progress again keeps
+	// its start.
 	mark := func(step string) {
 		n := slices.Index(j.Steps, step) + 1
 		if n < 1 {
 			j.StepNumber = 0
 			return
 		}
-		if n == j.StepNumber && n <= len(j.StepTimes) && !j.StepTimes[n-1].IsZero() {
+		if n == j.StepNumber && n <= len(j.StepStarts) && !j.StepStarts[n-1].IsZero() {
 			return
 		}
-		times := make([]time.Time, len(j.Steps))
-		copy(times, j.StepTimes[:min(len(j.StepTimes), n-1)])
-		times[n-1] = now().UTC()
-		j.StepNumber, j.StepTimes = n, times
+		at := now().UTC()
+		starts, ends := make([]time.Time, len(j.Steps)), make([]time.Time, len(j.Steps))
+		copy(starts, j.StepStarts[:min(len(j.StepStarts), n-1)])
+		copy(ends, j.StepEnds[:min(len(j.StepEnds), n-1)])
+		if was := j.StepNumber; was >= 1 && was < n && !starts[was-1].IsZero() && ends[was-1].IsZero() {
+			ends[was-1] = at
+		}
+		starts[n-1] = at
+		j.StepNumber, j.StepStarts, j.StepEnds = n, starts, ends
 		fmt.Fprintf(os.Stderr, "step %d of %d: %s\n", n, len(j.Steps), step)
+	}
+	// end notes that the step in progress finished or failed.
+	end := func() {
+		if n := j.StepNumber; n >= 1 && n <= len(j.StepEnds) {
+			j.StepEnds[n-1] = now().UTC()
+		}
 	}
 	// publish records the phase, the step text older screens show, and the
 	// step of the list that is now in progress.
@@ -116,7 +129,7 @@ func runJob(j *job, ops workflowOps) error {
 		return ops.save(j)
 	}
 	if steps := stepList(affected); !slices.Equal(steps, j.Steps) {
-		j.Steps, j.StepNumber, j.StepTimes = steps, 0, nil
+		j.Steps, j.StepNumber, j.StepStarts, j.StepEnds = steps, 0, nil, nil
 		mark(steps[0])
 	}
 	if j.Phase == "committing" {
@@ -128,6 +141,7 @@ func runJob(j *job, ops workflowOps) error {
 	// saveFailure saves a failure with its code. The code comes from the
 	// cause alone, never from the cleanup joined to it.
 	saveFailure := func(cause error, f *protocol.Failure) error {
+		end()
 		j.Phase = "failed"
 		j.Error, j.Failure = cause.Error(), f
 		j.Next, j.Advice = protocol.Advise(f, !j.HostChanges)
@@ -164,10 +178,13 @@ func runJob(j *job, ops workflowOps) error {
 	if j.Phase == "retry" {
 		// The installed helper only records the request. Starts are attempted
 		// afresh. Downloads and the history of what may have run are kept.
-		// The step that failed begins again with its own time when marked.
+		// The step that failed begins again with its own times when marked.
 		j.Started = map[protocol.Component]bool{}
-		if n := j.StepNumber; n >= 1 && n <= len(j.StepTimes) {
-			j.StepTimes[n-1] = time.Time{}
+		if n := j.StepNumber; n >= 1 && n <= len(j.StepStarts) {
+			j.StepStarts[n-1] = time.Time{}
+		}
+		if n := j.StepNumber; n >= 1 && n <= len(j.StepEnds) {
+			j.StepEnds[n-1] = time.Time{}
 		}
 		j.Phase = "accepted"
 		if j.Completed["staged"] {
@@ -293,6 +310,7 @@ func runJob(j *job, ops workflowOps) error {
 		fmt.Fprintln(os.Stderr, "LND backup copy failed after the update:", err)
 	}
 	j.Error, j.Failure, j.Next, j.Advice = "", nil, "", ""
+	end()
 	if err := publish("complete", "Update complete", stepFinish); err != nil {
 		return err
 	}

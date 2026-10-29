@@ -24,12 +24,12 @@ const Service = protocol.WorkerUnit
 // retained launcher depend on. Both stay in service for every later release
 // that admits this one, and that release's worker may add fields, phases and
 // components. So they read only these fields, treat every phase other than
-// failed, complete, cancelled and waiting-unlock as work in progress, and keep
+// failed, complete, canceled and waiting-unlock as work in progress, and keep
 // the rest of the file when they write. Removing or redefining one of these
 // fields breaks nodes that are already installed. Steps, StepNumber,
-// StepTimes, Failure, Next and Advice are only for the screen, so they are
-// kept undecoded here and a value of another shape is ignored instead of
-// making the record unreadable.
+// StepStarts, StepEnds, Failure, Next and Advice are only for the screen, so
+// they are kept undecoded here and a value of another shape is ignored
+// instead of making the record unreadable.
 type record struct {
 	Schema int `json:"schema"`
 	Review struct {
@@ -45,7 +45,8 @@ type record struct {
 	Step        string          `json:"step"`
 	Steps       json.RawMessage `json:"steps"`
 	StepNumber  json.RawMessage `json:"step_number"`
-	StepTimes   json.RawMessage `json:"step_times"`
+	StepStarts  json.RawMessage `json:"step_starts"`
+	StepEnds    json.RawMessage `json:"step_ends"`
 	Error       string          `json:"error"`
 	Failure     json.RawMessage `json:"failure"`
 	Next        json.RawMessage `json:"next"`
@@ -53,7 +54,7 @@ type record struct {
 	HostChanges bool            `json:"host_changes_begun"`
 }
 
-func (r *record) active() bool           { return r.Phase != "complete" && r.Phase != "cancelled" }
+func (r *record) active() bool           { return r.Phase != "complete" && r.Phase != "canceled" }
 func (r *record) dir(root string) string { return filepath.Join(root, r.Review.Digest) }
 
 // relaunch reports whether the launcher should hand the job to its worker.
@@ -118,12 +119,14 @@ type job struct {
 	Step       string          `json:"step"`
 	// Steps is the list Node Updates draws, written by the worker at the start
 	// of each run. StepNumber counts from 1 and names the step in progress.
-	// StepTimes holds when each step began. Failure is the code of a known
-	// failure and Next and Advice the screen's next step and words for it,
-	// these three saved and cleared with Error.
+	// StepStarts and StepEnds hold when each step began and when it finished
+	// or failed, a Retry keeping those of the steps it does not redo. Failure
+	// is the code of a known failure and Next and Advice the screen's next
+	// step and words for it, these three saved and cleared with Error.
 	Steps         []string                    `json:"steps,omitempty"`
 	StepNumber    int                         `json:"step_number,omitempty"`
-	StepTimes     []time.Time                 `json:"step_times,omitempty"`
+	StepStarts    []time.Time                 `json:"step_starts,omitempty"`
+	StepEnds      []time.Time                 `json:"step_ends,omitempty"`
 	Error         string                      `json:"error,omitempty"`
 	Failure       *protocol.Failure           `json:"failure,omitempty"`
 	Next          protocol.Next               `json:"next,omitempty"`
@@ -142,7 +145,7 @@ type job struct {
 	HostChanges bool `json:"host_changes_begun"`
 }
 
-func (j *job) active() bool           { return j.Phase != "complete" && j.Phase != "cancelled" }
+func (j *job) active() bool           { return j.Phase != "complete" && j.Phase != "canceled" }
 func (j *job) dir(root string) string { return filepath.Join(root, j.Review.Digest) }
 
 func readRecord(path string) ([]byte, error) {
@@ -230,7 +233,7 @@ func loadJob(root string) (*job, error) {
 		}
 	}
 	switch j.Phase {
-	case "accepted", "retry", "staging", "installing", "starting", "checking", "waiting-unlock", "committing", "complete", "failed", "cancelled":
+	case "accepted", "retry", "staging", "installing", "starting", "checking", "waiting-unlock", "committing", "complete", "failed", "canceled":
 	default:
 		return nil, errors.New("unknown update phase")
 	}
