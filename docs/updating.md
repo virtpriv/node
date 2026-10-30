@@ -75,9 +75,9 @@ stopped until it continues.
 
 ## Testing a release candidate
 
-On a node without funds only, open **System → Updates → Node Updates →
-Select release** and enter the exact release tag, such as `v0.7.0-rc.1`. This
-selects one update. Normal updates keep offering stable releases only.
+On a node without funds only, open **System → Settings → Test release** and
+enter the exact release tag, such as `v0.7.0-rc.1`. This selects one update.
+Normal updates keep offering stable releases only.
 
 ## What an update does not do
 

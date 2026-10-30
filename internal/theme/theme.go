@@ -1,8 +1,6 @@
 package theme
 
 import (
-	"strings"
-
 	"charm.land/lipgloss/v2"
 )
 
@@ -308,14 +306,4 @@ func applyStyles() {
 func init() {
 	applyColors()
 	applyStyles()
-}
-
-// Hints draws a help line from key and description pairs: the key bright,
-// its description dim, thin bars between them.
-func Hints(pairs ...string) string {
-	var parts []string
-	for i := 0; i+1 < len(pairs); i += 2 {
-		parts = append(parts, HelpKey.Render(pairs[i])+" "+HelpDesc.Render(pairs[i+1]))
-	}
-	return strings.Join(parts, HelpSep.Render(" │ "))
 }

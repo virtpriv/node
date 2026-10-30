@@ -49,7 +49,7 @@ type ChannelCloseScreen struct {
 	force         bool
 	feeInput      AmountInput
 	fees          feeSuggestions
-	focusZone     int // type step: 0=options, 1=buttons; fee step: 0=fee, 1=buttons
+	focusZone     int // type step: 0=options, 1=buttons. fee step: 0=fee, 1=buttons
 	confirmBtnIdx int // 0=Go Back, 1=Review or close action
 	attempt       *channelCloseAttempt
 	result        app.ChannelCloseResult
@@ -491,7 +491,7 @@ func (s *ChannelCloseScreen) viewReview(w, h int) string {
 	p.line("Local balance snapshot: " + formatSats(s.attempt.localBalance) + " sats")
 	if req.Force {
 		p.warn("Type: Force close (unilateral)")
-		p.line("Commitment fee is predefined; sweeps add fees.")
+		p.line("Commitment fee is predefined. Sweeps add fees.")
 		p.warnWrapWords("Recovery depends on channel timelocks, HTLCs and confirmations. Funds are not immediately available.")
 	} else {
 		p.line("Type: Cooperative close")
@@ -501,7 +501,7 @@ func (s *ChannelCloseScreen) viewReview(w, h int) string {
 			p.line(fmt.Sprintf("Requested fee rate: %d sat/vB", req.SatPerVbyte))
 		}
 		p.line("Total fee and returned amount: unknown before close")
-		p.line("Requires peer cooperation; confirmation is still needed.")
+		p.line("Requires peer cooperation. Confirmation is still needed.")
 	}
 	p.dim("The local balance is not a payout quote.")
 	p.warn("Closing a channel cannot be undone.")
@@ -617,7 +617,7 @@ func (s *ChannelCloseScreen) viewResult(w, h int) string {
 	switch s.result.State {
 	case app.ClosePending:
 		p.title(theme.Header, "Channel Closing")
-		p.line("LND reported a closing transaction; confirmation is pending.")
+		p.line("LND reported a closing transaction. Confirmation is pending.")
 		p.labelLine("Candidate closing TX:")
 		p.monoWrap(s.result.Txid)
 		p.dim("The candidate may change. Check pending channels and history.")
@@ -627,7 +627,7 @@ func (s *ChannelCloseScreen) viewResult(w, h int) string {
 		p.monoWrap(s.result.Txid)
 	case app.CloseOutcomeUnknown:
 		p.title(theme.Warning, "Channel Close Outcome Unknown")
-		p.warnWrapWords("The close may still complete. Check pending channels and history before another request; repeating a close can request a fee bump.")
+		p.warnWrapWords("The close may still complete. Check pending channels and history before another request. Repeating a close can request a fee bump.")
 	default:
 		p.title(theme.Warning, "Channel Close Not Submitted")
 	}
@@ -651,11 +651,11 @@ func (s *ChannelCloseScreen) typeBindings() []key.Binding {
 	if s.focusZone == closeTypeZoneButtons {
 		binds = append(binds,
 			kLeftRightButtons, kEnter,
-			bind("↑", "back", "up"),
+			bind(theme.KeyUp, "back", "up"),
 			kSidebar)
 	} else {
 		binds = append(binds,
-			bind("↑↓", "close type", "up", "down"),
+			bind(theme.KeyUp+theme.KeyDown, "close type", "up", "down"),
 			kEnter, kSidebar)
 		if s.ctx.HasTabs {
 			binds = append(binds, kShiftTabBar)
@@ -673,5 +673,5 @@ func (s *ChannelCloseScreen) feeBindings() []key.Binding {
 		}
 		return append(binds, kQuit)
 	}
-	return []key.Binding{kLeftRightButtons, kEnter, bind("⇧tab", "fee", "shift+tab"), kSidebar, kBack, kQuit}
+	return []key.Binding{kLeftRightButtons, kEnter, bind(theme.KeyShiftTab, "fee", "shift+tab"), kSidebar, kBack, kQuit}
 }

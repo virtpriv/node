@@ -1,10 +1,7 @@
 package tui
 
 import (
-	"strings"
-
 	"charm.land/bubbles/v2/key"
-	"charm.land/lipgloss/v2"
 
 	"github.com/virtpriv/node/internal/theme"
 )
@@ -17,67 +14,14 @@ func (m Model) renderHelpBar(maxW int) string {
 func renderBindings(
 	bindings []key.Binding, maxW int,
 ) string {
-	if maxW <= 0 {
-		return ""
-	}
-
-	sep := theme.HelpSep.Render(" │ ")
-	sepW := lipgloss.Width(sep)
-
-	type helpPart struct {
-		rendered string
-		width    int
-	}
-	var parts []helpPart
+	var pairs []string
 	for _, b := range bindings {
-		if !b.Enabled() {
-			continue
+		if b.Enabled() {
+			h := b.Help()
+			pairs = append(pairs, h.Key, h.Desc)
 		}
-		h := b.Help()
-		if h.Key == "" {
-			continue
-		}
-		part := theme.HelpKey.Render(h.Key) +
-			" " +
-			theme.HelpDesc.Render(h.Desc)
-		parts = append(parts, helpPart{
-			rendered: part,
-			width:    lipgloss.Width(part),
-		})
 	}
-
-	if len(parts) == 0 {
-		return ""
-	}
-
-	fitCount := len(parts)
-	for fitCount > 0 {
-		totalW := 0
-		for i := 0; i < fitCount; i++ {
-			totalW += parts[i].width
-			if i < fitCount-1 {
-				totalW += sepW
-			}
-		}
-		if totalW <= maxW {
-			break
-		}
-		fitCount--
-	}
-
-	if fitCount == 0 {
-		if len(parts) > 0 {
-			return parts[0].rendered
-		}
-		return ""
-	}
-
-	var strs []string
-	for i := 0; i < fitCount; i++ {
-		strs = append(strs, parts[i].rendered)
-	}
-
-	return strings.Join(strs, sep)
+	return theme.HelpLine(maxW, pairs...)
 }
 
 func (m Model) currentBindings() []key.Binding {
@@ -86,7 +30,7 @@ func (m Model) currentBindings() []key.Binding {
 	// Fullscreen views
 	if m.subview == svQR || m.subview == svFullURL {
 		return []key.Binding{
-			bind("enter", "back", "enter"),
+			bind(theme.KeyEnter, "back", "enter"),
 			kQuit,
 		}
 	}

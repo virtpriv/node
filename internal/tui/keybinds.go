@@ -2,6 +2,8 @@ package tui
 
 import (
 	"charm.land/bubbles/v2/key"
+
+	"github.com/virtpriv/node/internal/theme"
 )
 
 // ── Helper ──────────────────────────────────────────────
@@ -16,40 +18,40 @@ func bind(helpKey, helpDesc string, keys ...string) key.Binding {
 
 var (
 	// Navigation
-	kQuit    = bind("ctrl+c", "quit", "ctrl+c")
-	kSidebar = bind("←", "sidebar", "left")
-	kEnter   = bind("enter", "select", "enter")
-	kBack    = bind("⌫", "back", "backspace")
+	kQuit    = bind(theme.KeyCtrlC, "quit", "ctrl+c")
+	kSidebar = bind(theme.KeyLeft, "sidebar", "left")
+	kEnter   = bind(theme.KeyEnter, "select", "enter")
+	kBack    = bind(theme.KeyBackspace, "back", "backspace")
 
 	// Confirm dialog
 	kYesConfirm = bind("y", "confirm", "y")
 	kNoCancel   = bind("n", "cancel", "n")
 
 	// Directional
-	kLeftRightButtons = bind("←→", "buttons", "left", "right")
-	kRightButton      = bind("→", "button", "right")
-	kLeftRightCursor  = bind("←→", "cursor", "left", "right")
-	kUpTabBar         = bind("↑", "tab bar", "up")
-	kShiftTabBar      = bind("⇧tab", "tab bar", "shift+tab")
-	kUpShiftTabBar    = bind("↑/⇧tab", "tab bar", "up", "shift+tab")
-	kShiftTabButtons  = bind("⇧tab", "buttons", "shift+tab")
-	kShiftTabInput    = bind("⇧tab", "input", "shift+tab")
-	kTabNext          = bind("tab", "next", "tab")
-	kTabButtons       = bind("tab", "buttons", "tab")
-	kTabNextField     = bind("tab", "next field", "tab")
-	kUpDownSelect     = bind("↑↓", "select", "up", "down")
-	kUpDownFields     = bind("↑↓", "fields", "up", "down")
-	kUpDownChannels   = bind("↑↓", "channels", "up", "down")
+	kLeftRightButtons = bind(theme.KeyLeft+theme.KeyRight, "buttons", "left", "right")
+	kRightButton      = bind(theme.KeyRight, "button", "right")
+	kLeftRightCursor  = bind(theme.KeyLeft+theme.KeyRight, "cursor", "left", "right")
+	kUpTabBar         = bind(theme.KeyUp, "tab bar", "up")
+	kShiftTabBar      = bind(theme.KeyShiftTab, "tab bar", "shift+tab")
+	kUpShiftTabBar    = bind(theme.KeyUp+"/"+theme.KeyShiftTab, "tab bar", "up", "shift+tab")
+	kShiftTabButtons  = bind(theme.KeyShiftTab, "buttons", "shift+tab")
+	kShiftTabInput    = bind(theme.KeyShiftTab, "input", "shift+tab")
+	kTabNext          = bind(theme.KeyTab, "next", "tab")
+	kTabButtons       = bind(theme.KeyTab, "buttons", "tab")
+	kTabNextField     = bind(theme.KeyTab, "next field", "tab")
+	kUpDownSelect     = bind(theme.KeyUp+theme.KeyDown, "select", "up", "down")
+	kUpDownFields     = bind(theme.KeyUp+theme.KeyDown, "fields", "up", "down")
+	kUpDownChannels   = bind(theme.KeyUp+theme.KeyDown, "channels", "up", "down")
 
 	// Enter variants
-	kEnterOpen            = bind("enter", "open", "enter")
-	kEnterClose           = bind("enter", "close", "enter")
-	kEnterDetails         = bind("enter", "details", "enter")
-	kEnterNext            = bind("enter", "next", "enter")
-	kEnterConfirm         = bind("enter", "confirm", "enter")
-	kEnterCreate          = bind("enter", "create", "enter")
-	kEnterCreateWallet    = bind("enter", "create wallet", "enter")
-	kEnterRetryWalletRead = bind("enter", "retry wallet state", "enter")
+	kEnterOpen            = bind(theme.KeyEnter, "open", "enter")
+	kEnterClose           = bind(theme.KeyEnter, "close", "enter")
+	kEnterDetails         = bind(theme.KeyEnter, "details", "enter")
+	kEnterNext            = bind(theme.KeyEnter, "next", "enter")
+	kEnterConfirm         = bind(theme.KeyEnter, "confirm", "enter")
+	kEnterCreate          = bind(theme.KeyEnter, "create", "enter")
+	kEnterCreateWallet    = bind(theme.KeyEnter, "create wallet", "enter")
+	kEnterRetryWalletRead = bind(theme.KeyEnter, "retry wallet state", "enter")
 )
 
 // ── Button navigation helper ────────────────────────────
@@ -75,14 +77,14 @@ func homeButtonBindings(
 	var binds []key.Binding
 	if btnIdx == 0 {
 		binds = []key.Binding{
-			bind("←/⌫", "sidebar", "left", "backspace"),
+			bind(theme.KeyLeft+"/"+theme.KeyBackspace, "sidebar", "left", "backspace"),
 			kRightButton,
 		}
 	} else {
 		binds = []key.Binding{kLeftRightButtons}
 	}
 	binds = append(binds,
-		bind("↓", downLabel, "down"),
+		bind(theme.KeyDown, downLabel, "down"),
 		kEnter)
 	if hasTabs {
 		binds = append(binds, kUpTabBar)
@@ -104,10 +106,10 @@ func homeListBindings(
 	itemsLabel, enterLabel, shiftTabLabel string,
 ) []key.Binding {
 	return []key.Binding{
-		bind("↑↓", itemsLabel, "up", "down"),
-		bind("enter", enterLabel, "enter"),
-		bind("⇧tab", shiftTabLabel, "shift+tab"),
-		bind("←/⌫", "sidebar", "left", "backspace"),
+		bind(theme.KeyUp+theme.KeyDown, itemsLabel, "up", "down"),
+		bind(theme.KeyEnter, enterLabel, "enter"),
+		bind(theme.KeyShiftTab, shiftTabLabel, "shift+tab"),
+		bind(theme.KeyLeft+"/"+theme.KeyBackspace, "sidebar", "left", "backspace"),
 		kQuit,
 	}
 }
@@ -166,7 +168,7 @@ func detailActionBindings(
 ) []key.Binding {
 	binds := buttonNav(btnIdx)
 	binds = append(binds,
-		bind("enter", enterLabel, "enter"))
+		bind(theme.KeyEnter, enterLabel, "enter"))
 	if hasTabs {
 		binds = append(binds, kShiftTabBar)
 	}
@@ -222,7 +224,7 @@ func manageButtonBindings(
 ) []key.Binding {
 	binds := buttonNav(btnIdx)
 	binds = append(binds,
-		bind("↓", downLabel, "down"),
+		bind(theme.KeyDown, downLabel, "down"),
 		kEnter)
 	if hasTabs {
 		binds = append(binds, kShiftTabBar)
@@ -235,7 +237,7 @@ func manageButtonBindings(
 
 func sidebarBindings() []key.Binding {
 	return []key.Binding{
-		bind("↑↓", "navigate", "up"),
+		bind(theme.KeyUp+theme.KeyDown, "navigate", "up"),
 		kEnter,
 		kQuit,
 	}
@@ -244,9 +246,9 @@ func sidebarBindings() []key.Binding {
 // ── Model-level: tab bar ────────────────────────────────
 
 func tabBarBindings(viewOnly, onTab bool) []key.Binding {
-	lr := bind("←→", "tabs", "left", "right")
-	down := bind("↓", "content", "down", "tab")
-	enter := bind("enter", "select", "enter")
+	lr := bind(theme.KeyLeft+theme.KeyRight, "tabs", "left", "right")
+	down := bind(theme.KeyDown, "content", "down", "tab")
+	enter := bind(theme.KeyEnter, "select", "enter")
 
 	binds := []key.Binding{lr}
 	if !viewOnly {
@@ -254,8 +256,8 @@ func tabBarBindings(viewOnly, onTab bool) []key.Binding {
 	}
 	if onTab {
 		binds = append(binds,
-			bind("↑", "close", "up"),
-			bind("⌫", "close tab", "backspace"))
+			bind(theme.KeyUp, "close", "up"),
+			bind(theme.KeyBackspace, "close tab", "backspace"))
 	}
 	binds = append(binds, kQuit)
 	return binds

@@ -447,13 +447,13 @@ func (s *ChannelOpenScreen) handleToggleKey(
 		switch s.toggleIdx {
 		case 0:
 			if s.private && s.taproot {
-				s.error = "Taproot channels must be private; select Legacy first"
+				s.error = "Taproot channels must be private, select Legacy first"
 				return s, nil
 			}
 			s.private = !s.private
 		case 1:
 			if !s.taproot && !s.private {
-				s.error = "Taproot channels must be private; select Private first"
+				s.error = "Taproot channels must be private, select Private first"
 				return s, nil
 			}
 			s.taproot = !s.taproot
@@ -1025,7 +1025,7 @@ func (s *ChannelOpenScreen) peerListBindings() []key.Binding {
 func (s *ChannelOpenScreen) amountListBindings() []key.Binding {
 	return []key.Binding{
 		kUpDownSelect, kTabNext,
-		bind("⇧tab", "peers", "shift+tab"),
+		bind(theme.KeyShiftTab, "peers", "shift+tab"),
 		kEnterConfirm, kSidebar, kBack, kQuit,
 	}
 }
@@ -1033,9 +1033,9 @@ func (s *ChannelOpenScreen) amountListBindings() []key.Binding {
 func (s *ChannelOpenScreen) toggleBindings() []key.Binding {
 	return []key.Binding{
 		kUpDownSelect,
-		bind("space", "toggle", "space"),
+		bind(theme.KeySpace, "toggle", "space"),
 		kEnterNext,
-		bind("⇧tab", "fee", "shift+tab"),
+		bind(theme.KeyShiftTab, "fee", "shift+tab"),
 		kSidebar, kBack, kQuit,
 	}
 }
@@ -1043,7 +1043,7 @@ func (s *ChannelOpenScreen) toggleBindings() []key.Binding {
 func (s *ChannelOpenScreen) feeZoneBindings() []key.Binding {
 	return []key.Binding{
 		kLeftRightCursor, kTabNext,
-		bind("⇧tab", "amount", "shift+tab"),
+		bind(theme.KeyShiftTab, "amount", "shift+tab"),
 		kSidebar, kBack, kQuit,
 	}
 }
@@ -1051,7 +1051,7 @@ func (s *ChannelOpenScreen) feeZoneBindings() []key.Binding {
 func (s *ChannelOpenScreen) buttonBindings() []key.Binding {
 	binds := buttonNav(s.btnIdx)
 	binds = append(binds, kEnter,
-		bind("⇧tab", "toggles", "shift+tab"),
+		bind(theme.KeyShiftTab, "toggles", "shift+tab"),
 		kBack, kQuit)
 	return binds
 }

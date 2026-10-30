@@ -748,7 +748,7 @@ func (s *AutoUnlockScreen) enableBindings() []key.Binding {
 		return []key.Binding{
 			kEnterNext,
 			kTabButtons,
-			bind("⇧tab", "prev field", "shift+tab"),
+			bind(theme.KeyShiftTab, "prev field", "shift+tab"),
 			kQuit,
 		}
 	}
@@ -757,7 +757,7 @@ func (s *AutoUnlockScreen) enableBindings() []key.Binding {
 	binds := buttonNav(s.btnIdx)
 	binds = append(binds,
 		kEnter,
-		bind("⇧tab", "fields", "shift+tab"))
+		bind(theme.KeyShiftTab, "fields", "shift+tab"))
 	if s.ctx.HasTabs {
 		binds = append(binds, kUpTabBar)
 	}

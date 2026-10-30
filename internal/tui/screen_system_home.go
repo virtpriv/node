@@ -25,8 +25,8 @@ import (
 // Section home for System. Two focus zones, the buttons and
 // the scrollable service list with hotkey actions.
 //
-// Buttons are dynamic and only actionable ones appear. Updates
-// and Accounts always show, and Reboot shows when required.
+// Buttons are dynamic and only actionable ones appear. Updates,
+// Accounts and Settings always show, and Reboot shows when required.
 // Updates opens Node Updates, which stays reachable for a saved
 // update, and Update Packages.
 //
@@ -48,6 +48,7 @@ type sysBtn int
 const (
 	sysBtnUpdates sysBtn = iota
 	sysBtnAccounts
+	sysBtnSettings
 	sysBtnReboot
 )
 
@@ -247,6 +248,8 @@ func (s *SystemHomeScreen) HandleKey(
 				return s, openUpdatesCmd(s)
 			case sysBtnAccounts:
 				return s, openAccountsCmd(s.ctx)
+			case sysBtnSettings:
+				return s, openSettingsCmd(s.ctx)
 			case sysBtnReboot:
 				if s.rebootPending == nil && !s.rebootAccepted {
 					s.sysConfirm = "Reboot"
@@ -707,11 +710,11 @@ func (s *SystemHomeScreen) HelpBindings() []key.Binding {
 
 func (s *SystemHomeScreen) serviceBindings() []key.Binding {
 	if s.svcPending != nil {
-		return []key.Binding{bind("↑↓", "services", "up", "down"), bind("l", "logs", "l"), kShiftTabButtons, kSidebar, kBack, kQuit}
+		return []key.Binding{bind(theme.KeyUp+theme.KeyDown, "services", "up", "down"), bind("l", "logs", "l"), kShiftTabButtons, kSidebar, kBack, kQuit}
 	}
 
 	binds := []key.Binding{
-		bind("↑↓", "services", "up", "down"),
+		bind(theme.KeyUp+theme.KeyDown, "services", "up", "down"),
 		bind("r", "restart", "r"),
 		bind("s", "stop", "s"),
 		bind("a", "start", "a"),
@@ -745,7 +748,7 @@ func (s *SystemHomeScreen) hasUpdate() bool {
 func (s *SystemHomeScreen) buttonActions() []sysBtn {
 	// Saved updates must remain reachable without release discovery, including
 	// after a reboot, failed startup, or a completed VPN binary replacement.
-	actions := []sysBtn{sysBtnUpdates, sysBtnAccounts}
+	actions := []sysBtn{sysBtnUpdates, sysBtnAccounts, sysBtnSettings}
 	if s.rebootPending != nil || s.rebootAccepted ||
 		(s.ctx.Status != nil && s.ctx.Status.Reboot.Value) {
 		actions = append(actions, sysBtnReboot)
@@ -756,6 +759,7 @@ func (s *SystemHomeScreen) buttonActions() []sysBtn {
 var sysBtnLabel = map[sysBtn]string{
 	sysBtnUpdates:  "Updates",
 	sysBtnAccounts: "Accounts",
+	sysBtnSettings: "Settings",
 	sysBtnReboot:   "Reboot",
 }
 

@@ -255,13 +255,13 @@ func (s *ChannelOpenScreen) customPeerBindings() []key.Binding {
 	case coCustomZoneHost:
 		return []key.Binding{
 			kLeftRightCursor, kTabButtons,
-			bind("⇧tab", "pubkey", "shift+tab"),
+			bind(theme.KeyShiftTab, "pubkey", "shift+tab"),
 			kSidebar, kQuit,
 		}
 	case coCustomZoneButtons:
 		binds := buttonNav(s.customBtnIdx)
 		binds = append(binds, kEnter,
-			bind("⇧tab", "host", "shift+tab"),
+			bind(theme.KeyShiftTab, "host", "shift+tab"),
 			kBack, kQuit)
 		return binds
 	}

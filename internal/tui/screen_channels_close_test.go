@@ -85,7 +85,7 @@ func TestChannelCloseFrozenReviewAndCopy(t *testing.T) {
 				t.Fatal("missing confirmation identity/accounting")
 			}
 			if tc.force {
-				if !strings.Contains(before, "Force close") || !strings.Contains(before, "sweeps add fees") {
+				if !strings.Contains(before, "Force close") || !strings.Contains(before, "Sweeps add fees") {
 					t.Fatal("force costs not disclosed")
 				}
 			} else if tc.rate == 0 && !strings.Contains(before, "auto (LND default)") {
@@ -250,8 +250,8 @@ func TestChannelCloseResultsAreHonestAndFit(t *testing.T) {
 	}{
 		{"candidate", app.ClosePending, false, "Candidate closing TX"},
 		{"confirmed", app.CloseConfirmed, true, "not full fund recovery"},
-		{"unknown", app.CloseOutcomeUnknown, false, "repeating a close"},
-		{"force unknown", app.CloseOutcomeUnknown, true, "repeating a close"},
+		{"unknown", app.CloseOutcomeUnknown, false, "Repeating a close"},
+		{"force unknown", app.CloseOutcomeUnknown, true, "Repeating a close"},
 		{"not submitted", app.CloseNotSubmitted, false, "Not Submitted"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

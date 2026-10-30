@@ -61,6 +61,7 @@ const (
 	tabSSHKeyAdd                        // SSH key add flow
 	tabSSHPasswordAuth                  // SSH password auth toggle
 	tabSSHChangePassword                // change login password
+	tabSettings                         // the TUI's settings and Test release
 )
 
 type openTab struct {
