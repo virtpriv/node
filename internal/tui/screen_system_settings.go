@@ -6,7 +6,6 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/virtpriv/node/internal/release"
 	"github.com/virtpriv/node/internal/theme"
@@ -214,7 +213,7 @@ func (s *SettingsScreen) View(w, h int) string {
 			p.line(" Downloading and verifying the release plan...")
 		case s.err != "":
 			p.blank()
-			p.fitText(lipgloss.NewStyle(), s.err, nodeUpdateActionRows)
+			p.fitText(theme.Warning, s.err, nodeUpdateActionRows)
 		}
 		if s.checking {
 			return p.renderWithBottomButtons([]string{"Cancel"}, 0, s.ctx.ContentFocused, h)
