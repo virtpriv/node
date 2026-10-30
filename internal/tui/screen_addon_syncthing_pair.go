@@ -128,7 +128,7 @@ func (s *SyncthingPairScreen) View(
 		p := newPane(w)
 		title := "Pairing Not Completed"
 		if s.result.Outcome == app.SyncthingPartial {
-			title = "Device Configured; Sharing Incomplete"
+			title = "Device Configured, Sharing Incomplete"
 		}
 		if s.result.Outcome == app.SyncthingUnknown {
 			title = "Pairing Outcome Unconfirmed"
@@ -173,7 +173,7 @@ func (s *SyncthingPairScreen) inputBindings() []key.Binding {
 	var binds []key.Binding
 	if s.focusZone == syncPairZoneInput {
 		binds = append(binds,
-			bind("enter", "pair", "enter"),
+			bind(theme.KeyEnter, "pair", "enter"),
 			kTabButtons, kSidebar)
 		if s.ctx.HasTabs {
 			binds = append(binds, kShiftTabBar)

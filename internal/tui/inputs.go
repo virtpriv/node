@@ -122,9 +122,9 @@ func restyleScreenFields(screen Screen) {
 		fields = []*textinput.Model{&s.pw1, &s.pw2}
 	case *P2PUpgradeScreen:
 		fields = []*textinput.Model{&s.input}
-	case *NodeUpdateScreen:
-		if s.releaseInput != nil {
-			fields = []*textinput.Model{s.releaseInput}
+	case *SettingsScreen:
+		if s.release != nil {
+			fields = []*textinput.Model{s.release}
 		}
 	}
 	for _, field := range fields {

@@ -777,19 +777,19 @@ func (m wizardModel) helpLine() string {
 		if !m.dialogShown() {
 			return ""
 		}
-		return theme.Hints("↑↓", "fields", "←→", "buttons", "↩", "select", "⌃C", "quit")
+		return theme.HelpLine(theme.FrameWidth, theme.KeyUp+theme.KeyDown, "fields", theme.KeyLeft+theme.KeyRight, "buttons", theme.KeyEnter, "select", theme.KeyCtrlC, "quit")
 	case wzSteps:
 		if m.stopping {
 			return theme.HelpDesc.Render("Pausing after this step. Keep this terminal open.")
 		}
-		return theme.Hints("⌃C", "pause install")
+		return theme.HelpLine(theme.FrameWidth, theme.KeyCtrlC, "pause install")
 	case wzDone:
-		return theme.Hints("⌃C", "quit")
+		return theme.HelpLine(theme.FrameWidth, theme.KeyCtrlC, "quit")
 	case wzConnect:
 		if m.asking {
-			return theme.Hints("←→", "buttons", "↩", "select")
+			return theme.HelpLine(theme.FrameWidth, theme.KeyLeft+theme.KeyRight, "buttons", theme.KeyEnter, "select")
 		}
-		return theme.Hints("↩", "exit")
+		return theme.HelpLine(theme.FrameWidth, theme.KeyEnter, "exit")
 	}
 	return ""
 }

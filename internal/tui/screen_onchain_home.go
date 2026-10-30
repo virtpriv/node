@@ -40,8 +40,8 @@ type OnChainHomeScreen struct {
 	txCursor      int
 	pencilFocused bool
 
-	// Coin control dirty flag — set on any spacebar
-	// toggle, cleared when openSend reads it.
+	// Coin control dirty flag, set on any spacebar
+	// toggle and cleared when openSend reads it.
 	utxoChanged bool
 
 	// Label popup state
@@ -247,7 +247,7 @@ func (s *OnChainHomeScreen) handleTab() (
 			s.pencilFocused = false
 		}
 	case ocHomeZoneTxs:
-		// At bottom zone — nowhere to go
+		// At the bottom zone, nowhere to go
 	}
 	return s, nil
 }
@@ -330,7 +330,7 @@ func (s *OnChainHomeScreen) openSend() (
 	screen := NewOnChainSendScreen(
 		s.ctx, s.ocCtx)
 
-	// Selected coins default to Max; LND determines the net amount.
+	// Selected coins default to Max. LND determines the net amount.
 	if s.ocCtx.Selection.Len() > 0 {
 		screen.applyMax()
 	}
@@ -404,7 +404,7 @@ func (s *OnChainHomeScreen) handleLabelPopupKey(
 	case "down", "tab":
 		if !s.labelOnBtn {
 			s.labelOnBtn = true
-			// Land on Save (index 1) — the action button.
+			// Land on Save (index 1), the action button.
 			s.labelBtnIdx = 1
 			s.labelInput.Blur()
 		}
@@ -456,7 +456,7 @@ func (s *OnChainHomeScreen) handleLabelPopupKey(
 				return s, labelTxCmd(s, client, prepared)
 			}
 		}
-		// On label field — move to buttons, land on Save.
+		// On the label field, move to the buttons and land on Save.
 		s.labelOnBtn = true
 		s.labelBtnIdx = 1
 		s.labelInput.Blur()
@@ -916,7 +916,7 @@ func (s *OnChainHomeScreen) openLabelPopup() {
 	}
 	s.labelInput = newDetailField(txLabel, fieldW)
 	s.labelInput.Placeholder = "enter label"
-	// app validates LND's byte limit; a rune limit can truncate existing labels.
+	// app validates LND's byte limit. A rune limit can truncate existing labels.
 	s.labelInput.Focus()
 	s.labelEditing = true
 	s.labelOnBtn = false
@@ -1028,16 +1028,16 @@ func (s *OnChainHomeScreen) utxoBindings() []key.Binding {
 	var binds []key.Binding
 	if s.pencilFocused {
 		binds = append(binds,
-			bind("←", "UTXO", "left"),
-			bind("enter", "edit label", "enter"))
+			bind(theme.KeyLeft, "UTXO", "left"),
+			bind(theme.KeyEnter, "edit label", "enter"))
 	} else {
 		binds = append(binds,
-			bind("↑↓", "UTXOs", "up", "down"),
-			bind("space", "select", "space"),
+			bind(theme.KeyUp+theme.KeyDown, "UTXOs", "up", "down"),
+			bind(theme.KeySpace, "select", "space"),
 			kEnterDetails)
 	}
 	binds = append(binds,
-		bind("tab", "transactions", "tab"),
+		bind(theme.KeyTab, "transactions", "tab"),
 		kShiftTabButtons,
 		kSidebar,
 		kBack, kQuit)
@@ -1051,14 +1051,14 @@ func (s *OnChainHomeScreen) labelPopupBindings() []key.Binding {
 	if s.labelOnBtn {
 		return []key.Binding{
 			kLeftRightButtons,
-			bind("↑", "label", "up"),
+			bind(theme.KeyUp, "label", "up"),
 			kEnter,
 			kQuit,
 		}
 	}
 	return []key.Binding{
-		bind("↓", "buttons", "down"),
-		bind("enter", "buttons", "enter"),
+		bind(theme.KeyDown, "buttons", "down"),
+		bind(theme.KeyEnter, "buttons", "enter"),
 		kQuit,
 	}
 }

@@ -133,19 +133,21 @@ func TestNodeUpdateSubmitsReviewedTokenAndRejectsStalePreparation(t *testing.T) 
 			target := selection.target
 			client := &nodeUpdateClientStub{}
 			ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0", LatestVersion: "0.7.1"}
-			s := NewNodeUpdateScreen(ctx)
-			var cmd tea.Cmd
+			var s *NodeUpdateScreen
 			if selection.explicit {
-				cmd = reviewSelectedRelease(t, s, "v"+target)
+				settings, cmd := testRelease(t, ctx, "v"+target)
+				ctx.LatestVersion = "0.7.3"
+				s, _ = openedNodeUpdates(t, settings, cmd)
 			} else {
-				cmd = pressNodeUpdateAction(t, s, "Review")
+				s = NewNodeUpdateScreen(ctx)
+				cmd := pressNodeUpdateAction(t, s, "Review")
+				ctx.LatestVersion = "0.7.3"
+				s.HandleMsg(cmd())
 			}
-			ctx.LatestVersion = "0.7.3"
-			s.HandleMsg(cmd())
 			if client.prepared != target || s.review == nil {
 				t.Fatal("background discovery changed the release being reviewed")
 			}
-			cmd = pressNodeUpdateAction(t, s, "Install")
+			cmd := pressNodeUpdateAction(t, s, "Install")
 			if again := s.request("start"); again != nil {
 				t.Fatal("duplicate start command")
 			}
@@ -168,12 +170,11 @@ func TestNodeUpdateSubmitsReviewedTokenAndRejectsStalePreparation(t *testing.T) 
 func TestCandidateRequiresExplicitSelection(t *testing.T) {
 	client := &nodeUpdateClientStub{}
 	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0", LatestVersion: "0.7.1-rc.1"}
-	s := NewNodeUpdateScreen(ctx)
-	if NewSystemHomeScreen(ctx).hasUpdate() || s.hasTarget() {
+	if NewSystemHomeScreen(ctx).hasUpdate() || NewNodeUpdateScreen(ctx).hasTarget() {
 		t.Fatal("normal discovery offered a release candidate")
 	}
-	cmd := reviewSelectedRelease(t, s, "v0.7.1-rc.1")
-	s.HandleMsg(cmd())
+	settings, cmd := testRelease(t, ctx, "v0.7.1-rc.1")
+	s, _ := openedNodeUpdates(t, settings, cmd)
 	if client.prepared != "0.7.1-rc.1" || s.review == nil || client.starts != 0 {
 		t.Fatal("explicit candidate selection did not require review before installation")
 	}
@@ -182,8 +183,8 @@ func TestCandidateRequiresExplicitSelection(t *testing.T) {
 func TestNodeUpdateReviewFailureSurvivesStatusRefresh(t *testing.T) {
 	failure := errors.New("cannot read installed component version")
 	client := &nodeUpdateClientStub{prepareErr: failure}
-	s := NewNodeUpdateScreen(&ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0-rc.1"})
-	cmd := reviewSelectedRelease(t, s, "v0.7.0-rc.2")
+	s := NewNodeUpdateScreen(&ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0-rc.1", LatestVersion: "0.7.0"})
+	cmd := pressNodeUpdateAction(t, s, "Review")
 	_, poll := s.HandleMsg(cmd())
 	if poll == nil {
 		t.Fatal("failed preparation stopped background status polling")
@@ -217,22 +218,9 @@ func TestNodeUpdateReviewFailureSurvivesStatusRefresh(t *testing.T) {
 		t.Fatal("explicit retry kept the previous preparation failure")
 	}
 	s.HandleMsg(cmd())
-	if s.review == nil || s.review.Manifest.Version != "0.7.0-rc.2" || client.starts != 0 {
+	if s.review == nil || s.review.Manifest.Version != "0.7.0" || client.starts != 0 {
 		t.Fatal("successful retry did not return to review without installation")
 	}
-}
-
-func reviewSelectedRelease(t *testing.T, s *NodeUpdateScreen, tag string) tea.Cmd {
-	t.Helper()
-	s.button = slices.Index(s.buttons(), "Select release")
-	if s.button < 0 {
-		t.Fatal("candidate selection is unreachable")
-	}
-	s.HandleKey("enter", tea.KeyPressMsg{})
-	s.HandleMsg(tea.PasteMsg{Content: tag})
-	s.HandleKey("enter", tea.KeyPressMsg{})
-	_, cmd := s.HandleKey("enter", tea.KeyPressMsg{})
-	return cmd
 }
 
 func pressNodeUpdateAction(t *testing.T, s *NodeUpdateScreen, action string) tea.Cmd {
@@ -383,29 +371,29 @@ func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 	}{
 		{name: "failure with line breaks after host changes", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) { s.status = failed(stop, false) },
-			buttons: []string{"Close", "Retry", "Select release"}, shown: changed},
+			buttons: []string{"Close", "Retry"}, shown: changed},
 		{name: "cancellable failure", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) { s.status = failed("not enough free space", true) },
-			buttons: []string{"Close", "Retry", "Cancel update", "Select release"}, shown: unchanged},
+			buttons: []string{"Close", "Retry", "Cancel update"}, shown: unchanged},
 		{name: "cancellable failure with a newer release", latest: "0.7.2",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) { s.status = failed("not enough free space", true) },
-			buttons: []string{"Close", "Retry", "Cancel update", "Review", "Select release"}, shown: unchanged},
+			buttons: []string{"Close", "Retry", "Cancel update", "Review"}, shown: unchanged},
 		{name: "long failure on one line", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) { s.status = failed(refusal, false) },
-			buttons: []string{"Close", "Retry", "Select release"}, shown: []string{refusal}},
+			buttons: []string{"Close", "Retry"}, shown: []string{refusal}},
 		{name: "failure longer than the screen", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) { s.status = failed(endless.String(), false) },
-			buttons: []string{"Close", "Retry", "Select release"},
+			buttons: []string{"Close", "Retry"},
 			shown:   []string{"step 0: the unit reported a failure"}},
 		{name: "saved failure, action error and status error together", latest: "0.7.2",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) {
 				s.status, s.err, s.statusErr = failed(stop, true), errors.New(refusal), errors.New(outage)
 			},
-			buttons: []string{"Close", "Retry", "Cancel update", "Review", "Select release"},
+			buttons: []string{"Close", "Retry", "Cancel update", "Review"},
 			shown:   []string{firstStop, refusal, "update-status: helper unreachable"}},
 		{name: "refused review without a job", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) { s.err = errors.New(refusal) },
-			buttons: []string{"Close", "Review", "Select release"}, shown: []string{refusal}},
+			buttons: []string{"Close", "Review"}, shown: []string{refusal}},
 		{name: "review with a long summary", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) {
 				s.review = &protocol.Review{Token: id, KeyServerUnreachable: true, Source: protocol.Versions{VPN: "0.7.0"},
@@ -416,7 +404,7 @@ func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) {
 				s.status = failed("first\rsecond\tthird\a \x1b[2Jfourth", false)
 			},
-			buttons: []string{"Close", "Retry", "Select release"}, shown: []string{"first", "second", "third", "fourth"},
+			buttons: []string{"Close", "Retry"}, shown: []string{"first", "second", "third", "fourth"},
 			absent: []string{"\r", "\t", "\a", "\x1b[2J"}},
 		{name: "long list with a failure late in it", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) {
@@ -426,14 +414,17 @@ func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 				}
 				s.status.StepNumber = 20
 			},
-			buttons: []string{"Close", "Retry", "Select release"},
+			buttons: []string{"Close", "Retry"},
 			shown:   []string{"Step 20 of the update", "disk full while installing new files", "Select Retry to try again."}},
 		{name: "release to install first, with long names",
 			prepare: func(t *testing.T, s *NodeUpdateScreen) {
+				// Settings hands the node's answer to Node Updates.
 				s.ctx.NodeUpdates = &nodeUpdateClientStub{updateFirst: map[string]string{"0.7.2-rc.12": "0.7.2-rc.11"}}
-				s.HandleMsg(reviewSelectedRelease(t, s, "v0.7.2-rc.12")())
+				settings, cmd := testRelease(t, s.ctx, "v0.7.2-rc.12")
+				opened, _ := openedNodeUpdates(t, settings, cmd)
+				*s = *opened
 			},
-			buttons: []string{"Close", "Review", "Select release"},
+			buttons: []string{"Close", "Review"},
 			shown:   []string{"v0.7.2-rc.12 can be installed after v0.7.2-rc.11. Review v0.7.2-rc.11 first."}},
 	}
 	for _, c := range cases {

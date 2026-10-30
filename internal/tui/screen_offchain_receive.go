@@ -172,19 +172,19 @@ func (s *ReceiveScreen) inputBindings() []key.Binding {
 	case recvZoneMemo:
 		binds = append(binds,
 			kUpDownFields, kTabNext, kEnterCreate,
-			bind("⇧tab", "amount", "shift+tab"),
+			bind(theme.KeyShiftTab, "amount", "shift+tab"),
 			kSidebar)
 	case recvZoneBlind:
 		binds = append(binds,
 			kUpDownFields,
-			bind("space", "toggle", "space"),
+			bind(theme.KeySpace, "toggle", "space"),
 			kEnterNext, kTabNext,
-			bind("⇧tab", "memo", "shift+tab"),
+			bind(theme.KeyShiftTab, "memo", "shift+tab"),
 			kSidebar)
 	case recvZoneButtons:
 		binds = append(binds,
 			kLeftRightButtons, kEnter,
-			bind("⇧tab", "toggle", "shift+tab"),
+			bind(theme.KeyShiftTab, "toggle", "shift+tab"),
 			kBack)
 	}
 	binds = append(binds, kQuit)
@@ -427,7 +427,7 @@ func (s *ReceiveScreen) handleWaitingKey(
 		}
 		return s, s.display.command(&qrCopyDisplayRequest{
 			owner: s, text: s.invoice.PaymentRequest(),
-			label: "Invoice - " + formatSats(s.invoice.AmountSats()) + " sats",
+			label: "Invoice: " + formatSats(s.invoice.AmountSats()) + " sats",
 			copy:  s.buttonIdx == 1, wallet: s.attempt.wallet, invoice: s.attempt,
 		})
 	}
@@ -478,7 +478,7 @@ func (s *ReceiveScreen) handleInvoiceCreated(msg invoiceCreatedMsg) (Screen, tea
 	if msg.err != nil {
 		s.inputError = msg.err.Error()
 		if s.attempt.request.Blinded && (strings.Contains(s.inputError, "blinded") || strings.Contains(s.inputError, "routes to self")) {
-			s.inputError += " - try turning off blinded paths"
+			s.inputError = strings.TrimSuffix(s.inputError, ".") + ". Try turning off blinded paths."
 		}
 		s.attempt = nil
 		s.step = recvStepInput

@@ -28,7 +28,7 @@ type channelCoinsMsg struct {
 }
 
 // One form admits at most one same-scope collection. The shared app reader owns
-// cancellation and joining; this screen owns selection and result publication.
+// cancellation and joining. This screen owns selection and result publication.
 func (s *ChannelOpenScreen) refreshCoins() tea.Cmd {
 	if s.step >= coStepOpening {
 		return nil
@@ -140,7 +140,7 @@ func (s *ChannelOpenScreen) handleCoinRefresh(msg channelCoinsMsg) (Screen, tea.
 func (s *ChannelOpenScreen) selectionSummary() string {
 	total, err := s.selection.Total(s.utxos)
 	if err != nil {
-		return fmt.Sprintf("%d selected; unavailable coins", s.selection.Len())
+		return fmt.Sprintf("%d selected, coins unavailable", s.selection.Len())
 	}
 	return fmt.Sprintf("%d selected (%s sats)", s.selection.Len(), formatSats(total))
 }
@@ -505,7 +505,7 @@ func (s *ChannelOpenScreen) coinControlBindings() []key.Binding {
 		binds := buttonNav(s.ccBtnIdx)
 		binds = append(binds,
 			kEnter,
-			bind("⇧tab", "UTXOs", "shift+tab"),
+			bind(theme.KeyShiftTab, "UTXOs", "shift+tab"),
 			kBack, kQuit)
 		return binds
 	}
@@ -515,8 +515,8 @@ func (s *ChannelOpenScreen) coinControlBindings() []key.Binding {
 		}
 	}
 	return []key.Binding{
-		bind("↑↓", "navigate", "up", "down"),
-		bind("enter/space", "select", "enter", "space"),
+		bind(theme.KeyUp+theme.KeyDown, "navigate", "up", "down"),
+		bind(theme.KeyEnter+"/"+theme.KeySpace, "select", "enter", "space"),
 		kTabNext, kBack, kQuit,
 	}
 }

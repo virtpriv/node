@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"slices"
@@ -8,7 +9,6 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/virtpriv/node/internal/app"
@@ -27,16 +27,15 @@ type nodeUpdates interface {
 }
 
 type NodeUpdateScreen struct {
-	ctx          *ScreenContext
-	target       string
-	review       *protocol.Review
-	status       protocol.Status
-	err          error
-	statusErr    error
-	busy         string
-	button       int
-	attempt      uint64
-	releaseInput *textinput.Model
+	ctx       *ScreenContext
+	target    string
+	review    *protocol.Review
+	status    protocol.Status
+	err       error
+	statusErr error
+	busy      string
+	button    int
+	attempt   uint64
 	// notice explains why target is not the release the operator selected.
 	notice string
 	// lead is the next step button focused when its state appeared.
@@ -54,18 +53,55 @@ type nodeUpdateMsg struct {
 }
 type nodeUpdateTick struct{ owner *NodeUpdateScreen }
 
+var errNodeUpdatesUnavailable = errors.New("update client is unavailable")
+
 func NewNodeUpdateScreen(ctx *ScreenContext) *NodeUpdateScreen {
 	s := &NodeUpdateScreen{ctx: ctx, spin: steplist.NewSpinner()}
 	s.selectStable()
 	return s
 }
+
+// newReviewedRelease opens Node Updates on the node's answer for a release
+// named in Settings: its review, or the release to install first.
+func newReviewedRelease(ctx *ScreenContext, version string, answer protocol.Review) *NodeUpdateScreen {
+	s := &NodeUpdateScreen{ctx: ctx, spin: steplist.NewSpinner(), target: version}
+	s.prepared(answer)
+	return s
+}
+
+// prepared takes the node's answer for the target. A release to install
+// first is guidance, not an approvable review: the screen offers that
+// release instead.
+func (s *NodeUpdateScreen) prepared(answer protocol.Review) {
+	s.button = 0
+	if first := answer.UpdateFirst; first != "" {
+		s.notice = fmt.Sprintf("v%s can be installed after v%s. Review v%s first.", s.target, first, first)
+		s.target = first
+		return
+	}
+	s.notice = ""
+	s.review = &answer
+}
+
+// nodeUpdatesBusy reports a Node Updates screen waiting for the node's
+// answer, which a new screen in its tab would lose.
+func nodeUpdatesBusy(screen Screen) bool {
+	s, ok := screen.(*NodeUpdateScreen)
+	return ok && s.busy != ""
+}
+
 func (s *NodeUpdateScreen) selectStable() {
 	s.target, s.notice = "", ""
 	if release.IsStable(s.ctx.LatestVersion) {
 		s.target = s.ctx.LatestVersion
 	}
 }
-func (s *NodeUpdateScreen) Init() tea.Cmd { return s.request("status") }
+func (s *NodeUpdateScreen) Init() tea.Cmd {
+	if s.review != nil {
+		return nil
+	}
+	return s.request("status")
+}
 func (s *NodeUpdateScreen) request(kind string) tea.Cmd {
 	if s.busy != "" {
 		return nil
@@ -85,7 +121,7 @@ func (s *NodeUpdateScreen) request(kind string) tea.Cmd {
 	return func() tea.Msg {
 		msg := nodeUpdateMsg{owner: s, attempt: attempt, kind: kind}
 		if client == nil {
-			msg.err = fmt.Errorf("update client is unavailable")
+			msg.err = errNodeUpdatesUnavailable
 			return msg
 		}
 		switch kind {
@@ -108,17 +144,8 @@ func (s *NodeUpdateScreen) poll() tea.Cmd {
 }
 func (s *NodeUpdateScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 	switch m := msg.(type) {
-	case tea.PasteMsg:
-		if s.releaseInput != nil && s.releaseInput.Focused() {
-			value := strings.TrimSpace(m.Content)
-			if len(value) > s.releaseInput.CharLimit || validatePrintableASCII(value) != nil {
-				s.err = fmt.Errorf("enter a release tag such as v0.7.0-rc.1")
-				return s, nil
-			}
-			s.releaseInput.SetValue(value)
-		}
 	case nodeUpdateTick:
-		if m.owner == s && s.review == nil && s.releaseInput == nil {
+		if m.owner == s && s.review == nil {
 			if s.target == "" && s.notice == "" {
 				// The release check may have answered after this screen opened.
 				s.selectStable()
@@ -140,17 +167,10 @@ func (s *NodeUpdateScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 		}
 		if m.err == nil {
 			if m.kind == "prepare" {
-				if first := m.review.UpdateFirst; first != "" {
-					// Guidance, not an approvable review. Offer the release
-					// this node has to install first.
-					s.notice = fmt.Sprintf("v%s can be installed after v%s. Review v%s first.", s.target, first, first)
-					s.target = first
-					s.button = 0
+				s.prepared(m.review)
+				if s.review == nil {
 					return s, s.poll()
 				}
-				s.notice = ""
-				s.review = &m.review
-				s.button = 0
 				return s, nil
 			}
 			s.status = m.status
@@ -160,7 +180,7 @@ func (s *NodeUpdateScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 			}
 			s.focusLead()
 		}
-		if s.review == nil && s.releaseInput == nil {
+		if s.review == nil {
 			return s, s.poll()
 		}
 	}
@@ -176,9 +196,6 @@ func (s *NodeUpdateScreen) buttons() []string {
 	}
 	if s.review != nil {
 		return []string{"Cancel", "Install"}
-	}
-	if s.releaseInput != nil {
-		return []string{"Cancel", "Review release"}
 	}
 	out := []string{"Close"}
 	if s.status.Active {
@@ -201,9 +218,6 @@ func (s *NodeUpdateScreen) buttons() []string {
 	}
 	if s.olderThanUpdate() {
 		return append(out, "Relaunch")
-	}
-	if !s.status.Active || s.status.Phase == "failed" {
-		out = append(out, "Select release")
 	}
 	return out
 }
@@ -239,10 +253,7 @@ func (s *NodeUpdateScreen) olderThanUpdate() bool {
 	newer, err := release.Newer(s.ctx.Version, s.status.Version)
 	return s.status.Phase == "complete" && err == nil && newer
 }
-func (s *NodeUpdateScreen) HandleKey(k string, msg tea.KeyPressMsg) (Screen, tea.Cmd) {
-	if s.releaseInput != nil {
-		return s.handleReleaseKey(k, msg)
-	}
+func (s *NodeUpdateScreen) HandleKey(k string, _ tea.KeyPressMsg) (Screen, tea.Cmd) {
 	buttons := s.buttons()
 	if s.button >= len(buttons) {
 		s.button = len(buttons) - 1
@@ -251,7 +262,7 @@ func (s *NodeUpdateScreen) HandleKey(k string, msg tea.KeyPressMsg) (Screen, tea
 	case "ctrl+c":
 		return s, tea.Quit
 	case "backspace":
-		return s, emitCloseTab
+		return s, emitFocusParent
 	case "left":
 		if s.button > 0 {
 			s.button--
@@ -284,16 +295,6 @@ func (s *NodeUpdateScreen) HandleKey(k string, msg tea.KeyPressMsg) (Screen, tea
 			return s, s.request("status")
 		case "Review":
 			return s, s.request("prepare")
-		case "Select release":
-			input := textinput.New()
-			input.Placeholder = "v0.7.0-rc.1"
-			input.CharLimit = 64
-			input.Validate = validatePrintableASCII
-			applyInputStyles(&input)
-			s.releaseInput = &input
-			s.err = nil
-			s.button = 0
-			return s, input.Focus()
 		case "Install":
 			return s, s.request("start")
 		case "Retry", "Continue":
@@ -316,60 +317,6 @@ func (s *NodeUpdateScreen) HandleKey(k string, msg tea.KeyPressMsg) (Screen, tea
 				return nodeUpdateMsg{owner: s, attempt: attempt, kind: "unlock", status: status, err: err}
 			})
 		}
-	}
-	return s, nil
-}
-
-func (s *NodeUpdateScreen) handleReleaseKey(k string, msg tea.KeyPressMsg) (Screen, tea.Cmd) {
-	cancel := func() (Screen, tea.Cmd) {
-		s.releaseInput = nil
-		s.err = nil
-		s.button = 0
-		return s, s.request("status")
-	}
-	switch k {
-	case "ctrl+c":
-		return s, tea.Quit
-	case "esc":
-		return cancel()
-	case "tab", "down", "enter":
-		if s.releaseInput.Focused() {
-			s.releaseInput.Blur()
-			s.button = 1
-			return s, nil
-		}
-	case "up", "shift+tab":
-		return s, s.releaseInput.Focus()
-	}
-	if s.releaseInput.Focused() {
-		var cmd tea.Cmd
-		*s.releaseInput, cmd = s.releaseInput.Update(msg)
-		return s, cmd
-	}
-	switch k {
-	case "backspace":
-		return cancel()
-	case "left":
-		if s.button == 0 {
-			return s, emitFocusSidebar
-		}
-		s.button = 0
-	case "right", "tab":
-		s.button = 1
-	case "enter":
-		if s.button == 0 {
-			return cancel()
-		}
-		version := strings.TrimPrefix(strings.TrimSpace(s.releaseInput.Value()), "v")
-		newer, err := release.Newer(s.ctx.Version, version)
-		if err != nil || !newer {
-			s.err = fmt.Errorf("select a newer release tag, such as v0.7.0-rc.1")
-			return s, s.releaseInput.Focus()
-		}
-		s.target, s.notice = version, ""
-		s.releaseInput = nil
-		s.button = 0
-		return s, s.request("prepare")
 	}
 	return s, nil
 }
@@ -414,7 +361,7 @@ func nodeUpdateFits() []nodeUpdateFit {
 
 // hasLog reports an update record whose log the l key can open.
 func (s *NodeUpdateScreen) hasLog() bool {
-	return s.status.ID != "" && s.review == nil && s.releaseInput == nil
+	return s.status.ID != "" && s.review == nil
 }
 
 // showLog opens the update's journal in the terminal, as the System screen
@@ -553,28 +500,13 @@ func (s *NodeUpdateScreen) stepRows(w int) (rows []string, from, to int) {
 // the screen shows.
 func (s *NodeUpdateScreen) spinner() *steplist.Spinner { return &s.spin }
 func (s *NodeUpdateScreen) stepRuns() bool {
-	return s.review == nil && s.releaseInput == nil && s.status.Active && s.status.Running &&
+	return s.review == nil && s.status.Active && s.status.Running &&
 		s.status.Phase != "failed" && len(s.status.Steps) > 0
 }
 
 func (s *NodeUpdateScreen) View(w, h int) string {
 	p := newPane(w)
 	plain := lipgloss.NewStyle()
-	if s.releaseInput != nil {
-		p.title(theme.Header, "Select a Test Release")
-		p.line(" Use only a disposable node without funds.")
-		p.line(" Enter the exact published VPN release tag.")
-		p.blank()
-		s.releaseInput.SetWidth(min(40, max(1, w-8)))
-		p.line(" " + s.releaseInput.View())
-		if s.err != nil {
-			p.blank()
-			p.fitText(theme.Warning, s.err.Error(), nodeUpdateActionRows)
-		}
-		p.blank()
-		p.dim("This selects one update. Normal discovery stays stable.")
-		return p.renderWithBottomButtons(s.buttons(), s.button, s.ctx.ContentFocused && !s.releaseInput.Focused(), h)
-	}
 	p.title(theme.Header, "Node Updates")
 	// list is the step list, from and to its rows to keep in view, and after
 	// what the screen shows below it.
@@ -713,9 +645,6 @@ func (s *NodeUpdateScreen) messages(w int, fit nodeUpdateFit) []string {
 	return strings.Split(strings.Join(p.lines[1:], "\n"), "\n")
 }
 func (s *NodeUpdateScreen) HelpBindings() []key.Binding {
-	if s.releaseInput != nil {
-		return []key.Binding{kTabButtons, kEnter, bind("esc", "cancel", "esc"), kQuit}
-	}
 	bindings := actionButtonBindings(s.button, s.ctx.HasTabs)
 	if s.hasLog() {
 		bindings = append(bindings, bind("l", "logs", "l"))

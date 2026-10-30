@@ -753,7 +753,7 @@ func (s *OnChainSendScreen) viewInput(
 	}
 	lines = append(lines, "")
 
-	// Preview expresses intent only; a manual fee rate has no supported total quote.
+	// Preview expresses intent only. A manual fee rate has no supported total quote.
 	var diagLines []string
 	if s.sendAll || s.amtInput.Sats() > 0 {
 		amount := formatSats(s.amtInput.Sats())
@@ -762,7 +762,7 @@ func (s *OnChainSendScreen) viewInput(
 		}
 		diagLines = renderTxDiagram(buildDiagramInputs(s.ocCtx.Selection.Outpoints(), s.ocCtx.Utxos.Value, s.ocCtx.OnChainTxs.Value),
 			strings.TrimSpace(s.addrInput.Value()), amount, "unknown", "unknown", s.sendAll, w)
-		diagLines = append(diagLines, " "+theme.Dim.Render("Total fee unavailable for this manual rate; LND determines change."))
+		diagLines = append(diagLines, " "+theme.Dim.Render("Total fee unavailable for this manual rate. LND determines change."))
 		if s.sendAll {
 			diagLines = append(diagLines, " "+theme.Dim.Render("Max deducts fees and may leave reserve change."))
 		}
@@ -899,7 +899,7 @@ func (s *OnChainSendScreen) viewResult(w, h int) string {
 func (s *OnChainSendScreen) inputFieldBindings() []key.Binding {
 	binds := []key.Binding{
 		kUpDownFields, kTabNext, kLeftRightCursor,
-		bind("enter", "continue", "enter"),
+		bind(theme.KeyEnter, "continue", "enter"),
 		kSidebar,
 	}
 	switch s.step {
@@ -909,13 +909,13 @@ func (s *OnChainSendScreen) inputFieldBindings() []key.Binding {
 		}
 	case ocStepAmount:
 		binds = append(binds,
-			bind("⇧tab", "address", "shift+tab"))
+			bind(theme.KeyShiftTab, "address", "shift+tab"))
 	case ocStepLabel:
 		binds = append(binds,
-			bind("⇧tab", "amount", "shift+tab"))
+			bind(theme.KeyShiftTab, "amount", "shift+tab"))
 	case ocStepFee:
 		binds = append(binds,
-			bind("⇧tab", "label", "shift+tab"))
+			bind(theme.KeyShiftTab, "label", "shift+tab"))
 	}
 	binds = append(binds, kQuit)
 	return binds
@@ -925,8 +925,8 @@ func (s *OnChainSendScreen) inputButtonBindings() []key.Binding {
 	binds := buttonNav(s.sendBtnIdx)
 	binds = append(binds,
 		kEnter,
-		bind("⇧tab", "fee", "shift+tab"),
-		bind("↑", "fields", "up"),
+		bind(theme.KeyShiftTab, "fee", "shift+tab"),
+		bind(theme.KeyUp, "fields", "up"),
 		kBack, kQuit)
 	return binds
 }

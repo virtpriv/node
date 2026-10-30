@@ -462,7 +462,7 @@ func (s *P2PUpgradeScreen) viewConfirm2(
 
 func (s *P2PUpgradeScreen) HelpBindings() []key.Binding {
 	if s.step == p2pNoIP {
-		return []key.Binding{bind("enter", "retry", "enter"), kSidebar, kBack, kQuit}
+		return []key.Binding{bind(theme.KeyEnter, "retry", "enter"), kSidebar, kBack, kQuit}
 	}
 	if s.step == p2pLoading {
 		return []key.Binding{kSidebar, kBack, kQuit}
@@ -480,7 +480,7 @@ func (s *P2PUpgradeScreen) HelpBindings() []key.Binding {
 	// Confirm step
 	if s.focusZone == p2pZoneInput {
 		return []key.Binding{
-			bind("enter", "buttons", "enter"),
+			bind(theme.KeyEnter, "buttons", "enter"),
 			kTabButtons,
 			kBack,
 			kQuit,

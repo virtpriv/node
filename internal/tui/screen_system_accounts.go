@@ -126,7 +126,7 @@ func (s *AccountsScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 		s.loading, s.err = false, msg.err
 		if msg.err == nil {
 			if msg.detail.Account.Ref() != s.account.Ref() {
-				s.err = errors.New("account observation changed; refresh before continuing")
+				s.err = errors.New("account observation changed, refresh before continuing")
 				return s, nil
 			}
 			fingerprint := ""
@@ -206,7 +206,7 @@ func (s *AccountsScreen) HandleKey(k string, _ tea.KeyPressMsg) (Screen, tea.Cmd
 	}
 	if s.working || s.resultReady {
 		switch k {
-		case "left", "esc", "backspace":
+		case "left", "backspace":
 			return s, emitFocusSidebar
 		case "shift+tab":
 			return s, emitFocusTabBar
@@ -245,7 +245,7 @@ func (s *AccountsScreen) HandleKey(k string, _ tea.KeyPressMsg) (Screen, tea.Cmd
 			}
 		case "shift+tab":
 			return s, emitFocusTabBar
-		case "esc", "backspace":
+		case "backspace":
 			s.review, s.scroll = nil, 0
 		case "enter":
 			if s.confirmIdx == 0 {
@@ -306,7 +306,7 @@ func (s *AccountsScreen) HandleKey(k string, _ tea.KeyPressMsg) (Screen, tea.Cmd
 		} else {
 			s.keyCursor = min(s.listLen()-1, s.keyCursor+1)
 		}
-	case "backspace", "esc":
+	case "backspace":
 		return s, s.back()
 	case "r":
 		return s, s.refresh()
@@ -357,7 +357,7 @@ func (s *AccountsScreen) renderBody(header, body *paneBuilder, w, h, cursor int)
 
 }
 
-// Row navigation follows the selected row; extra arrow presses scroll through
+// Row navigation follows the selected row. Extra arrow presses scroll through
 // expanded information below it. Both account views use the shared viewport.
 func renderAccountViewport(text string, w, h, cursor int, scroll *int) string {
 	lines := strings.Count(text, "\n") + 1
@@ -584,10 +584,10 @@ func (s *AccountsScreen) viewImport(w, h int) string {
 
 func (s *AccountsScreen) HelpBindings() []key.Binding {
 	if s.working {
-		return []key.Binding{bind("↑↓", "scroll", "up", "down"), bind("⇧tab", "tabs", "shift+tab"), kSidebar, kQuit}
+		return []key.Binding{bind(theme.KeyUp+theme.KeyDown, "scroll", "up", "down"), bind(theme.KeyShiftTab, "tabs", "shift+tab"), kSidebar, kQuit}
 	}
 	if s.resultReady || s.review != nil {
-		return []key.Binding{bind("←→", "buttons", "left", "right"), bind("↑↓", "scroll", "up", "down"), bind("enter", "select", "enter"), bind("⇧tab", "tabs", "shift+tab"), kQuit}
+		return []key.Binding{bind(theme.KeyLeft+theme.KeyRight, "buttons", "left", "right"), bind(theme.KeyUp+theme.KeyDown, "scroll", "up", "down"), bind(theme.KeyEnter, "select", "enter"), bind(theme.KeyShiftTab, "tabs", "shift+tab"), kQuit}
 	}
 	list := "accounts"
 	if s.account != nil {
@@ -596,5 +596,5 @@ func (s *AccountsScreen) HelpBindings() []key.Binding {
 	if s.focusZone == sshZoneButtons {
 		return manageButtonBindings(list, s.btnIdx, s.ctx.HasTabs)
 	}
-	return []key.Binding{bind("↑↓", list, "up", "down"), bind("enter", "open", "enter"), bind("⇧tab", "buttons", "shift+tab"), kBack, kSidebar, kQuit}
+	return []key.Binding{bind(theme.KeyUp+theme.KeyDown, list, "up", "down"), bind(theme.KeyEnter, "open", "enter"), bind(theme.KeyShiftTab, "buttons", "shift+tab"), kBack, kSidebar, kQuit}
 }

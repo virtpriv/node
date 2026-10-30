@@ -96,7 +96,7 @@ The TUI has a sidebar with five sections and a dark and light theme toggle:
   with anchor sweep detection
 - **Add-On:** install and manage Syncthing for channel backups
 - **System:** services and logs, accounts and SSH keys, auto-unlock, P2P
-  mode, [updates](updating.md)
+  mode, settings, [updates](updating.md)
 
 Detail views open in tabs within each section. Press Ctrl+C to quit to the
 `vpn` shell, where the node commands work:

@@ -123,8 +123,8 @@ Any revised candidate receives a new RC number.
 
 Normal discovery uses GitHub's latest stable release and rejects RC tags,
 drafts and prereleases. It caches stable discovery for up to 24 hours. To test
-an exact release, open System > Updates > Node Updates > Select release and enter its
-tag. This bypasses latest-release discovery, including that cache, but retains
+an exact release, open System > Settings > Test release and enter its tag.
+This bypasses latest-release discovery, including that cache, but retains
 the normal Tor download, signature, source admission and explicit approval
 path. No alternate repository, signing key or persistent testing channel is
 used. An RC selection does not carry into a newly opened update screen. A saved
@@ -141,7 +141,7 @@ preservation and corrective-release requirements apply as for stable updates.
 After RC qualification, build and sign the final stable version and its exact
 plan from the approved source. Its version and manifest make this a different
 artifact. Publish it initially with GitHub's prerelease flag still set and use
-Select release to validate that exact stable tag on the test node. Keep it out
+Test release to validate that exact stable tag on the test node. Keep it out
 of normal discovery until its required checks pass, then clear the prerelease
 flag and mark it latest without replacing its assets. A failed final artifact
 must be superseded by a new version, not overwritten. Test the actual supported

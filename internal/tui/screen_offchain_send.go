@@ -548,7 +548,7 @@ func (s *SendScreen) inputBindings() []key.Binding {
 		binds = append(binds,
 			kLeftRightCursor,
 			kTabNext,
-			bind("enter", "send", "enter"),
+			bind(theme.KeyEnter, "send", "enter"),
 			kSidebar)
 		if s.ctx.HasTabs {
 			binds = append(binds, kShiftTabBar)

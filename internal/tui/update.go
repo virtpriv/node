@@ -142,6 +142,15 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.routeNodeUpdate(msg.owner, msg)
 	case nodeUpdateTick:
 		return m.routeNodeUpdate(msg.owner, msg)
+	case settingsReviewMsg:
+		// A closed form drops the node's answer, as Node Updates does.
+		for _, tab := range m.tabs {
+			if tab.Screen == msg.owner {
+				_, cmd := msg.owner.HandleMsg(msg)
+				return m, cmd
+			}
+		}
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -411,7 +420,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					t.Section == sec {
 					m.activeTab = i
 					m.rememberTabPosition()
-					if msg.Replace && (autoUnlockBusy(t.Screen) || walletCreationBusy(t.Screen) || onChainSendBusy(t.Screen) || channelOpenBusy(t.Screen) || m.sshTabBusy(t) || m.helperTabBusy(t) || m.syncthingTabBusy(t)) {
+					if msg.Replace && (autoUnlockBusy(t.Screen) || walletCreationBusy(t.Screen) || onChainSendBusy(t.Screen) || channelOpenBusy(t.Screen) || nodeUpdatesBusy(t.Screen) || m.sshTabBusy(t) || m.helperTabBusy(t) || m.syncthingTabBusy(t)) {
 						return m, nil
 					}
 					if msg.Replace &&

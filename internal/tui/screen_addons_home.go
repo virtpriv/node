@@ -16,7 +16,7 @@ import (
 // install flow if LND is ready. Bottom half reserved for
 // a future add-on.
 //
-// Desired enablement comes from configuration; device counts come from the
+// Desired enablement comes from configuration. Device counts come from the
 // same live observations as the Syncthing detail screens.
 
 type AddonsHomeScreen struct {
@@ -225,7 +225,7 @@ func (s *AddonsHomeScreen) View(
 func (s *AddonsHomeScreen) HelpBindings() []key.Binding {
 	binds := []key.Binding{
 		kEnterOpen,
-		bind("←/⌫", "sidebar", "left", "backspace"),
+		bind(theme.KeyLeft+"/"+theme.KeyBackspace, "sidebar", "left", "backspace"),
 	}
 	if s.ctx.HasTabs {
 		binds = append(binds, kUpTabBar)

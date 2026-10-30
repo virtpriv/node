@@ -227,7 +227,7 @@ func (s *SSHKeyAddScreen) handleInputKey(
 			}
 			return s, nil
 		}
-		// Enter in input — advance to buttons
+		// Enter in the input advances to the buttons.
 		s.focusZone = sshAddZoneButtons
 		s.keyInput.Blur()
 		s.btnIdx = 1
@@ -304,7 +304,7 @@ func (s *SSHKeyAddScreen) inputBindings() []key.Binding {
 	} else {
 		binds = append(binds,
 			kTabButtons,
-			bind("enter", "add", "enter"),
+			bind(theme.KeyEnter, "add", "enter"),
 			kSidebar)
 		if s.ctx.HasTabs {
 			binds = append(binds, kShiftTabBar)
