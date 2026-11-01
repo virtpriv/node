@@ -35,12 +35,13 @@ func InstallInitialBinary() error {
 
 // InstallBasePackages prepares the packages needed before Tor routing is
 // configured. Installer keeps this initial clearnet phase before its Tor gate.
+// apt-transport-tor comes here with Tor, so step 10 only writes files.
 func InstallBasePackages() error {
 	if err := system.RunRoot("apt-get", "update", "-qq"); err != nil {
 		return err
 	}
 	return system.RunRoot("apt-get", "install", "-y", "-qq",
-		"sudo", "gnupg", "tor", "torsocks", "wget", "curl", "ufw")
+		"sudo", "gnupg", "tor", "torsocks", "apt-transport-tor", "wget", "curl", "ufw")
 }
 
 // PrepareBaseHost repairs unresolved local hostname lookup when possible and
@@ -94,13 +95,14 @@ func InstallUnattendedUpgrades() error {
 		"unattended-upgrades", "apt-listchanges")
 }
 
-// ConfigureUnattendedUpgrades lets Debian install its security updates by
-// itself and restart at 04:00 when an update needs it. The origin lines are
-// Debian's own, from the template in its unattended-upgrades package. Debian's
-// security archive has the suite stable-security and the codename
-// <codename>-security, so it is matched by codename. The older line
-// "${distro_id}:${distro_codename}-security" matches the suite and so matched
-// nothing on Debian.
+// ConfigureUnattendedUpgrades lets Debian install its security and point
+// release updates by itself and restart at 04:00 when an update needs it. The
+// three origin lines are Debian's own, from the template in its
+// unattended-upgrades package. Debian's security archive has the suite
+// stable-security and the codename <codename>-security, so it is matched by
+// codename. The older line "${distro_id}:${distro_codename}-security" matches
+// the suite and so matched nothing on Debian. Backports are left out, as in
+// Debian's template.
 func ConfigureUnattendedUpgrades() error {
 	autoConf := `APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
@@ -111,8 +113,9 @@ APT::Periodic::AutocleanInterval "7";
 		return err
 	}
 
-	upgradeConf := `// Virtual Private Node installs Debian's security updates by itself.
+	upgradeConf := `// Virtual Private Node installs Debian's updates by itself.
 Unattended-Upgrade::Origins-Pattern {
+        "origin=Debian,codename=${distro_codename},label=Debian";
         "origin=Debian,codename=${distro_codename},label=Debian-Security";
         "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
 };
@@ -151,18 +154,4 @@ bantime = 600
 		return err
 	}
 	return system.RunRoot("systemctl", "restart", "fail2ban")
-}
-
-// ConfigureAptTor routes subsequent apt downloads through Tor and bounds
-// download retries. Package configuration remains unbounded so callers do not
-// kill dpkg during a transaction. Installer must pass its Tor gate first.
-func ConfigureAptTor() error {
-	content := `Acquire::http::Proxy "socks5h://127.0.0.1:9050";
-Acquire::https::Proxy "socks5h://127.0.0.1:9050";
-Acquire::http::Timeout "60";
-Acquire::https::Timeout "60";
-Acquire::Retries "3";
-`
-	return system.WriteFileRoot(paths.AptTorProxy,
-		[]byte(content), 0644)
 }

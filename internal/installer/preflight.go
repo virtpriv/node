@@ -28,13 +28,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
-
 	"github.com/virtpriv/node/internal/bytesize"
 	"github.com/virtpriv/node/internal/host"
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/system"
+	"github.com/virtpriv/node/internal/theme"
 )
 
 // PreflightResult is one check's outcome. Err == nil means pass.
@@ -54,6 +53,9 @@ const (
 	checkNameSSHState  = "ssh daemon state is observable"
 	checkNameMemory    = "memory is at least 3.4 GB"
 	checkNameDisk      = "disk is at least 80 GB"
+	checkNameSources   = "software comes only from Debian"
+	checkNameUpdates   = "every package gets Debian's security updates"
+	checkNameAptProxy  = "apt uses no proxy"
 )
 
 // detectHardware is a variable so tests can stand in for the machine.
@@ -113,7 +115,7 @@ func RunPreflight() (host.SSHObservation, error) {
 	fmt.Fprint(os.Stderr, "\n"+FormatPreflightReport(results))
 	for _, r := range results {
 		if r.Err != nil {
-			logger.Install("Preflight FAIL: %s: %v", r.Name, r.Err)
+			logger.Install("Preflight FAIL: %s: %s", r.Name, strings.ReplaceAll(r.Err.Error(), "\n\n", " "))
 		}
 	}
 	return obs, fmt.Errorf(
@@ -134,6 +136,12 @@ func runPreflightChecks() ([]PreflightResult, host.SSHObservation) {
 		PreflightResult{checkNameIOLogging, checkSudoersIOLogging(paths.SudoersFile, paths.SudoersDir, sudoPackageAbsent())},
 		PreflightResult{checkNameDpkg, checkDpkgAudit()},
 		PreflightResult{checkNameUfw, checkUfwInstallable()},
+	)
+	apt := host.CheckAptBaseline()
+	results = append(results,
+		PreflightResult{checkNameSources, apt.Sources},
+		PreflightResult{checkNameUpdates, apt.Updates},
+		PreflightResult{checkNameAptProxy, apt.Proxy},
 	)
 	obs, obsErr := host.ObserveInitialSSHState()
 	results = append(results,
@@ -428,14 +436,15 @@ func checkUfwInstallable() error {
 
 // runAptCachePolicy runs `apt-cache policy <pkg>` with LC_ALL=C so the
 // Candidate line is the same in every locale. It runs the command itself,
-// not through the system wrappers, only to set that variable.
+// not through the system wrappers, only to set that variable. The package
+// cache stays in memory, so preflight saves nothing to /var/cache/apt.
 func runAptCachePolicy(
 	pkg string, timeout time.Duration,
 ) (string, error) {
 	ctx, cancel := context.WithTimeout(
 		context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "apt-cache", "policy", pkg)
+	cmd := exec.CommandContext(ctx, "apt-cache", append([]string{"policy", pkg}, host.AptCacheInMemory()...)...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	out, err := cmd.Output()
 	if err != nil {
@@ -466,7 +475,8 @@ func ufwCandidateVerdict(output string) error {
 
 // ── Report formatting ────────────────────────────────────
 
-// FormatPreflightReport renders the full check list with every failure's reason.
+// FormatPreflightReport renders the full check list with every failure's
+// reason. A reason of several findings has an empty line between them.
 func FormatPreflightReport(results []PreflightResult) string {
 	var b strings.Builder
 	b.WriteString("  Checking this machine before changing anything\n\n")
@@ -478,7 +488,11 @@ func FormatPreflightReport(results []PreflightResult) string {
 		}
 		failed++
 		fmt.Fprintf(&b, "    [FAIL] %s\n", r.Name)
-		for _, line := range strings.Split(ansi.Wordwrap(r.Err.Error(), 56, ""), "\n") {
+		for _, line := range theme.Wrap(r.Err.Error(), 56) {
+			if line == "" {
+				b.WriteString("\n")
+				continue
+			}
 			fmt.Fprintf(&b, "           %s\n", line)
 		}
 	}

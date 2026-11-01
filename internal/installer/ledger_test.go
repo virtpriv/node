@@ -207,7 +207,7 @@ func TestLedgerDbCacheImmutable(t *testing.T) {
 // must resume, and a record in the earlier order is refused, not reinterpreted.
 func TestLedgerFollowsThePackageUpgradeBehindTor(t *testing.T) {
 	beforeUpgrade := []string{"binary.install", "apt.base", "firewall", "host.prep", "identity.access",
-		"service-identities.v1", "ipv6.disable", "tor.configure", "tor.gate", "apt.torproxy"}
+		"service-identities.v1", "ipv6.disable", "tor.configure", "tor.gate", "apt.tor"}
 	record := func(keys ...string) *installLedger {
 		t.Helper()
 		l := testLedger()

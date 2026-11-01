@@ -268,7 +268,8 @@ const (
 	Fail2banJail       = "/etc/fail2ban/jail.local"
 	AutoUpgrades       = "/etc/apt/apt.conf.d/20auto-upgrades"
 	UnattendedUpgrades = "/etc/apt/apt.conf.d/50unattended-upgrades"
-	AptTorProxy        = "/etc/apt/apt.conf.d/99-tor-proxy"
+	AptTor             = "/etc/apt/apt.conf.d/99-vpn-apt-tor"
+	AptSources         = "/etc/apt/sources.list.d/vpn-debian.sources"
 	DisableIPv6Conf    = "/etc/sysctl.d/99-disable-ipv6.conf"
 )
 
