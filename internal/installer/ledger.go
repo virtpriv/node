@@ -36,7 +36,7 @@ var baseInstallStepKeys = []string{
 	"ipv6.disable",
 	"tor.configure",
 	"tor.gate",
-	"apt.torproxy",
+	"apt.tor",
 	"base.upgrade",
 	"swap.zram",
 	"btc.download",

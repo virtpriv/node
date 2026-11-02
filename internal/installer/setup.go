@@ -93,6 +93,8 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	// restarts services by itself instead of showing its dialog mid-upgrade.
 	os.Setenv("DEBIAN_FRONTEND", "noninteractive")
 	os.Setenv("NEEDRESTART_MODE", "a")
+	// A server named in no_proxy would make apt skip Tor for it.
+	os.Unsetenv("no_proxy")
 	deps := newInstallStartupDependencies()
 
 	// The transient stable lock is acquired before classification. It is not
@@ -537,7 +539,7 @@ func buildInstallSteps(
 		// first download.
 		{Key: "tor.gate", Name: "Verifying the Tor connection",
 			Kind: StepGate, Fn: verifyTorRouting},
-		{Key: "apt.torproxy", Name: "Sending apt package downloads through Tor",
+		{Key: "apt.tor", Name: "Sending apt package downloads through Tor",
 			Fn: host.ConfigureAptTor},
 		// Through Tor, like every later apt operation. The package lists
 		// are fetched again first, because those from the first step can

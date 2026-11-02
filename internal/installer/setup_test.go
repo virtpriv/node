@@ -308,10 +308,10 @@ func TestPackageUpgradeRunsBehindTorAndFirewallStaysFirst(t *testing.T) {
 	if at("firewall") != at("apt.base")+1 {
 		t.Fatal("the firewall no longer follows the first package step directly")
 	}
-	if at("apt.torproxy") < at("tor.gate") {
+	if at("apt.tor") < at("tor.gate") {
 		t.Fatal("apt is sent through Tor before Tor routing is verified")
 	}
-	if at("base.upgrade") < at("apt.torproxy") {
+	if at("base.upgrade") < at("apt.tor") {
 		t.Fatal("the package upgrade runs before apt uses Tor")
 	}
 	if at("btc.download") < at("base.upgrade") {

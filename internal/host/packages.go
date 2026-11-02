@@ -11,7 +11,7 @@ import (
 )
 
 // UpgradePackages preserves existing configuration on conflict. Installation
-// chooses when to run it; runtime package updates first refresh package lists.
+// chooses when to run it. Runtime package updates first refresh package lists.
 // Both root entry points set noninteractive apt and needrestart environments.
 func UpgradePackages() error {
 	return upgradePackages(system.RunRoot)
@@ -23,17 +23,18 @@ func upgradePackages(run func(string, ...string) error) error {
 		"-o", "Dpkg::Options::=--force-confold")
 }
 
-// RefreshPackageLists fetches the package lists by whatever route apt is
-// configured to use. Unlike a runtime package update it tolerates a source
-// that cannot be reached: apt then keeps the list it has.
+// RefreshPackageLists fetches the package lists through Tor, after install
+// step 10. Like a runtime package update it fails when any source cannot be
+// reached, so the upgrade never runs on old lists or none. A resumed install
+// repeats it.
 func RefreshPackageLists() error {
-	return system.RunRoot("apt-get", "update", "-qq")
+	return system.RunRoot("apt-get", "update", "--error-on=any", "-qq")
 }
 
 // UpdatePackages completes accepted package work independently of the observer.
 // Do not attach the terminal's cancellation to apt/dpkg: a lost connection must
 // not interrupt package configuration. Apt retains its installed Tor routing,
-// download timeouts and retries; only the read-only final audit has a deadline.
+// download timeouts and retries. Only the read-only final audit has a deadline.
 func UpdatePackages(progress func(int)) error {
 	if os.Geteuid() != 0 {
 		return errors.New("package updates require the root helper")

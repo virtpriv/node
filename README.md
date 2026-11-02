@@ -56,7 +56,7 @@ funds.
 
 ### Requirements
 
-- Fresh Debian 13 amd64 machine
+- Fresh Debian 13 amd64 machine whose software comes only from Debian
 - 2 (v)CPU, 4+ GB RAM, 90+ GB total SSD. LND safety-stops at 10% free,
   leaving about 81 GB of operational usage on a 90 GB filesystem.
 - The installer refuses a machine with less than 3.4 GB of memory or 80 GB
@@ -161,8 +161,10 @@ through Tor. After that, the installer makes two types of network calls:
   Debian NTP pool (continues after install)
 
 **Phase 2 (all through Tor, hard-gated):**
-- Debian package index refresh and package upgrade (behind the
-  firewall, which is enabled in Phase 1)
+- Debian package index refresh and package upgrade from
+  deb.debian.org over HTTPS (behind the firewall, which is enabled
+  in Phase 1). apt's plain http and https are turned off, so a
+  source outside Tor fails
 - Bitcoin Core and LND downloads
 - Syncthing download (when Syncthing is installed)
 - All subsequent apt operations
