@@ -316,7 +316,7 @@ func parseInstall(args []string) (command, installer.InstallOptions, error) {
 	return cmdInstall, opts, nil
 }
 
-// usage lists what an owner runs. The commands that systemd starts
+// usage lists what an owner runs. The commands that systemd or apt start
 // (helperd, stage-lnd-cert, reboot-check, publish-lnd-backup,
 // update-launch and update-worker) are left out.
 func usage() string {
