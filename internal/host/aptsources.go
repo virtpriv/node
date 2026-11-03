@@ -85,9 +85,12 @@ Signed-By: ` + debianKeyring + `
 }
 
 // vpnAptSettingFiles are the apt settings files vpn writes, in steps 10 and
-// 17. The checks of the machine's own settings skip them. On a fresh machine
+// 11. The checks of the machine's own settings skip them. On a fresh machine
 // whatever they hold is replaced, and on a resumed install they are vpn's.
-var vpnAptSettingFiles = []string{paths.AptTor, paths.AutoUpgrades, paths.UnattendedUpgrades}
+var vpnAptSettingFiles = []string{paths.AptTor, paths.AutoUpgrades, paths.UnattendedUpgrades, paths.AptRebootCheck}
+
+// debianAptTimers start Debian's nightly job, debianAptJobUnits are the job.
+var debianAptTimers = []string{"apt-daily.timer", "apt-daily-upgrade.timer"}
 
 // AptBaseline is the preflight's three apt answers. A nil error passes.
 type AptBaseline struct {
@@ -183,9 +186,10 @@ func (f *findings) addFor(s aptSettingFiles, key, why string) {
 	}
 }
 
-// err joins the findings and then the fix. A file or answer that could not
-// be read gets no fix, since removing it is not the advice.
-func (f findings) err(fix string) error {
+// err joins the findings and then the fix, which starts with undo, the word
+// for what to do with a finding. A file or answer that could not be read gets
+// no fix, since undoing it is not the advice.
+func (f findings) err(undo, fix string) error {
 	if len(f) == 0 {
 		return nil
 	}
@@ -198,9 +202,9 @@ func (f findings) err(fix string) error {
 	text := strings.Join(f, "\n\n")
 	switch {
 	case found == 1:
-		text += "\n\nremove it, " + fix
+		text += "\n\n" + undo + " it, " + fix
 	case found > 1:
-		text += "\n\nremove them, " + fix
+		text += "\n\n" + undo + " them, " + fix
 	}
 	return errors.New(text)
 }
@@ -212,7 +216,7 @@ func (h aptHost) checkSources(settings aptSettingFiles, dump []aptSetting) error
 	if moved := h.checkAptFolders(settings, &f); moved {
 		// apt reads its sources elsewhere, so the checks below would read
 		// the wrong files.
-		return f.err(aptFixDebian)
+		return f.err("remove", aptFixDebian)
 	}
 	for _, file := range settings.includes {
 		f.add("found #include in %s, which vpn does not follow", file)
@@ -239,12 +243,12 @@ func (h aptHost) checkSources(settings aptSettingFiles, dump []aptSetting) error
 	entries, err := h.aptSourceEntries()
 	if err != nil {
 		f.add("%v", err)
-		return f.err(aptFixDebian)
+		return f.err("remove", aptFixDebian)
 	}
 	keys, err := h.debianKeyFiles()
 	if err != nil {
 		f.add("%v", err)
-		return f.err(aptFixDebian)
+		return f.err("remove", aptFixDebian)
 	}
 	unsigned := false
 	for _, e := range entries {
@@ -270,7 +274,7 @@ func (h aptHost) checkSources(settings aptSettingFiles, dump []aptSetting) error
 	targets, err := h.aptTargets()
 	if err != nil {
 		f.add("%v", err)
-		return f.err(aptFixDebian)
+		return f.err("remove", aptFixDebian)
 	}
 	for _, t := range targets {
 		if !slices.Contains(debianSuites, t.suite) || (t.component != "" && !slices.Contains(debianComponents, t.component)) {
@@ -282,7 +286,7 @@ func (h aptHost) checkSources(settings aptSettingFiles, dump []aptSetting) error
 			}
 		}
 	}
-	return f.err(aptFixDebian)
+	return f.err("remove", aptFixDebian)
 }
 
 // aptDefaultFolders are the places Debian's apt reads its sources, keys and
@@ -959,6 +963,23 @@ func (h aptHost) checkUpdates(settings aptSettingFiles) error {
 		}
 	}
 
+	// The nightly job runs from Debian's two apt timers. Only an enabled
+	// timer starts again after a reboot. The job's own units have no install
+	// section, so they are never enabled, but a masked one never runs.
+	units := append(slices.Clone(debianAptTimers), debianAptJobUnits...)
+	states, err := h.run("systemctl", append([]string{"show", "--property=Id,UnitFileState"}, units...)...)
+	if err != nil {
+		f.add("cannot read the nightly update timers: %v", err)
+	} else {
+		parsed := system.ParseUnitProperties(states)
+		for _, unit := range units {
+			state := parsed[unit]["UnitFileState"]
+			if (slices.Contains(debianAptTimers, unit) && state != "enabled") || strings.HasPrefix(state, "masked") {
+				f.add("found %s switched off, which stops the nightly updates", unit)
+			}
+		}
+	}
+
 	// Debian's backports add ~bpo to every version (backports.debian.org,
 	// Contribute, "Append ~bpo${release}+${build} to the version number").
 	out, err := h.run("dpkg-query", "-W", "-f=${db:Status-Status} ${binary:Package} ${Version}\n")
@@ -975,7 +996,7 @@ func (h aptHost) checkUpdates(settings aptSettingFiles) error {
 	if len(backports) > 0 {
 		f.add("found packages from Debian's backports, which get no security team updates (%s)", strings.Join(backports, ", "))
 	}
-	return f.err(aptFixUpdates)
+	return f.err("undo", aptFixUpdates)
 }
 
 // ── apt uses no proxy ────────────────────────────────────
@@ -1019,7 +1040,7 @@ func (h aptHost) checkProxy(settings aptSettingFiles, dump []aptSetting) error {
 			f.add("found no_proxy in the settings systemd gives every service")
 		}
 	}
-	return f.err(aptFixProxy)
+	return f.err("remove", aptFixProxy)
 }
 
 // isAptProxySetting matches Acquire::<method>::Proxy, a server's own

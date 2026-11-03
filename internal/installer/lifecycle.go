@@ -106,6 +106,7 @@ func productionLifecycleFS() lifecycleFS {
 			paths.AdminSudoers,
 			paths.AptTor,
 			paths.AptSources,
+			paths.AptRebootCheck,
 			paths.DisableIPv6Conf,
 			paths.Fail2banJail,
 			paths.BitcoinDir,

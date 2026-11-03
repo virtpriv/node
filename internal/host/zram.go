@@ -46,7 +46,8 @@ func SetUpCompressedSwap() error {
 			return string(data), err
 		},
 		install: func() error {
-			return system.RunRoot("apt-get", "install", "-y", "-qq", "systemd-zram-generator")
+			job := newDebianAptJob()
+			return job.run(func() error { return installPackages(job, "systemd-zram-generator") })
 		},
 		unitState: func() (string, error) {
 			return system.RunOutput("systemctl", "show", "--property=LoadState", "--value", "dev-zram0.swap")

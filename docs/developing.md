@@ -110,9 +110,23 @@ continued working. An older helper that supplies no verified result also
 produces an unconfirmed outcome, so the TUI and helper must come from the same
 build.
 
-Update Packages runs a package list refresh, an upgrade that preserves existing
-configuration on conflict, and a `dpkg --audit` consistency check. A failed
-refresh stops the upgrade.
+Update Packages waits while Debian's daily update runs, at most an hour. It then
+refreshes the package lists, runs Debian's `unattended-upgrade` with vpn's rules
+and ends with a `dpkg --audit` consistency check. A failed refresh stops the
+upgrade. Install step 11 and the nightly job run the same program with the same
+rules, which keep a configuration file the owner changed.
+
+After every package change apt runs `vpn reboot-check`, from
+`/etc/apt/apt.conf.d/99-vpn-reboot-check`. It raises Debian's restart flag,
+`/var/run/reboot-required`, when the running kernel is older than the newest one
+installed, or when Tor, SSH, Bitcoin Core or fail2ban still runs a program or
+library file an update replaced. LND and the root helper carry their libraries
+inside their programs, so they are not checked. Install step 11 and Update
+Packages also run the check directly, since with nothing to install apt runs no
+hook. The check never makes apt fail. When the flag is up, Debian's nightly job
+restarts the node right after its run. The install, Update Packages and a node
+update hold a systemd block inhibitor, so a restart then waits for the next
+night.
 
 Reboot reports "Reboot requested" only after systemd accepts the request. This
 confirms neither shutdown nor a successful restart. The outcome stays on System

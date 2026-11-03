@@ -75,9 +75,10 @@ func (s *ServiceControls) Control(request servicecontrol.Request) <-chan Service
 		close(results)
 		return results
 	}
-	// Include queuing behind another helper verb. A timeout is not permission
-	// to retry: the previous request may still be running on the host.
-	ctx, cancel := context.WithTimeout(s.ctx, 35*time.Minute)
+	// Include queuing behind the longest helper job, Update Packages at 90
+	// minutes, then this verb's own 30. A timeout is not permission to retry.
+	// The previous request may still be running on the host.
+	ctx, cancel := context.WithTimeout(s.ctx, 125*time.Minute)
 	s.workers.Go(func() {
 		defer cancel()
 		defer close(results)

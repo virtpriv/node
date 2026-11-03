@@ -18,7 +18,14 @@ import (
 
 // Run executes a command and returns an error with output on failure.
 func Run(name string, args ...string) error {
+	return run(nil, name, args...)
+}
+
+func run(env []string, name string, args ...string) error {
 	cmd := exec.Command(name, args...)
+	if env != nil {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%s %s: %s: %s", name, strings.Join(args, " "), err, output)
 	}
@@ -44,6 +51,15 @@ func RunRoot(name string, args ...string) error {
 		return err
 	}
 	return Run(name, args...)
+}
+
+// RunRootCLocale is RunRoot with the program's messages in the C locale, so
+// that the caller can recognize one and they read the same on every machine.
+func RunRootCLocale(name string, args ...string) error {
+	if err := requireRoot(name); err != nil {
+		return err
+	}
+	return run([]string{"LC_ALL=C"}, name, args...)
 }
 
 // RunOutput returns trimmed stdout on success and discards output on error.

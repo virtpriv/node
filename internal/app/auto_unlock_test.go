@@ -82,7 +82,7 @@ func TestAutoUnlockObservationDeadline(t *testing.T) {
 		}
 		started := time.Now()
 		result := <-w.Disable()
-		if result.Observation != AutoUnlockUnknown || !errors.Is(result.Err, context.DeadlineExceeded) || time.Since(started) != 25*time.Minute || calls != 1 {
+		if result.Observation != AutoUnlockUnknown || !errors.Is(result.Err, context.DeadlineExceeded) || time.Since(started) != 115*time.Minute || calls != 1 {
 			t.Fatalf("observation deadline or no-retry contract failed: %+v", result)
 		}
 	})

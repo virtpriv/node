@@ -61,9 +61,10 @@ func (r *Reboots) Request() <-chan RebootResult {
 		close(results)
 		return results
 	}
-	// Include time queued behind a long helper transaction. This bounds local
-	// observation, not shutdown, and expiry does not authorize an automatic retry.
-	ctx, cancel := context.WithTimeout(r.ctx, 35*time.Minute)
+	// Include time queued behind the longest helper job, Update Packages at 90
+	// minutes. This bounds local observation, not shutdown, and expiry does not
+	// authorize an automatic retry.
+	ctx, cancel := context.WithTimeout(r.ctx, 95*time.Minute)
 	r.workers.Go(func() {
 		defer cancel()
 		defer close(results)
