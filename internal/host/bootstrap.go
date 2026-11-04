@@ -89,20 +89,24 @@ net.ipv6.conf.lo.disable_ipv6 = 1
 	return system.RunRootSilent("sysctl", "--system")
 }
 
-// InstallUnattendedUpgrades installs Debian's security-update tooling.
-func InstallUnattendedUpgrades() error {
-	return system.RunRoot("apt-get", "install", "-y", "-qq",
-		"unattended-upgrades", "apt-listchanges")
-}
-
-// ConfigureUnattendedUpgrades lets Debian install its security and point
-// release updates by itself and restart at 04:00 when an update needs it. The
-// three origin lines are Debian's own, from the template in its
-// unattended-upgrades package. Debian's security archive has the suite
-// stable-security and the codename <codename>-security, so it is matched by
-// codename. The older line "${distro_id}:${distro_codename}-security" matches
-// the suite and so matched nothing on Debian. Backports are left out, as in
-// Debian's template.
+// ConfigureUnattendedUpgrades writes vpn's rules for Debian's
+// unattended-upgrade, which every package update runs, and apt's hook for
+// the reboot check. The three origin lines are Debian's own, from the
+// template in its unattended-upgrades package. Debian's security archive has
+// the suite stable-security and the codename <codename>-security, so it is
+// matched by codename. Backports are left out, as in Debian's template.
+//
+// The machine restarts right after the nightly run when an update needs it.
+// vpn's install, Update Packages and a node update hold a block inhibitor,
+// so a restart then is refused and waits for the next night.
+//
+// A node takes Debian's fixes on battery and on a metered connection too, so
+// those two of Debian's defaults are turned off. They stop a run with a
+// failure.
+//
+// Both dpkg options keep a configuration file the owner changed, with
+// Debian's new one saved beside it, and update an untouched one. Without
+// them a changed file holds its package back for good.
 func ConfigureUnattendedUpgrades() error {
 	autoConf := `APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
@@ -120,18 +124,33 @@ Unattended-Upgrade::Origins-Pattern {
         "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
 };
 Unattended-Upgrade::Automatic-Reboot "true";
-Unattended-Upgrade::Automatic-Reboot-Time "04:00";
+Unattended-Upgrade::Automatic-Reboot-Time "now";
 Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
-Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::OnlyOnACPower "false";
+Unattended-Upgrade::Skip-Updates-On-Metered-Connections "false";
+Dpkg::Options {
+        "--force-confdef";
+        "--force-confold";
+};
 `
-	return system.WriteFileRoot(paths.UnattendedUpgrades,
-		[]byte(upgradeConf), 0644)
+	if err := system.WriteFileRoot(paths.UnattendedUpgrades,
+		[]byte(upgradeConf), 0644); err != nil {
+		return err
+	}
+	return system.WriteFileRoot(paths.AptRebootCheck, []byte(aptRebootCheckHook), 0644)
 }
 
-// InstallFail2ban installs the SSH intrusion-prevention service.
+// aptRebootCheckHook runs the reboot check after every package change. It
+// never makes apt fail.
+const aptRebootCheckHook = `// Virtual Private Node checks after each package change whether a restart is needed.
+DPkg::Post-Invoke {"if [ -x ` + paths.BinaryPath + ` ]; then ` + paths.BinaryPath + ` reboot-check || true; fi";};
+`
+
+// InstallFail2ban installs the SSH intrusion-prevention service, once
+// Debian's own job is not running.
 func InstallFail2ban() error {
-	return system.RunRoot("apt-get", "install",
-		"-y", "-qq", "fail2ban")
+	job := newDebianAptJob()
+	return job.run(func() error { return installPackages(job, "fail2ban") })
 }
 
 // ConfigureFail2ban writes the initial SSH jail and starts the service.

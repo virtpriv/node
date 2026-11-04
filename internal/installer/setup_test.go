@@ -91,6 +91,7 @@ func installStartupFixture(
 	deps.installLock = filepath.Join(deps.runtimeDir, "install.lock")
 	deps.fs = f.fs
 	deps.lookup = f.lookup
+	deps.inhibitShutdown = func(string) (func(), error) { return func() {}, nil }
 	deps.runPreflight = func() (host.SSHObservation, error) {
 		preflightCalls++
 		return preflight()
@@ -110,7 +111,6 @@ func installStartupFixture(
 		newInstallStartupDependencies = original
 	})
 	t.Setenv("DEBIAN_FRONTEND", "test-value")
-	t.Setenv("NEEDRESTART_MODE", "test-value")
 	return &preflightCalls, &initializeCalls
 }
 
@@ -243,6 +243,39 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 		})
 	}
 
+	// Debian's update program restarts the machine when the restart flag
+	// is up, so an install that cannot hold restarts off must not start.
+	t.Run("restarts cannot be held off", func(t *testing.T) {
+		f := newLifecycleFixture(t)
+		root := filepath.Dir(f.fs.varLibVPN)
+		before := snapshotProtectedTree(t, root)
+		preflightCalls, initializeCalls := installStartupFixture(
+			t, f, func() (host.SSHObservation, error) {
+				return host.SSHObservation{}, errors.New("unexpected preflight")
+			})
+		withDeps := newInstallStartupDependencies
+		newInstallStartupDependencies = func() installStartupDependencies {
+			deps := withDeps()
+			deps.inhibitShutdown = func(string) (func(), error) {
+				return nil, errors.New("systemd-inhibit: Failed to connect to bus")
+			}
+			return deps
+		}
+		t.Cleanup(func() { newInstallStartupDependencies = withDeps })
+
+		err := RunInstall(InstallOptions{}, unexpectedInstallFrontend(t))
+		var stop *StopError
+		if !errors.As(err, &stop) || !stop.NotStarted || !strings.Contains(err.Error(), "Failed to connect to bus") {
+			t.Fatalf("install without a held restart: %v", err)
+		}
+		if *preflightCalls != 0 || *initializeCalls != 0 {
+			t.Fatalf("refusal reached preflight=%d initialize=%d", *preflightCalls, *initializeCalls)
+		}
+		if after := snapshotProtectedTree(t, root); string(after) != string(before) {
+			t.Fatal("refused RunInstall path changed protected state")
+		}
+	})
+
 	t.Run("unsupported architecture", func(t *testing.T) {
 		f := newLifecycleFixture(t)
 		root := filepath.Dir(f.fs.varLibVPN)
@@ -319,47 +352,35 @@ func TestPackageUpgradeRunsBehindTorAndFirewallStaysFirst(t *testing.T) {
 	}
 }
 
-// Compressed swap is a Debian package, so it comes after apt uses Tor, and it
-// is on before Bitcoin Core starts its first sync.
-func TestCompressedSwapComesBeforeBitcoinCore(t *testing.T) {
+// fail2ban and compressed swap are Debian packages, so they come after the
+// upgrade, which leaves apt's lists fresh through Tor. Both are on before
+// Bitcoin Core: fail2ban guards SSH logins, and compressed swap is there for
+// Core's first sync, when memory is shortest.
+func TestDebianPackagesComeBetweenTheUpgradeAndBitcoinCore(t *testing.T) {
 	at := func(key string) int { return stepIndex(t, key) }
-	if at("swap.zram") != at("base.upgrade")+1 {
-		t.Fatal("compressed swap does not follow the package upgrade directly")
-	}
-	if at("btc.download") != at("swap.zram")+1 {
-		t.Fatal("compressed swap is not set up just before Bitcoin Core")
+	for _, key := range []string{"security", "swap.zram"} {
+		if at(key) < at("base.upgrade") || at(key) > at("btc.download") {
+			t.Fatalf("%s is not between the package upgrade and Bitcoin Core", key)
+		}
 	}
 }
 
 // An upgrade can restart Tor. The step must not report done until Tor routes
 // again, or the next download starts into a Tor that is still coming back.
 func TestPackageUpgradeConfirmsTorBeforeItReportsDone(t *testing.T) {
-	refresh, upgrade, verify := refreshPackageLists, upgradeBasePackages, verifyTorAfterUpgrade
-	t.Cleanup(func() {
-		refreshPackageLists, upgradeBasePackages, verifyTorAfterUpgrade = refresh, upgrade, verify
-	})
+	upgrade, verify := upgradeDebian, verifyTorAfterUpgrade
+	t.Cleanup(func() { upgradeDebian, verifyTorAfterUpgrade = upgrade, verify })
 	for _, tc := range []struct {
-		refreshed, upgraded, torReturns bool
-		want                            string
+		upgraded, torReturns bool
+		want                 string
 	}{
-		// The list from the first step can be days old when an install
-		// resumes, so it is fetched again, now through Tor.
-		{true, true, true, "refresh, upgrade, verify Tor"},
-		{true, true, false, "refresh, upgrade, verify Tor"},
+		{true, true, "upgrade, verify Tor"},
+		{true, false, "upgrade, verify Tor"},
 		// A failed upgrade must fail the step, or it is recorded as done.
-		{true, false, true, "refresh, upgrade"},
-		{false, true, true, "refresh"},
+		{false, true, "upgrade"},
 	} {
-		torReturns := tc.torReturns
 		var calls []string
-		refreshPackageLists = func() error {
-			calls = append(calls, "refresh")
-			if !tc.refreshed {
-				return errors.New("apt failed")
-			}
-			return nil
-		}
-		upgradeBasePackages = func() error {
+		upgradeDebian = func() error {
 			calls = append(calls, "upgrade")
 			if !tc.upgraded {
 				return errors.New("apt failed")
@@ -368,7 +389,7 @@ func TestPackageUpgradeConfirmsTorBeforeItReportsDone(t *testing.T) {
 		}
 		verifyTorAfterUpgrade = func() error {
 			calls = append(calls, "verify Tor")
-			if !torReturns {
+			if !tc.torReturns {
 				return errors.New("Tor is not routing")
 			}
 			return nil
@@ -387,8 +408,8 @@ func TestPackageUpgradeConfirmsTorBeforeItReportsDone(t *testing.T) {
 		if strings.Join(calls, ", ") != tc.want {
 			t.Fatalf("step did %q, want %q", calls, tc.want)
 		}
-		if (err == nil) != (tc.refreshed && tc.upgraded && torReturns) {
-			t.Fatalf("refreshed=%v, upgraded=%v, Tor routing=%v, but the step returned %v", tc.refreshed, tc.upgraded, torReturns, err)
+		if (err == nil) != (tc.upgraded && tc.torReturns) {
+			t.Fatalf("upgraded=%v, Tor routing=%v, but the step returned %v", tc.upgraded, tc.torReturns, err)
 		}
 	}
 }

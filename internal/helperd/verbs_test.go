@@ -36,7 +36,9 @@ func TestEveryVerbHasDeadline(t *testing.T) {
 		if def.handler == nil {
 			t.Errorf("%s: no handler", name)
 		}
-		if def.deadline > time.Hour {
+		// The longest, Update Packages, is 90 minutes. Anything longer is
+		// most likely a unit typed wrong.
+		if def.deadline > 2*time.Hour {
 			t.Errorf("%s: deadline %v is implausibly long",
 				name, def.deadline)
 		}

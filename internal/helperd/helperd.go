@@ -90,7 +90,6 @@ func Serve(version string) error {
 	// Non-interactive package operations for apt-running verbs
 	// (same environment the installer uses).
 	os.Setenv("DEBIAN_FRONTEND", "noninteractive")
-	os.Setenv("NEEDRESTART_MODE", "a")
 
 	ln, err := activationListener()
 	if err != nil {
@@ -282,7 +281,7 @@ func (s *server) handleConn(c *net.UnixConn) (exitAfter bool) {
 	// download timeouts and retry caps in system.doDownload,
 	// apt's Acquire timeout configuration, systemd's per-unit
 	// stop timeouts), not by this deadline. Deadlines are per
-	// verb (a package upgrade legitimately needs half an hour,
+	// verb (a package update legitimately needs an hour and a half,
 	// a password change does not).
 	if err := c.SetDeadline(time.Now().Add(def.deadline)); err != nil {
 		auditErr(req.Verb, `{"event":"error","detail":"arm verb deadline: %v"}`, err)

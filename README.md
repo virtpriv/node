@@ -46,7 +46,7 @@ funds.
 - **Tor:** Bitcoin Core, LND, updates and every download once the installer has set up Tor go through Tor. The exceptions are listed under [Privacy & Network Traffic](#privacy--network-traffic)
 - **UFW firewall:** deny all incoming except SSH
 - **fail2ban:** brute force protection
-- **Unattended upgrades:** automatic Debian security updates, with a restart at 04:00 server time when an update needs one
+- **Unattended upgrades:** automatic Debian security updates, checked every day, with a restart right after when an update needs one
 - **NTP clock sync:** accurate time for block timestamps, HTLC timeouts, and macaroon expiry
 - **Compressed swap:** when memory runs short, unused memory is compressed and kept in memory, never written to disk (zram, when the kernel supports it)
 
@@ -136,7 +136,7 @@ For maintainers and contributors: [How vpn Works Inside](docs/developing.md),
 - vpn and LND authenticate to Bitcoin Core with separate `rpcauth` identities. Neither reads a Core cookie or Core's data directory
 - Syncthing can read only the finished copy of `channel.backup`. It cannot change that copy or read LND's own files
 - GPG signature verification for all software, any bad signature is a hard stop
-- Unattended security upgrades with an automatic restart at 04:00 server time when an update needs one
+- Unattended security upgrades, checked every day, with an automatic restart right after when an update needs one, never during an install or an update
 - Base packages upgraded during install, through Tor and behind the firewall, to close CVE windows on stale server images
 - Syncthing backup sync: mutual TLS device approval, web UI only via Tor
 - Bitcoin Core wallet disabled

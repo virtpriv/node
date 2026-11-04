@@ -13,7 +13,7 @@ machine, how you reach it and where your backups can sync.
 | Syncthing backups | Sync from anywhere | Sync only on your home network |
 | Wallet from a phone (Zeus over Tor) | Works anywhere | Works anywhere |
 | Hybrid mode | Available | Not available, and not for home use |
-| Restarts | Provider maintenance, 04:00 security restarts | Power cuts, internet outages, 04:00 security restarts |
+| Restarts | Provider maintenance, security restarts when an update needs one | Power cuts, internet outages, security restarts when an update needs one |
 
 ## Privacy and control
 
@@ -68,11 +68,12 @@ home address.
 
 ## Restarts and outages
 
-The Node installs Debian security updates by itself and restarts at 04:00
-server time when an update needs it. Without auto-unlock, LND stays locked
-after any restart, Lightning stops and the Node cannot protect your channels
-until you unlock the wallet. Auto-unlock is strongly encouraged, for a Node at
-home even more, because you can reach it only from your home network.
+The Node checks for Debian security updates every day, installs them by itself
+and restarts right after when an update needs it. Without auto-unlock, LND
+stays locked after any restart, Lightning stops and the Node cannot protect
+your channels until you unlock the wallet. Auto-unlock is strongly encouraged,
+for a Node at home even more, because you can reach it only from your home
+network.
 
 - **VPS:** the provider may also restart the server for maintenance.
 - **At home:** power cuts and internet outages stop the Node too. When the

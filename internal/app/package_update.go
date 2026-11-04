@@ -56,9 +56,9 @@ func (u *PackageUpdates) Update() <-chan PackageUpdateResult {
 		close(results)
 		return results
 	}
-	// Allow helper queue time as well as its 30-minute socket budget. Expiry
-	// ends observation only; root work may still finish after this deadline.
-	ctx, cancel := context.WithTimeout(u.ctx, 35*time.Minute)
+	// Allow helper queue time as well as its 90-minute socket budget. Expiry
+	// ends observation only. Root work may still finish after this deadline.
+	ctx, cancel := context.WithTimeout(u.ctx, 95*time.Minute)
 	u.workers.Go(func() {
 		defer cancel()
 		defer close(results)

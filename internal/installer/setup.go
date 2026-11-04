@@ -15,6 +15,7 @@ import (
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/loginpassword"
 	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/system"
 )
 
 const (
@@ -62,6 +63,8 @@ type installStartupDependencies struct {
 	classifyLifecycle   func(lifecycleFS, identityLookup) (lifecycleState, error)
 	runPreflight        func() (host.SSHObservation, error)
 	initializeLifecycle func(lifecycleFS, identityLookup, installContext) (*installLedger, error)
+	// inhibitShutdown holds off restarts until the returned release runs.
+	inhibitShutdown func(why string) (release func(), err error)
 	// workBase holds each run's download folder.
 	workBase string
 }
@@ -76,7 +79,14 @@ func productionInstallStartupDependencies() installStartupDependencies {
 		classifyLifecycle:   classifyLifecycleState,
 		runPreflight:        RunPreflight,
 		initializeLifecycle: initializeLifecycle,
-		workBase:            os.TempDir(),
+		inhibitShutdown: func(why string) (func(), error) {
+			inhibitor, err := system.InhibitShutdown(why)
+			if err != nil {
+				return nil, err
+			}
+			return func() { inhibitor.Release() }, nil
+		},
+		workBase: os.TempDir(),
 	}
 }
 
@@ -89,10 +99,8 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	}
 
 	// Package operations run without prompts for the whole run, as the
-	// retired bootstrap script did. debconf asks nothing, and needrestart
-	// restarts services by itself instead of showing its dialog mid-upgrade.
+	// retired bootstrap script did, so debconf asks nothing.
 	os.Setenv("DEBIAN_FRONTEND", "noninteractive")
-	os.Setenv("NEEDRESTART_MODE", "a")
 	// A server named in no_proxy would make apt skip Tor for it.
 	os.Unsetenv("no_proxy")
 	deps := newInstallStartupDependencies()
@@ -129,6 +137,14 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	if !opts.Unattended && frontend == nil {
 		return errors.New("interactive installation requires a frontend")
 	}
+
+	// Restarts wait until the run ends. Debian's update program restarts
+	// the machine when the restart flag is up, and step 11 runs it.
+	release, err := deps.inhibitShutdown("installing the node")
+	if err != nil {
+		return &StopError{NotStarted: true, StartErr: fmt.Errorf("cannot hold off a restart: %w", err)}
+	}
+	defer release()
 
 	// Preflight is read-only and precedes every durable initialization.
 	_, err = deps.runPreflight()
@@ -469,8 +485,7 @@ func fillGeneratedPassword(dec *InstallDecisions) error {
 // restart of Tor does not change whether torsocks intercepts, and the next
 // download refuses to run without Tor in any case.
 var (
-	refreshPackageLists   = host.RefreshPackageLists
-	upgradeBasePackages   = host.UpgradePackages
+	upgradeDebian         = host.UpgradeDebian
 	verifyTorAfterUpgrade = func() error {
 		return waitForTorBootstrap(torStallWindow, torBootstrapCeiling)
 	}
@@ -541,22 +556,28 @@ func buildInstallSteps(
 			Kind: StepGate, Fn: verifyTorRouting},
 		{Key: "apt.tor", Name: "Sending apt package downloads through Tor",
 			Fn: host.ConfigureAptTor},
-		// Through Tor, like every later apt operation. The package lists
-		// are fetched again first, because those from the first step can
-		// be days old when an install resumes, and a superseded package
-		// can no longer be downloaded. An upgrade can restart Tor, for
-		// example with a library Tor uses, so the step reports done only
-		// once Tor is ready again. The next step downloads through it.
+		// Through Tor, like every later apt operation. Debian's own
+		// unattended-upgrade runs with vpn's rules, the program every later
+		// update runs, and its nightly job is turned on. An upgrade can
+		// restart Tor, for example with a library Tor uses, so the step
+		// reports done only once Tor is ready again. The next step
+		// downloads through it.
 		{Key: "base.upgrade",
-			Name: "Updating Debian packages through Tor",
+			Name: "Updating Debian and turning on its security updates",
 			Fn: func() error {
-				if err := refreshPackageLists(); err != nil {
-					return err
-				}
-				if err := upgradeBasePackages(); err != nil {
+				if err := upgradeDebian(); err != nil {
 					return err
 				}
 				return verifyTorAfterUpgrade()
+			}},
+		// SSH login protection as early as its package can come through
+		// Tor, on the lists the upgrade just refreshed.
+		{Key: "security", Name: "Turning on fail2ban login protection",
+			Fn: func() error {
+				if err := host.InstallFail2ban(); err != nil {
+					return err
+				}
+				return host.ConfigureFail2ban()
 			}},
 		// Debian's zram package, so it comes after apt uses Tor, and before
 		// Bitcoin Core's first sync, when memory is shortest.
@@ -595,19 +616,6 @@ func buildInstallSteps(
 			}},
 		{Key: "btc.start", Name: "Starting Bitcoin Core",
 			Fn: func() error { return host.EnableAndRestartBitcoind(cfg) }},
-		{Key: "security", Name: "Turning on Debian security updates and login protection",
-			Fn: func() error {
-				if err := host.InstallUnattendedUpgrades(); err != nil {
-					return err
-				}
-				if err := host.ConfigureUnattendedUpgrades(); err != nil {
-					return err
-				}
-				if err := host.InstallFail2ban(); err != nil {
-					return err
-				}
-				return host.ConfigureFail2ban()
-			}},
 
 		// ── LND (Tor-only, non-interactive) ─────────
 		{Key: "lnd.download", Group: "lnd",

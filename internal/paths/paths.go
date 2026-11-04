@@ -270,6 +270,7 @@ const (
 	UnattendedUpgrades = "/etc/apt/apt.conf.d/50unattended-upgrades"
 	AptTor             = "/etc/apt/apt.conf.d/99-vpn-apt-tor"
 	AptSources         = "/etc/apt/sources.list.d/vpn-debian.sources"
+	AptRebootCheck     = "/etc/apt/apt.conf.d/99-vpn-reboot-check"
 	DisableIPv6Conf    = "/etc/sysctl.d/99-disable-ipv6.conf"
 )
 

@@ -74,11 +74,11 @@ fails, LND stays locked and the same form lets you try again.
 
 ## Auto-unlock
 
-Auto-unlock is strongly encouraged. The node installs Debian security updates
-by itself and restarts at 04:00 server time when an update needs it. Without
-auto-unlock, LND stays locked after such a restart. Lightning then stops, and
-the node cannot protect your channels until you log in and unlock the wallet.
-Nothing tells you that this happened.
+Auto-unlock is strongly encouraged. The node checks for Debian security updates
+every day, installs them by itself and restarts right after when an update
+needs it. Without auto-unlock, LND stays locked after such a restart. Lightning
+then stops, and the node cannot protect your channels until you log in and
+unlock the wallet. Nothing tells you that this happened.
 
 To switch auto-unlock on or off later, open **System**, select lnd and press
 `u`. The password is kept in a file only LND can read and never leaves the
@@ -139,8 +139,10 @@ TUI does not undo an action the server accepted.
 
 - **Node Updates** updates vpn, Bitcoin Core, LND and Syncthing together. See
   [Updating Your Node](updating.md).
-- **Update Packages** refreshes Debian's package lists, upgrades the packages
-  and keeps your existing configuration where a package asks. Its result stays
+- **Update Packages** runs Debian's daily update now and keeps your existing
+  configuration. If an update needs a restart, the Updates screen says so, and
+  the node restarts during its next daily update, between 06:00 and 07:00
+  server time. Press **Reboot** to restart sooner. Its result stays
   on the Updates screen when you leave it and come back. A finished run means
   those commands succeeded. It does not mean every service is healthy or that
   no restart is needed. Closing the TUI does not stop a package update the

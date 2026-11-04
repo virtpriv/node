@@ -2,53 +2,116 @@ package host
 
 import (
 	"errors"
-	"reflect"
 	"testing"
 	"time"
 )
 
-func TestPackageUpdateCommandsAndFailureBoundaries(t *testing.T) {
-	failure := errors.New("injected command failure")
+// ── Waiting for Debian's own apt job ─────────────────────
+
+// fakeClock moves only when the code under test sleeps.
+type fakeClock struct{ now time.Time }
+
+func (c *fakeClock) Now() time.Time                      { return c.now }
+func (c *fakeClock) Sleep(d time.Duration)               { c.now = c.now.Add(d) }
+func (c *fakeClock) since(start time.Time) time.Duration { return c.now.Sub(start) }
+
+// The messages apt 3.0.3 and unattended-upgrades 2.12 print, in the C
+// locale, when another apt holds a lock.
+var aptLockMessages = []string{
+	"apt-get update --error-on=any -qq: exit status 100: E: Could not get lock /var/lib/apt/lists/lock. It is held by process 1234 (apt-get)",
+	"apt-get install -y -qq fail2ban: exit status 100: E: Could not get lock /var/lib/dpkg/lock-frontend. It is held by process 912 (unattended-upgr)",
+	"unattended-upgrade: exit status 1: Cache lock can not be acquired, exiting",
+	// When another unattended-upgrade runs, unattended-upgrade logs why only
+	// to its own log file, so its failure carries no message.
+	"unattended-upgrade : exit status 1: ",
+}
+
+func TestDebianJobStillRunningAfterAnHour(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(1_800_000_000, 0)}
+	start := clock.now
+	job := debianAptJob{running: func() (bool, error) { return true, nil }, sleep: clock.Sleep, now: clock.Now}
+	err := job.run(func() error {
+		t.Fatal("ran while Debian's job was running")
+		return nil
+	})
+	if !errors.Is(err, errDebianJobStillRunning) {
+		t.Fatalf("error %v, want %v", err, errDebianJobStillRunning)
+	}
+	if waited := clock.since(start); waited < time.Hour || waited > time.Hour+time.Minute {
+		t.Fatalf("gave up after %v, want one hour", waited)
+	}
+}
+
+// Debian's job can start between the wait and the command. A lock error, or a
+// failure while Debian's job is running, then waits once more and tries once
+// more. A second failure is the command's own.
+func TestDebianJobLockErrorWaitsOnceMore(t *testing.T) {
+	for _, msg := range aptLockMessages {
+		for _, tc := range []struct {
+			name      string
+			failures  int
+			wantRuns  int
+			wantError bool
+		}{
+			{name: "the second try runs", failures: 1, wantRuns: 2},
+			{name: "a second lock error stops", failures: 2, wantRuns: 2, wantError: true},
+		} {
+			t.Run(tc.name+": "+msg, func(t *testing.T) {
+				clock := &fakeClock{now: time.Unix(1_800_000_000, 0)}
+				var busyUntil time.Time
+				runs := 0
+				job := debianAptJob{
+					running: func() (bool, error) { return clock.now.Before(busyUntil), nil },
+					sleep:   clock.Sleep, now: clock.Now,
+				}
+				err := job.run(func() error {
+					runs++
+					if runs <= tc.failures {
+						busyUntil = clock.now.Add(5 * time.Minute)
+						return errors.New(msg)
+					}
+					if clock.now.Before(busyUntil) {
+						t.Fatal("tried again while Debian's job was running")
+					}
+					return nil
+				})
+				if runs != tc.wantRuns || (err != nil) != tc.wantError {
+					t.Fatalf("ran %d times, error %v", runs, err)
+				}
+				if tc.wantError && err.Error() != msg {
+					t.Fatalf("error %q, want apt's own %q", err, msg)
+				}
+			})
+		}
+	}
+}
+
+func TestDebianJobOtherErrorsAreNotRetried(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(1_800_000_000, 0)}
+	failure := errors.New("apt-get update --error-on=any -qq: exit status 100: E: Failed to fetch tor+https://deb.debian.org/debian/dists/trixie/InRelease")
+	runs := 0
+	job := debianAptJob{running: func() (bool, error) { return false, nil }, sleep: clock.Sleep, now: clock.Now}
+	err := job.run(func() error { runs++; return failure })
+	if runs != 1 || !errors.Is(err, failure) {
+		t.Fatalf("ran %d times, error %v", runs, err)
+	}
+}
+
+// dpkg --audit prints nothing on a healthy machine. Anything it prints, or a
+// failure to run it, fails Update Packages.
+func TestPackageAuditResult(t *testing.T) {
+	failure := errors.New("dpkg --audit: signal: killed")
 	for _, tc := range []struct {
-		name      string
-		fail      int
-		audit     string
-		wantCalls int
-		wantSteps []int
+		out  string
+		err  error
+		want bool
 	}{
-		{name: "complete", wantCalls: 3, wantSteps: []int{0, 1}},
-		{name: "refresh fails", fail: 1, wantCalls: 1},
-		{name: "upgrade fails", fail: 2, wantCalls: 2, wantSteps: []int{0}},
-		{name: "audit command fails", fail: 3, wantCalls: 3, wantSteps: []int{0, 1}},
-		{name: "audit reports inconsistency", audit: " package is only half configured\n", wantCalls: 3, wantSteps: []int{0, 1}},
+		{out: "", want: false},
+		{out: " package is only half configured\n", want: true},
+		{err: failure, want: true},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var calls [][]string
-			var steps []int
-			run := func(name string, args ...string) error {
-				calls = append(calls, append([]string{name}, args...))
-				if len(calls) == tc.fail {
-					return failure
-				}
-				return nil
-			}
-			err := updatePackages(run, func(timeout time.Duration, name string, args ...string) (string, error) {
-				if timeout != 10*time.Second {
-					t.Errorf("read-only audit bound: %v", timeout)
-				}
-				return tc.audit, run(name, args...)
-			}, func(i int) { steps = append(steps, i) })
-			want := [][]string{
-				{"apt-get", "update", "--error-on=any", "-qq"},
-				{"apt-get", "upgrade", "-y", "-qq", "-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold"},
-				{"dpkg", "--audit"},
-			}
-			if !reflect.DeepEqual(calls, want[:tc.wantCalls]) || !reflect.DeepEqual(steps, tc.wantSteps) {
-				t.Fatalf("commands %v, completed stages %v", calls, steps)
-			}
-			if (err != nil) != (tc.fail != 0 || tc.audit != "") || (tc.fail != 0 && !errors.Is(err, failure)) {
-				t.Fatalf("lost or invented failure: %v", err)
-			}
-		})
+		if err := packageAuditResult(tc.out, tc.err); (err != nil) != tc.want || (tc.err != nil && !errors.Is(err, failure)) {
+			t.Fatalf("audit %q, %v: %v", tc.out, tc.err, err)
+		}
 	}
 }

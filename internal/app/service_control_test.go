@@ -52,7 +52,7 @@ func TestServiceControlBoundAndClose(t *testing.T) {
 				if calls != 1 || result.Outcome != ServiceActionUnconfirmed || !errors.Is(result.Err, wantErr) {
 					t.Fatalf("retried or misreported observation loss: %+v, calls %d", result, calls)
 				}
-				if !closeEarly && time.Since(started) != 35*time.Minute {
+				if !closeEarly && time.Since(started) != 125*time.Minute {
 					t.Fatal("wrong observation bound")
 				}
 				if _, ok := <-results; ok {

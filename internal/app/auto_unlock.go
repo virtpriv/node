@@ -82,10 +82,11 @@ func (w *AutoUnlockChanges) start(enable bool, password autounlock.Password) <-c
 		close(results)
 		return results
 	}
-	// Include helper queue time. Allow the existing 20-minute helper window plus
-	// queue allowance; this is not LND's 120-second candidate-start timeout.
-	// Expiry ends only local observation, even if the helper is still queued.
-	ctx, cancel := context.WithTimeout(w.ctx, 25*time.Minute)
+	// Include queuing behind the longest helper job, Update Packages at 90
+	// minutes, then this verb's own 20. This is not LND's 120-second
+	// candidate-start timeout. Expiry ends only local observation, even if the
+	// helper is still queued.
+	ctx, cancel := context.WithTimeout(w.ctx, 115*time.Minute)
 	w.workers.Go(func() {
 		defer cancel()
 		defer close(results)

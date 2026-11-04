@@ -132,7 +132,7 @@ func TestPackageUpdateObservationBoundAndClose(t *testing.T) {
 				if result.Outcome != PackageUpdateUnconfirmed || !errors.Is(result.Err, wantErr) || calls != 1 || !session.closed {
 					t.Fatalf("result %+v, calls %d, closed %v", result, calls, session.closed)
 				}
-				if !closeEarly && time.Since(started) != 35*time.Minute {
+				if !closeEarly && time.Since(started) != 95*time.Minute {
 					t.Fatal("wrong deadline")
 				}
 				u.Close()

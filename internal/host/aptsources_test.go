@@ -31,8 +31,9 @@ type fakeAptMachine struct {
 	dump    []string          // apt-config dump lines beyond Debian's defaults
 	folders map[string]string // apt-config shell answers that differ from Debian's
 	targets []fakeTarget
-	pkgs    []string // dpkg-query lines, each status, package and version
-	env     []string // systemctl show-environment lines
+	pkgs    []string          // dpkg-query lines, each status, package and version
+	env     []string          // systemctl show-environment lines
+	timers  map[string]string // the nightly timers' UnitFileState
 }
 
 type fakeTarget struct {
@@ -56,6 +57,8 @@ func newFakeApt(t *testing.T) *fakeAptMachine {
 		" /etc/apt/trusted.gpg.d/debian-archive-bookworm-stable.asc 0123456789abcdef0123456789abcdef obsolete\n\n")
 	m.pkgs = []string{"installed tor 0.4.9.15-1~deb13u1", "installed debian-archive-keyring 2025.1"}
 	m.env = []string{"LANG=C.UTF-8", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"}
+	m.timers = map[string]string{"apt-daily.timer": "enabled", "apt-daily-upgrade.timer": "enabled",
+		"apt-daily.service": "static", "apt-daily-upgrade.service": "static"}
 	return m
 }
 
@@ -195,7 +198,16 @@ func (m *fakeAptMachine) run(name string, args ...string) (string, error) {
 	case "dpkg-query":
 		return strings.Join(m.pkgs, "\n"), nil
 	case "systemctl":
-		return strings.Join(m.env, "\n"), nil
+		if args[0] != "show" {
+			return strings.Join(m.env, "\n"), nil
+		}
+		var blocks []string
+		for _, a := range args {
+			if state, ok := m.timers[a]; ok {
+				blocks = append(blocks, "Id="+a+"\nUnitFileState="+state)
+			}
+		}
+		return strings.Join(blocks, "\n\n"), nil
 	}
 	m.t.Fatalf("unexpected command %s", name)
 	return "", nil
@@ -485,7 +497,7 @@ func TestAptChecksReportUnreadable(t *testing.T) {
 func TestAptUpdatesPassOnDebiansImages(t *testing.T) {
 	m := newFakeApt(t)
 	m.debianImage()
-	// Debian's own unattended-upgrades files, which step 17 replaces, may
+	// Debian's own unattended-upgrades files, which step 11 replaces, may
 	// stop the nightly job before it does.
 	m.file(paths.AutoUpgrades, "APT::Periodic::Update-Package-Lists \"0\";\nAPT::Periodic::Unattended-Upgrade \"0\";\n")
 	m.file(paths.UnattendedUpgrades, "Unattended-Upgrade::Package-Blacklist {\n    \"linux-\";\n};\n")
@@ -522,6 +534,24 @@ func TestAptUpdatesRefusesNightlySettings(t *testing.T) {
 			wantRefused(t, m.baseline().Updates, name)
 		})
 	}
+}
+
+// Masking the job itself stops the nightly updates as surely as switching
+// off its timer. The node check shows a masked timer.
+func TestAptUpdatesRefusesAMaskedNightlyJob(t *testing.T) {
+	m := newFakeApt(t)
+	m.debianImage()
+	m.timers["apt-daily-upgrade.service"] = "masked"
+	wantRefused(t, m.baseline().Updates, "apt-daily-upgrade.service")
+}
+
+// A timer switched off with systemctl disable does not start after the next
+// reboot. The node check shows a masked one.
+func TestAptUpdatesRefusesADisabledTimer(t *testing.T) {
+	m := newFakeApt(t)
+	m.debianImage()
+	m.timers["apt-daily.timer"] = "disabled"
+	wantRefused(t, m.baseline().Updates, "apt-daily.timer")
 }
 
 func TestAptUpdatesRefusesBackportsPackages(t *testing.T) {

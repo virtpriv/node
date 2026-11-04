@@ -35,7 +35,8 @@ import (
 // Deadlines bound the connection's socket I/O for one verb.
 // They are sized to the operation's legitimate worst case.
 // For example, bitcoind alone is allowed 10 minutes to stop, and
-// a package upgrade can take most of half an hour over Tor. A
+// a package update can wait up to an hour for Debian's daily
+// update and then take most of half an hour over Tor. A
 // deadline alone cannot cut short a wedged SUBPROCESS (nothing
 // does socket I/O while one runs). The bounds there live with
 // the subprocesses themselves: download timeouts and retry caps
@@ -69,7 +70,7 @@ var verbs = map[string]verbDef{
 	helper.VerbStageLNDCredentials:  {3 * time.Minute, verbStageLNDCredentials},
 	helper.VerbStageLNDMacaroon:     {1 * time.Minute, verbStageLNDMacaroon},
 	helper.VerbRebuildSSHConfig:     {3 * time.Minute, verbRebuildSSHConfig},
-	helper.VerbPackageUpdate:        {30 * time.Minute, verbPackageUpdate},
+	helper.VerbPackageUpdate:        {90 * time.Minute, verbPackageUpdate},
 	helper.VerbSelfUpdate:           {15 * time.Minute, verbSelfUpdate},
 	helper.VerbUpgradeP2PToHybrid:   {30 * time.Minute, verbUpgradeP2PToHybrid},
 	helper.VerbSyncthingInstall:     {30 * time.Minute, verbSyncthingInstall},

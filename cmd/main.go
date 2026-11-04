@@ -99,6 +99,17 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("staged LND TLS certificate copy refreshed")
+	case cmdRebootCheck:
+		// Run by apt's hook after every package change, as root. apt
+		// must never fail on it, so after the root check it always exits
+		// 0 and reports what it found in its output.
+		if os.Geteuid() != 0 {
+			fmt.Fprintln(os.Stderr,
+				"vpn reboot-check runs as root from apt's hook, "+
+					"it is not meant to be started by hand")
+			os.Exit(1)
+		}
+		host.RebootCheckHook(os.Stdout, os.Stderr)
 	case cmdPublishLNDBackup:
 		// Intended for lnd-backup-export.service. The publisher
 		// validates the exact lnd identity and unit-local backup
@@ -198,6 +209,7 @@ const (
 	cmdInstall
 	cmdHelperd
 	cmdStageLNDCert
+	cmdRebootCheck
 	cmdPublishLNDBackup
 	cmdVersion
 	cmdHelp
@@ -237,6 +249,12 @@ func parseArgs(
 				"stage-lnd-cert takes no arguments")
 		}
 		return cmdStageLNDCert, opts, nil
+	case "reboot-check":
+		if len(args) > 1 {
+			return 0, opts, fmt.Errorf(
+				"reboot-check takes no arguments")
+		}
+		return cmdRebootCheck, opts, nil
 	case "publish-lnd-backup":
 		if len(args) != 2 {
 			return 0, opts, fmt.Errorf(
@@ -298,9 +316,9 @@ func parseInstall(args []string) (command, installer.InstallOptions, error) {
 	return cmdInstall, opts, nil
 }
 
-// usage lists what an owner runs. The commands that systemd starts
-// (helperd, stage-lnd-cert, publish-lnd-backup, update-launch and
-// update-worker) are left out.
+// usage lists what an owner runs. The commands that systemd or apt start
+// (helperd, stage-lnd-cert, reboot-check, publish-lnd-backup,
+// update-launch and update-worker) are left out.
 func usage() string {
 	return `Virtual Private Node
 
