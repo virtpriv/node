@@ -233,10 +233,9 @@ func verbStageLNDMacaroon(_ *verbCtx, _ json.RawMessage) (any, error) {
 func verbReadNodeAddresses(_ *verbCtx, _ json.RawMessage) (any, error) {
 	onions := host.ReadOnionAddresses()
 	return helper.NodeAddressesResult{
-		BitcoinP2POnion: onions.BitcoinP2P,
-		LNDGRPCOnion:    onions.LNDGRPC,
-		LNDRESTOnion:    onions.LNDREST,
-		SyncthingOnion:  onions.Syncthing,
+		LNDGRPCOnion:   onions.LNDGRPC,
+		LNDRESTOnion:   onions.LNDREST,
+		SyncthingOnion: onions.Syncthing,
 		// Read the certificate identity even when the daemon is stopped.
 		SyncthingDeviceID: host.SyncthingDeviceID(),
 	}, nil

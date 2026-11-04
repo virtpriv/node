@@ -45,7 +45,6 @@ Wants=network-online.target
 Type=simple
 User=%s
 Group=%s
-SupplementaryGroups=debian-tor
 UMask=0077
 ExecStart=/usr/local/bin/bitcoind -conf=/etc/bitcoin/bitcoin.conf -datadir=/var/lib/bitcoin
 Restart=on-failure

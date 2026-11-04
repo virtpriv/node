@@ -179,7 +179,6 @@ type UpdateResumeParams struct {
 // hostname file is missing or unreadable. It does not prove the service
 // is unconfigured or that an observed address is reachable.
 type NodeAddressesResult struct {
-	BitcoinP2POnion   string `json:"bitcoin_p2p_onion"`
 	LNDGRPCOnion      string `json:"lnd_grpc_onion"`
 	LNDRESTOnion      string `json:"lnd_rest_onion"`
 	SyncthingOnion    string `json:"syncthing_onion"`

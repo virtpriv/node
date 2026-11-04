@@ -132,7 +132,7 @@ For maintainers and contributors: [How vpn Works Inside](docs/developing.md),
 - Root SSH disabled by the installer
 - SSH password controls apply to `vpn`. Other accounts retain their host password-authentication policy. Keyboard-interactive authentication and X11 forwarding are disabled for `vpn`. Native password changes require the current account password.
 - Bitcoin Core, LND, and Syncthing run as separate, non-login system users. Unprivileged `vpn` has no direct access to their private data directories, while authenticated root maintenance can access them
-- Tor control-cookie access is granted only inside `bitcoind.service` and `lnd.service`. Syncthing and the backup exporter receive none
+- Tor control-cookie access is granted only inside `lnd.service`, for LND's Lightning onion. Tor itself makes Bitcoin Core's onion address, so Bitcoin Core, Syncthing and the backup exporter receive none
 - vpn and LND authenticate to Bitcoin Core with separate `rpcauth` identities. Neither reads a Core cookie or Core's data directory
 - Syncthing can read only the finished copy of `channel.backup`. It cannot change that copy or read LND's own files
 - GPG signature verification for all software, any bad signature is a hard stop

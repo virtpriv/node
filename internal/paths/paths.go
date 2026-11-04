@@ -185,14 +185,16 @@ func ChannelBackup(network string) string {
 // ── Tor ──────────────────────────────────────────────────
 
 const (
-	Torrc                = "/etc/tor/torrc"
-	TorBitcoinP2P        = "/var/lib/tor/bitcoin-p2p"
-	TorLNDGRPC           = "/var/lib/tor/lnd-grpc"
-	TorLNDREST           = "/var/lib/tor/lnd-rest"
-	TorLNDRESTHostname   = "/var/lib/tor/lnd-rest/hostname"
-	TorSyncthing         = "/var/lib/tor/syncthing"
-	TorSyncthingHostname = "/var/lib/tor/syncthing/hostname"
-	TorSyncthingSync     = "/var/lib/tor/syncthing-sync"
+	Torrc                 = "/etc/tor/torrc"
+	TorrcDistrib          = "/etc/tor/torrc.distrib"
+	TorBitcoinP2P         = "/var/lib/tor/bitcoin-p2p"
+	TorBitcoinP2PHostname = "/var/lib/tor/bitcoin-p2p/hostname"
+	TorLNDGRPC            = "/var/lib/tor/lnd-grpc"
+	TorLNDREST            = "/var/lib/tor/lnd-rest"
+	TorLNDRESTHostname    = "/var/lib/tor/lnd-rest/hostname"
+	TorSyncthing          = "/var/lib/tor/syncthing"
+	TorSyncthingHostname  = "/var/lib/tor/syncthing/hostname"
+	TorSyncthingSync      = "/var/lib/tor/syncthing-sync"
 )
 
 // ── Systemd ──────────────────────────────────────────────

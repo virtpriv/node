@@ -144,6 +144,9 @@ assert_equal "Bitcoin private umask" \
 assert_excludes "Bitcoin lacks export group" \
     "$(systemctl show -p SupplementaryGroups --value bitcoind.service)" \
     vpn-lnd-backup
+assert_excludes "Bitcoin lacks Tor control group" \
+    "$(systemctl show -p SupplementaryGroups --value bitcoind.service)" \
+    debian-tor
 
 assert_metadata "FS LND data root" /var/lib/lnd lnd lnd 750
 assert_metadata "FS Bitcoin data root" /var/lib/bitcoin bitcoin bitcoin 750

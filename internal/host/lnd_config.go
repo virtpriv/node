@@ -184,7 +184,7 @@ func WriteLNDConfigWithRPCPassword(cfg *config.AppConfig, password string) error
 		return fmt.Errorf("refusing to write lnd.conf with an empty " +
 			"bitcoind RPC password")
 	}
-	restOnion, err := readRequiredLNDRESTOnion()
+	restOnion, err := readLNDRESTOnion()
 	if err != nil {
 		return err
 	}
@@ -196,35 +196,17 @@ func WriteLNDConfigWithRPCPassword(cfg *config.AppConfig, password string) error
 	return system.WriteFileRootOwned(paths.LNDConf, []byte(content), 0640, "root", lndUser)
 }
 
-// readRequiredLNDRESTOnion enforces the dependency between Tor's
-// hidden-service identity and LND's TLS configuration. This node
-// requests v3 onions, whose host label is 56 lowercase base32
-// characters. Missing, unreadable, or malformed state is never
-// converted into an lnd.conf without tlsextradomain.
-func readRequiredLNDRESTOnion() (string, error) {
-	data, err := os.ReadFile(paths.TorLNDRESTHostname)
-	if err != nil {
-		return "", fmt.Errorf("read LND REST onion hostname: %w", err)
-	}
-	onion := strings.TrimSpace(string(data))
-	if err := validateLNDRESTOnion(onion); err != nil {
-		return "", err
-	}
-	return onion, nil
-}
-
-func validateLNDRESTOnion(onion string) error {
-	if !ValidV3OnionHostname(onion) {
-		return fmt.Errorf("invalid LND REST onion hostname %q", onion)
-	}
-	return nil
+// readLNDRESTOnion ties LND's TLS configuration to the onion Tor made for
+// LND's REST port, so lnd.conf is never written without tlsextradomain.
+func readLNDRESTOnion() (string, error) {
+	return readRequiredOnion(paths.TorLNDRESTHostname, "LND REST")
 }
 
 // VerifyLNDTLSOnionSAN waits for LND's startup-time TLS
 // generation/refresh and proves that the certificate it wrote
 // contains the exact REST onion DNS SAN configured above.
 func VerifyLNDTLSOnionSAN() error {
-	onion, err := readRequiredLNDRESTOnion()
+	onion, err := readLNDRESTOnion()
 	if err != nil {
 		return err
 	}
@@ -378,7 +360,7 @@ func readLNDConfigRewrite(cfg *config.AppConfig) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read lnd.conf: %w", err)
 	}
-	restOnion, err := readRequiredLNDRESTOnion()
+	restOnion, err := readLNDRESTOnion()
 	if err != nil {
 		return "", err
 	}

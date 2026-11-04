@@ -9,10 +9,18 @@ import (
 	"github.com/virtpriv/node/internal/system"
 )
 
+// bitcoinOnionBindPort is where Core listens for peers that come through its
+// onion: the P2P port plus one, Core's own default for its onion bind. Tor
+// forwards the onion's P2P port to it.
+func bitcoinOnionBindPort(net *config.NetworkConfig) int {
+	return net.P2PPort + 1
+}
+
 // buildBitcoinConfig renders the selected immutable network profile. RPC
 // authentication belongs in the global section, before any network section.
+// onion is the address Tor made for Core.
 func buildBitcoinConfig(
-	cfg *config.AppConfig, rpcauthLines ...string,
+	cfg *config.AppConfig, onion string, rpcauthLines ...string,
 ) (string, error) {
 	net, err := cfg.NetworkConfig()
 	if err != nil {
@@ -44,12 +52,18 @@ func buildBitcoinConfig(
 	b.WriteString("maxmempool=300\n")
 	b.WriteString("proxy=127.0.0.1:9050\n")
 	b.WriteString("listen=1\n")
-	b.WriteString("listenonion=1\n")
+	// Tor makes Core's onion from vpn's torrc, so Core does not make one
+	// through Tor's control port.
+	b.WriteString("listenonion=0\n")
 	b.WriteString(auth)
 	if net.CoreNetwork != "main" {
 		fmt.Fprintf(&b, "\n[%s]\n", net.CoreNetwork)
 	}
-	b.WriteString("bind=127.0.0.1\n")
+	// Core listens only where Tor forwards its onion. Core reads bind only
+	// from the network's own section. The onion tag makes Core treat these
+	// peers as Tor peers, and externalip is the address it tells them.
+	fmt.Fprintf(&b, "bind=127.0.0.1:%d=onion\n", bitcoinOnionBindPort(net))
+	fmt.Fprintf(&b, "externalip=%s\n", onion)
 	b.WriteString("rpcbind=127.0.0.1\n")
 	fmt.Fprintf(&b, "rpcport=%d\n", net.RPCPort)
 	b.WriteString("rpcallowip=127.0.0.1\n")
@@ -64,11 +78,17 @@ func buildBitcoinConfig(
 // reruns the whole incomplete btc group after failure, before starting Core.
 // This operation is for initial provisioning, not a completed-node rewrite.
 func WriteInitialNodeRPCConfig(cfg *config.AppConfig) error {
+	// Read before any credential is made, so a missing address changes
+	// nothing.
+	onion, err := readRequiredOnion(paths.TorBitcoinP2PHostname, "Bitcoin Core")
+	if err != nil {
+		return err
+	}
 	creds, err := writeRPCAuthCredentials()
 	if err != nil {
 		return err
 	}
-	content, err := buildBitcoinConfig(cfg, creds.lines...)
+	content, err := buildBitcoinConfig(cfg, onion, creds.lines...)
 	if err != nil {
 		return err
 	}

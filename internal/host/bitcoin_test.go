@@ -10,11 +10,14 @@ import (
 	"github.com/virtpriv/node/internal/config"
 )
 
+// testCoreOnion stands in for the address Tor made for Core.
+var testCoreOnion = strings.Repeat("c", 56) + ".onion"
+
 func mustBuildBitcoinConfig(
 	t *testing.T, cfg *config.AppConfig, lines ...string,
 ) string {
 	t.Helper()
-	content, err := buildBitcoinConfig(cfg, lines...)
+	content, err := buildBitcoinConfig(cfg, testCoreOnion, lines...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,10 +38,11 @@ func TestBitcoinConfigMainnet(t *testing.T) {
 		"zmqpubrawblock=tcp://127.0.0.1:28332",
 		"zmqpubrawtx=tcp://127.0.0.1:28333",
 		"listen=1",
-		"listenonion=1",
+		"listenonion=0",
 		"dbcache=512",
 		"maxmempool=300",
-		"bind=127.0.0.1",
+		"bind=127.0.0.1:8334=onion",
+		"externalip=" + testCoreOnion,
 		"rpcbind=127.0.0.1",
 		"rpcallowip=127.0.0.1",
 	}
@@ -124,7 +128,7 @@ func TestBitcoinConfigDisablesUnusedCookieForEveryProfile(t *testing.T) {
 func TestBitcoinConfigRejectsUnknownProfile(t *testing.T) {
 	cfg := config.Default()
 	cfg.Network = "signet"
-	if _, err := buildBitcoinConfig(cfg); err == nil {
+	if _, err := buildBitcoinConfig(cfg, testCoreOnion); err == nil {
 		t.Fatal("raw signet profile generated a Bitcoin config")
 	}
 }
@@ -150,15 +154,19 @@ func TestBitcoinConfigRPCAuthPlacement(t *testing.T) {
 	}
 }
 
-func TestBitcoindServiceUsesDedicatedIdentityAndTorGroup(t *testing.T) {
+// Tor makes Core's onion, so Core needs no Tor control access. Its unit must
+// not give it the group that reads Tor's control cookie.
+func TestBitcoindServiceUsesDedicatedIdentityWithoutTorGroup(t *testing.T) {
 	unit := bitcoindServiceUnit(bitcoinUser)
 	for key, want := range map[string]string{
-		"User":                "bitcoin",
-		"Group":               "bitcoin",
-		"SupplementaryGroups": "debian-tor",
-		"UMask":               "0077",
+		"User":  "bitcoin",
+		"Group": "bitcoin",
+		"UMask": "0077",
 	} {
 		assertSingleUnitDirective(t, unit, "Service", key, want)
+	}
+	if strings.Contains(unit, "debian-tor") {
+		t.Error("bitcoind unit can read Tor's control cookie")
 	}
 	if strings.Contains(unit, backupGroup) {
 		t.Error("normal bitcoind unit has channel-backup access")
