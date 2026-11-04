@@ -29,22 +29,25 @@ func BuildTorConfig(cfg *config.AppConfig) (string, error) {
 
 	var b strings.Builder
 	b.WriteString("# Virtual Private Node, Tor configuration\n")
+	b.WriteString("# vpn writes this file. Debian's own copy is kept as " +
+		paths.TorrcDistrib + ".\n")
 	b.WriteString("SOCKSPort 9050\n")
 
 	// The control port is always written. Two parts use it: the installer's
-	// Tor routing check, which reads bootstrap progress here, and LND's P2P
-	// onion management. It listens on loopback only and needs the cookie, so
-	// writing it without LND adds no exposure.
-	b.WriteString("\n# Control port (install routing gate + LND onion management)\n")
+	// Tor routing check, which reads bootstrap progress here, and LND, which
+	// makes its Lightning onion through it. It listens on loopback only and
+	// needs the cookie, so writing it without LND adds no exposure.
+	b.WriteString("\n# Control port, for the installer's Tor check and LND's Lightning onion\n")
 	b.WriteString("ControlPort 9051\n")
 	b.WriteString("CookieAuthentication 1\n")
 	b.WriteString("CookieAuthFileGroupReadable 1\n")
 
+	// Tor makes Core's onion and forwards it to Core's onion bind.
 	b.WriteString(fmt.Sprintf(`
-# Bitcoin Core P2P (static onion address for peers)
+# Bitcoin Core, the onion address it gives its peers
 HiddenServiceDir /var/lib/tor/bitcoin-p2p/
 HiddenServicePort %d 127.0.0.1:%d
-`, net.P2PPort, net.P2PPort))
+`, net.P2PPort, bitcoinOnionBindPort(net)))
 
 	if cfg.HasLND() {
 		b.WriteString(`
@@ -72,14 +75,30 @@ HiddenServicePort 8384 127.0.0.1:8384
 	return b.String(), nil
 }
 
-// WriteTorConfig writes the torrc to disk.
+// WriteTorConfig writes the torrc at install. Debian's own copy is set aside
+// first, so vpn's file never overwrites it.
 func WriteTorConfig(cfg *config.AppConfig) error {
 	content, err := BuildTorConfig(cfg)
 	if err != nil {
 		return err
 	}
-	return writeTorConfig([]byte(content))
+	if err := divertDebianTorConfig(); err != nil {
+		return fmt.Errorf("set aside Debian's %s: %w", paths.Torrc, err)
+	}
+	return writeTorConfigForInstall([]byte(content))
 }
+
+var (
+	// A local dpkg diversion moves Debian's torrc to TorrcDistrib, and every
+	// later Tor package puts its copy there, so a Tor update never replaces
+	// vpn's file or asks about it. Adding the same diversion again changes
+	// nothing, so a resumed install runs it again safely.
+	divertDebianTorConfig = func() error {
+		return system.RunRoot("dpkg-divert", "--local", "--rename",
+			"--divert", paths.TorrcDistrib, "--add", paths.Torrc)
+	}
+	writeTorConfigForInstall = writeTorConfig
+)
 
 func writeTorConfig(content []byte) error {
 	return system.WriteFileRootOwned(paths.Torrc, content, 0640, "root", "debian-tor")

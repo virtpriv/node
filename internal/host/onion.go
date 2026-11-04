@@ -1,6 +1,7 @@
 package host
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -10,20 +11,18 @@ import (
 // OnionAddresses contains the fixed Tor hostname observations used for display.
 // Empty fields mean unavailable, including missing or unreadable files.
 type OnionAddresses struct {
-	BitcoinP2P string
-	LNDGRPC    string
-	LNDREST    string
-	Syncthing  string
+	LNDGRPC   string
+	LNDREST   string
+	Syncthing string
 }
 
 // ReadOnionAddresses reads current display facts without staging or mutation.
 // Provisioning separately validates required hostnames before using them.
 func ReadOnionAddresses() OnionAddresses {
 	return OnionAddresses{
-		BitcoinP2P: readOnionHostname(paths.TorBitcoinP2P + "/hostname"),
-		LNDGRPC:    readOnionHostname(paths.TorLNDGRPC + "/hostname"),
-		LNDREST:    readOnionHostname(paths.TorLNDRESTHostname),
-		Syncthing:  readOnionHostname(paths.TorSyncthingHostname),
+		LNDGRPC:   readOnionHostname(paths.TorLNDGRPC + "/hostname"),
+		LNDREST:   readOnionHostname(paths.TorLNDRESTHostname),
+		Syncthing: readOnionHostname(paths.TorSyncthingHostname),
 	}
 }
 
@@ -33,6 +32,22 @@ func readOnionHostname(path string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// readRequiredOnion reads the onion address Tor made for a service, for a
+// config file that names it. A missing, unreadable or malformed hostname is an
+// error, so no file is written without the address or with a wrong one. name
+// is the service as the error names it.
+func readRequiredOnion(hostnameFile, name string) (string, error) {
+	data, err := os.ReadFile(hostnameFile)
+	if err != nil {
+		return "", fmt.Errorf("read %s onion hostname: %w", name, err)
+	}
+	onion := strings.TrimSpace(string(data))
+	if !ValidV3OnionHostname(onion) {
+		return "", fmt.Errorf("invalid %s onion hostname %q", name, onion)
+	}
+	return onion, nil
 }
 
 // ValidV3OnionHostname checks the syntax of a native Tor v3 hostname.

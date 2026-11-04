@@ -103,11 +103,38 @@ func TestTorConfigPublicSignetPorts(t *testing.T) {
 	cfg.Network = config.NetworkPublicSignet
 	content := mustBuildTorConfig(t, cfg)
 
-	if !strings.Contains(content, "HiddenServicePort 38333 127.0.0.1:38333") {
-		t.Error("public-signet torrc should use port 38333 for P2P")
+	if !strings.Contains(content, "HiddenServicePort 38333 127.0.0.1:38334") {
+		t.Error("public-signet torrc should forward port 38333 to Core's onion bind")
 	}
 	if strings.Contains(content, "HiddenServicePort 38332") {
 		t.Error("public-signet torrc should not have an RPC hidden service")
+	}
+}
+
+// The install sets Debian's torrc aside before writing vpn's. If it wrote
+// first and the diversion then failed, a resumed install's diversion would
+// move vpn's file aside as if it were Debian's, and Debian's copy would be
+// gone.
+func TestInstallTorConfigIsNotWrittenWhenDiversionFails(t *testing.T) {
+	oldDivert, oldWrite := divertDebianTorConfig, writeTorConfigForInstall
+	t.Cleanup(func() {
+		divertDebianTorConfig, writeTorConfigForInstall = oldDivert, oldWrite
+	})
+	diverted := false
+	divertDebianTorConfig = func() error {
+		diverted = true
+		return errors.New("dpkg-divert: error: rename involves overwriting")
+	}
+	writes := 0
+	writeTorConfigForInstall = func([]byte) error {
+		writes++
+		return nil
+	}
+	if err := WriteTorConfig(config.Default()); err == nil {
+		t.Fatal("install went on although setting Debian's torrc aside failed")
+	}
+	if !diverted || writes != 0 {
+		t.Fatalf("diversion tried=%t, torrc writes=%d, want true and 0", diverted, writes)
 	}
 }
 

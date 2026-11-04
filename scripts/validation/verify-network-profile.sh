@@ -3,7 +3,7 @@ set -u -o pipefail
 
 # Read-only Debian 13 amd64 validation for one immutable VPN network profile.
 # Run as root on a disposable, freshly installed candidate. This proves the
-# generated daemon configuration and the live Bitcoin Core identity; wallet,
+# generated daemon configuration and the live Bitcoin Core identity. Wallet,
 # address, invoice, payment, channel, backup, reboot, and Tor reachability
 # scenarios remain explicit certification-matrix steps.
 
@@ -202,8 +202,19 @@ assert_file_excludes "LND no custom signet challenge" "${lnd_conf}" \
 assert_file_excludes "LND no custom signet seed" "${lnd_conf}" \
     "bitcoin.signetseednode="
 
+onion_bind_port=$((p2p_port + 1))
 assert_file_contains "TOR Bitcoin P2P port" /etc/tor/torrc \
-    "HiddenServicePort ${p2p_port} 127.0.0.1:${p2p_port}"
+    "HiddenServicePort ${p2p_port} 127.0.0.1:${onion_bind_port}"
+assert_file_contains "BTC no onion of its own" "${bitcoin_conf}" "listenonion=0"
+assert_file_contains "BTC onion bind" "${bitcoin_conf}" \
+    "bind=127.0.0.1:${onion_bind_port}=onion"
+core_onion=$(tr -d '[:space:]' 2>/dev/null < /var/lib/tor/bitcoin-p2p/hostname)
+if [[ -n ${core_onion} ]]; then
+    assert_file_contains "BTC onion address" "${bitcoin_conf}" \
+        "externalip=${core_onion}"
+else
+    fail "BTC onion address" "/var/lib/tor/bitcoin-p2p/hostname is missing or empty"
+fi
 
 declare -a bitcoin_cli
 bitcoin_cli=(/usr/local/bin/bitcoin-cli

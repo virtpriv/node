@@ -599,8 +599,9 @@ func buildInstallSteps(
 				return host.VerifyBitcoinCore(btcWork)
 			}},
 		// Also writes lnd.conf. LND's Bitcoin Core password is created here
-		// with bitcoin.conf and lnd.conf is where it is kept. The LND onion
-		// it names was created by Tor in the tor.configure step.
+		// with bitcoin.conf and lnd.conf is where it is kept. The onion
+		// addresses the two files name were made by Tor in the
+		// tor.configure step.
 		{Key: "btc.install", Group: "btc",
 			Name: "Installing and configuring Bitcoin Core",
 			Fn: func() error {

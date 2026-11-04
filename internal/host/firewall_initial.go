@@ -35,6 +35,9 @@ func ConfigureInitialFirewall() error {
 		return fmt.Errorf("observe SSH ports before firewall rewrite: %w", err)
 	}
 
+	// Debian's ufw ships IPV6=yes. vpn sets IPV6=no: ufw then drops all IPv6
+	// traffic in and out except loopback, so nothing leaves over IPv6 even if
+	// IPv6 is turned on again later.
 	ufwDefault, err := readUFWDefaultForFirewall()
 	if err == nil {
 		content := strings.ReplaceAll(

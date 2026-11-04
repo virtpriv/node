@@ -356,6 +356,7 @@ func TestProductionLifecycleEvidenceInventory(t *testing.T) {
 		paths.TorBitcoinP2P,
 		paths.TorLNDGRPC,
 		paths.TorLNDREST,
+		paths.TorrcDistrib,
 		paths.SyncthingDir,
 		paths.SyncthingDataDir,
 		paths.SyncthingService,

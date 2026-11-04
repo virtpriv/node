@@ -100,21 +100,6 @@ func TestBuildLNDConfigBindsByAddress(t *testing.T) {
 	}
 }
 
-func TestValidateLNDRESTOnion(t *testing.T) {
-	onion := strings.Repeat("a", 56) + ".onion"
-	if err := validateLNDRESTOnion(onion); err != nil {
-		t.Fatalf("valid v3 onion rejected: %v", err)
-	}
-	for _, invalid := range []string{
-		"", "short.onion", strings.Repeat("A", 56) + ".onion",
-		strings.Repeat("0", 56) + ".onion", strings.Repeat("a", 56),
-	} {
-		if err := validateLNDRESTOnion(invalid); err == nil {
-			t.Errorf("invalid onion accepted: %q", invalid)
-		}
-	}
-}
-
 func TestVerifyCertificateDNSName(t *testing.T) {
 	onion := strings.Repeat("b", 56) + ".onion"
 	_, key, err := ed25519.GenerateKey(rand.Reader)
