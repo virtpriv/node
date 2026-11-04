@@ -164,7 +164,7 @@ func TestRebootRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 		t.Fatal("post-request observation did not recover")
 	}
 	view := ansi.Strip(m.viewMain())
-	if strings.Contains(view, "Reboot: ") || !strings.Contains(view, "Reboot requested.") {
+	if strings.Contains(view, "Reboot required") || !strings.Contains(view, "Reboot requested.") {
 		t.Fatalf("existing view did not refresh: %s", view)
 	}
 }

@@ -472,22 +472,20 @@ func (s *SystemHomeScreen) View(
 
 	midLines = append(midLines, "")
 
-	// Security updates card
-	midLines = append(midLines,
-		"  "+border.Render(
-			"┌"+strings.Repeat("─", boxW-2)+"┐"),
-		"  "+border.Render("│")+pad(titleStyle.Render(" Security updates"), boxW-2)+border.Render("│"))
-	if status == nil {
-		midLines = append(midLines, "  "+border.Render("│")+pad(" "+theme.Dim.Render(" Loading..."), boxW-2)+border.Render("│"))
-	} else {
-		for _, line := range securityUpdatesLines(status, time.Now()) {
-			midLines = append(midLines, "  "+border.Render("│")+pad(clampLine(" "+line, boxW-2), boxW-2)+border.Render("│"))
+	// Security updates card, shown only while it has something to say.
+	if status != nil {
+		if lines := securityUpdatesLines(status, time.Now()); len(lines) > 0 {
+			midLines = append(midLines,
+				"  "+border.Render("┌"+strings.Repeat("─", boxW-2)+"┐"),
+				"  "+border.Render("│")+pad(titleStyle.Render(" Security updates"), boxW-2)+border.Render("│"))
+			for _, line := range lines {
+				midLines = append(midLines, "  "+border.Render("│")+pad(clampLine(" "+line, boxW-2), boxW-2)+border.Render("│"))
+			}
+			midLines = append(midLines,
+				"  "+border.Render("└"+strings.Repeat("─", boxW-2)+"┘"),
+				"")
 		}
 	}
-	midLines = append(midLines,
-		"  "+border.Render(
-			"└"+strings.Repeat("─", boxW-2)+"┘"),
-		"")
 
 	// Resources card
 	midLines = append(midLines,
@@ -781,37 +779,32 @@ func (s *SystemHomeScreen) svcName(i int) string {
 	return ""
 }
 
-// securityUpdatesLines are the Security updates card's lines. Red marks what
-// sets the sidebar's dot.
+// securityUpdatesLines are the Security updates card's lines, none on a
+// normal day. Each is something the owner may act on. Red marks what sets the
+// sidebar's dot.
 func securityUpdatesLines(status *statusSnapshot, now time.Time) []string {
 	var lines []string
-	stamp := func(t time.Time) string { return t.Local().Format("2 Jan 15:04") }
 
-	if u := status.Updates; !u.Known() {
-		lines = append(lines, theme.Value.Render("Last run: unavailable"))
-	} else {
-		state, since := app.SecurityUpdatesStatus(u.Value, now)
-		switch state {
-		case app.SecurityUpdatesOverdue:
-			lines = append(lines, theme.Warning.Render(observationText(u, "None since "+stamp(since))),
+	if u := status.Updates; u.Known() {
+		if state, since := app.SecurityUpdatesStatus(u.Value, now); state == app.SecurityUpdatesOverdue {
+			days := int(now.Sub(since) / (24 * time.Hour))
+			lines = append(lines, theme.Warning.Render(observationText(u, fmt.Sprintf("No updates for %d days", days))),
 				theme.Value.Render("Update Packages shows why."))
-		case app.SecurityUpdatesNotRunYet:
-			lines = append(lines, theme.Value.Render(observationText(u, "Last run: not yet")))
-		default:
-			lines = append(lines, theme.Value.Render(observationText(u, "Last run: "+stamp(since))))
 		}
 	}
 
 	if r := status.Reboot; r.Known() && r.Value.Required {
 		if app.RebootLate(r.Value, now) {
-			lines = append(lines, theme.Warning.Render(observationText(r, "Reboot overdue since "+stamp(r.Value.Since))))
+			lines = append(lines, theme.Warning.Render(observationText(r, "Reboot required. The node did not reboot by itself.")),
+				"", theme.Value.Render("Select Reboot to do it now."))
 		} else {
-			// The nightly run restarts the machine right after it.
-			line := "Reboot: after the next nightly update"
+			// The nightly run reboots the machine right after it. Without its
+			// time, the line says only that a reboot is required.
+			line := "Reboot required"
 			if status.Timers.Known() {
 				for _, t := range status.Timers.Value {
 					if t.Name == "apt-daily-upgrade.timer" && t.State == system.AptTimerRunning && !t.Next.IsZero() {
-						line = "Reboot: about " + stamp(t.Next)
+						line += ", automatic " + inHours(t.Next.Sub(now))
 					}
 				}
 			}
@@ -827,12 +820,24 @@ func securityUpdatesLines(status *statusSnapshot, now time.Time) []string {
 			}
 		}
 		if len(off) > 0 {
-			lines = append(lines, theme.Warning.Render(observationText(status.Timers, "Nightly updates are off")),
-				theme.Value.Render("To turn them on again, run:"), "")
+			lines = append(lines, theme.Warning.Render(observationText(status.Timers, "Security updates are off")),
+				theme.Value.Render("To turn them on, quit and run:"), "")
 			for _, name := range off {
 				lines = append(lines, theme.Value.Render("sudo systemctl enable --now "+name))
 			}
 		}
 	}
 	return lines
+}
+
+// inHours says how far ahead a time is, to the nearest hour.
+func inHours(d time.Duration) string {
+	switch h := int(d.Round(time.Hour).Hours()); {
+	case d < time.Hour:
+		return "in under an hour"
+	case h == 1:
+		return "in ~1 hour"
+	default:
+		return fmt.Sprintf("in ~%d hours", h)
+	}
 }
