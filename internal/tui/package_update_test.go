@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/system"
 )
 
 type packageUpdatesStub struct {
@@ -156,7 +157,7 @@ func TestPackageUpdateRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 	s := NewSystemHomeScreen(m.screenCtx)
 	m.sectionScreens[secSystem] = s
 	m.statusScope = m.currentStatusScope()
-	m.screenCtx.Status = &app.StatusSnapshot{Reboot: freshStatus(false), Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
+	m.screenCtx.Status = &app.StatusSnapshot{Reboot: freshStatus(system.RebootFlag{}), Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
 	before, beforeDone := startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
 	openUpdates(t, &m, s)
 	statusUpdate(&m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -168,7 +169,7 @@ func TestPackageUpdateRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 	if tor := m.screenCtx.Status.Services["tor"]; !tor.Known() || !tor.Value {
 		t.Fatal("invalidation discarded the last observed service state")
 	}
-	before.result <- app.StatusSnapshot{Reboot: freshStatus(false), Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
+	before.result <- app.StatusSnapshot{Reboot: freshStatus(system.RebootFlag{}), Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
 	during, duringDone := startStatusCommand(t, statusUpdate(&m, <-beforeDone), reader)
 	if m.screenCtx.Status.Reboot.Fresh() {
 		t.Fatal("pre-update read published")
@@ -177,16 +178,16 @@ func TestPackageUpdateRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 	if statusUpdate(&m, resultCmd()) != nil {
 		t.Fatal("completion started overlapping status collector")
 	}
-	during.result <- app.StatusSnapshot{Reboot: freshStatus(false), Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
+	during.result <- app.StatusSnapshot{Reboot: freshStatus(system.RebootFlag{}), Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
 	after, afterDone := startStatusCommand(t, statusUpdate(&m, <-duringDone), reader)
 	if m.screenCtx.Status.Reboot.Fresh() {
 		t.Fatal("read predating completion published")
 	}
-	after.result <- app.StatusSnapshot{Reboot: freshStatus(true), Services: map[string]app.Observation[bool]{"tor": freshStatus(false)}}
+	after.result <- app.StatusSnapshot{Reboot: freshStatus(system.RebootFlag{Required: true}), Services: map[string]app.Observation[bool]{"tor": freshStatus(false)}}
 	if statusUpdate(&m, <-afterDone) != nil {
 		t.Fatal("refresh did not coalesce")
 	}
-	if !m.screenCtx.Status.Reboot.Fresh() || !m.screenCtx.Status.Reboot.Value ||
+	if !m.screenCtx.Status.Reboot.Fresh() || !m.screenCtx.Status.Reboot.Value.Required ||
 		!m.screenCtx.Status.Services["tor"].Fresh() || m.screenCtx.Status.Services["tor"].Value {
 		t.Fatal("post-update observation did not recover")
 	}

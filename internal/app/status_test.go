@@ -49,9 +49,11 @@ func statusCollectorFixture(t *testing.T) *StatusCollector {
 		bitcoin: func(context.Context, int) (bitcoin.BlockchainInfo, error) {
 			return bitcoin.BlockchainInfo{Synced: true}, nil
 		},
-		size:    func(context.Context) (string, error) { return "1G", nil },
-		reboot:  func() (bool, error) { return false, nil },
-		updates: func() (system.SecurityUpdates, error) { return system.SecurityUpdates{}, nil }, publicIP: func(context.Context) (string, error) { return "", errors.New("unavailable") },
+		size:     func(context.Context) (string, error) { return "1G", nil },
+		reboot:   func() (system.RebootFlag, error) { return system.RebootFlag{}, nil },
+		updates:  func() (system.SecurityUpdates, error) { return system.SecurityUpdates{}, nil },
+		timers:   func(context.Context) ([]system.AptTimer, error) { return nil, nil },
+		publicIP: func(context.Context) (string, error) { return "", errors.New("unavailable") },
 	}
 	return c
 }

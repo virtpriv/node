@@ -133,8 +133,9 @@ func (n *NavSidebar) SetActive(section int) {
 
 // BlockRows returns the styled rows of each section's box, theme.SectionRows
 // tall, with the label in the middle. The active section is shown inverted,
-// and the cursor shows ▸ while the sidebar has focus.
-func (n NavSidebar) BlockRows(w int) [numSections][]string {
+// and the cursor shows ▸ while the sidebar has focus. A red dot before System
+// says one of its warnings stands.
+func (n NavSidebar) BlockRows(w int, systemWarning bool) [numSections][]string {
 	var blocks [numSections][]string
 	cell := lipgloss.NewStyle().Width(w).Align(lipgloss.Center)
 	for si := range numSections {
@@ -149,6 +150,9 @@ func (n NavSidebar) BlockRows(w int) [numSections][]string {
 			style = theme.NavCursor
 		}
 		label := style.Render(item.Label)
+		if systemWarning && item.Section == secSystem {
+			label = theme.RedDot.Render("●") + " " + label
+		}
 		if isCursor {
 			// Center "▸ Label" as one unit so the label stays where it is
 			// on rows without the cursor.
