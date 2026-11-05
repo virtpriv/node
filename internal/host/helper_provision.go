@@ -3,7 +3,6 @@ package host
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/paths"
@@ -112,51 +111,4 @@ func InstallHelperUnits() error {
 	logger.Install("helper socket enabled at %s (root:%s 0660)",
 		paths.HelperSocket, paths.AdminUser)
 	return nil
-}
-
-// SetupJournalAccess is the journal.access step: make journal
-// storage persistent (an audit trail that vanishes at reboot
-// is not much of a record) and let the admin user read it.
-func SetupJournalAccess() error {
-	// Persistent journald storage hinges on /var/log/journal
-	// existing (Storage=auto). Assert it on the actual box
-	// rather than trusting packaging defaults. The tmpfiles
-	// pass applies the packaged ownership and ACLs that make
-	// the systemd-journal group model work.
-	if _, err := os.Stat("/var/log/journal"); os.IsNotExist(err) {
-		if err := os.MkdirAll("/var/log/journal", 0o755); err != nil {
-			return fmt.Errorf("create /var/log/journal: %w", err)
-		}
-		if err := system.RunRoot("systemd-tmpfiles", "--create",
-			"--prefix", "/var/log/journal"); err != nil {
-			return err
-		}
-		if err := system.RunRoot("journalctl", "--flush"); err != nil {
-			return err
-		}
-		logger.Install("journald storage switched to persistent")
-	}
-
-	// systemd-journal membership grants read on ALL system
-	// journals, sshd's included. The TUI shows the node's service
-	// logs from them. Read-only: members cannot write or rewrite
-	// journal files. -aG, never -G: a bare -G REPLACES the
-	// supplementary group set.
-	if err := system.RunRoot("usermod", "-aG",
-		"systemd-journal", paths.AdminUser); err != nil {
-		return err
-	}
-	// Postcondition: the membership is really there.
-	out, err := system.RunOutput("id", "-nG", paths.AdminUser)
-	if err != nil {
-		return fmt.Errorf("verify group membership: %w", err)
-	}
-	for _, g := range strings.Fields(out) {
-		if g == "systemd-journal" {
-			return nil
-		}
-	}
-	return fmt.Errorf(
-		"%s is not in systemd-journal after usermod (groups: %s)",
-		paths.AdminUser, out)
 }

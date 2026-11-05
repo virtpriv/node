@@ -56,6 +56,7 @@ const (
 	checkNameSources   = "software comes only from Debian"
 	checkNameUpdates   = "every package gets Debian's security updates"
 	checkNameAptProxy  = "apt uses no proxy"
+	checkNameJournal   = "system logs can be kept on disk"
 )
 
 // detectHardware is a variable so tests can stand in for the machine.
@@ -142,6 +143,7 @@ func runPreflightChecks() ([]PreflightResult, host.SSHObservation) {
 		PreflightResult{checkNameSources, apt.Sources},
 		PreflightResult{checkNameUpdates, apt.Updates},
 		PreflightResult{checkNameAptProxy, apt.Proxy},
+		PreflightResult{checkNameJournal, host.CheckJournalStorage()},
 	)
 	obs, obsErr := host.ObserveInitialSSHState()
 	results = append(results,

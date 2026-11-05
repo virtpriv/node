@@ -115,13 +115,15 @@ type aptHost struct {
 
 func productionAptHost() aptHost { return aptHost{run: runAptTool} }
 
-// runAptTool runs one of Debian's tools in the C locale. When it fails, the
-// error carries the tool's own message, which names the file at fault.
+// runAptTool runs one of Debian's tools in the C locale, and systemd's tools
+// without colors or links, whatever the caller's environment asks. When it
+// fails, the error carries the tool's own message, which names the file at
+// fault.
 func runAptTool(name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), aptToolTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "SYSTEMD_COLORS=0", "SYSTEMD_URLIFY=0")
 	cmd.WaitDelay = 2 * time.Second
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
