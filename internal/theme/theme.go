@@ -188,17 +188,18 @@ var (
 // The node TUI's frame. The installer draws the same shape, so both read the
 // measurements here and the two cannot drift apart.
 //
-// From the top: the frame's border, the top bar, a line, then the sidebar
-// beside the content, a bottom row under the sidebar for the theme icon, and
-// the border. The sidebar holds the five sections, each SectionRows tall and
-// closed by a line, so its rows match the content's.
+// From the top, the frame has its border, the top bar, a line, the sidebar
+// beside the content, and the border. The sidebar holds the five sections,
+// each SectionRows tall and closed by a line, then the theme icon's row.
+// Screens draw in every row beside it, so their last row is the one just
+// above the frame's bottom border.
 const (
 	FrameWidth   = 82
 	SidebarWidth = 12
 	TopBarRows   = 2
 	SectionRows  = 5
-	ContentRows  = len(Sections) * (SectionRows + 1)
-	FrameHeight  = 1 + TopBarRows + 1 + ContentRows + 1 + 1
+	ContentRows  = len(Sections)*(SectionRows+1) + 1
+	FrameHeight  = 1 + TopBarRows + 1 + ContentRows + 1
 )
 
 // Sections are the sidebar's five sections, top to bottom.
