@@ -39,9 +39,9 @@ func (m Model) View() tea.View {
 	return v
 }
 
-// viewMain draws the frame: the top bar with the open tabs, the sidebar
-// beside the active screen, the theme toggle under the sidebar, and the help
-// line below. View centers it in the window.
+// viewMain draws the frame with the top bar and its open tabs, the sidebar
+// and the theme toggle beside the active screen, and the help line below.
+// View centers it in the window.
 func (m Model) viewMain() string {
 	insideW := tuiWidth - 2
 	sidebarW := theme.SidebarWidth
@@ -67,6 +67,8 @@ func (m Model) viewMain() string {
 		sideRows = append(sideRows, strings.Repeat("─", sidebarW))
 		sideLines = append(sideLines, true)
 	}
+	sideRows = append(sideRows, m.nav.ThemeIconCell(sidebarW))
+	sideLines = append(sideLines, false)
 
 	output := []string{
 		border.Render("╭" + strings.Repeat("─", insideW) + "╮"),
@@ -86,7 +88,6 @@ func (m Model) viewMain() string {
 		output = append(output, left+side+middle+clampLine(content, contentW)+border.Render("│"))
 	}
 	output = append(output,
-		border.Render("│")+m.nav.ThemeIconCell(sidebarW)+border.Render("│")+strings.Repeat(" ", contentW)+border.Render("│"),
 		border.Render("╰"+strings.Repeat("─", sidebarW)+"┴"+strings.Repeat("─", contentW)+"╯"),
 		centerInWidth(m.renderHelpBar(tuiWidth), tuiWidth))
 	if banner := m.renderNetworkBanner(); banner != "" {

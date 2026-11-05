@@ -317,10 +317,10 @@ func drawNodeUpdates(t *testing.T, ctx *ScreenContext, s *NodeUpdateScreen) (str
 	if len(rows) != theme.FrameHeight+1 || !strings.HasPrefix(rows[0], "╭") || !strings.HasPrefix(rows[theme.FrameHeight-1], "╰") {
 		t.Fatalf("frame is not %d rows:\n%s", theme.FrameHeight, strings.Join(rows, "\n"))
 	}
-	// The top border, the two rows of the top bar and the line under them
-	// come before the content rows.
+	// The screen's rows lie between the line under the top bar and the
+	// frame's bottom border, so a blank row under the screen counts too.
 	var content []string
-	for _, row := range rows[2+theme.TopBarRows : 2+theme.TopBarRows+theme.ContentRows] {
+	for _, row := range rows[2+theme.TopBarRows : theme.FrameHeight-1] {
 		if lipgloss.Width(row) != tuiWidth {
 			t.Fatalf("frame row is not %d columns: %q", tuiWidth, row)
 		}

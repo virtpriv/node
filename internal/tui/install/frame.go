@@ -16,10 +16,6 @@ const (
 	frameInside = theme.FrameWidth - 2
 	contentW    = frameInside - theme.SidebarWidth - 1
 	dialogW     = 54
-	// sideRows is the sidebar's height: the content's rows beside the five
-	// sections, then the row under them that the TUI uses for its theme
-	// toggle and the install leaves empty.
-	sideRows = theme.ContentRows + 1
 )
 
 // The opening animation, in frames of frameRate: the top bar's line runs
@@ -91,11 +87,12 @@ func dialog(title, desc string, body []string, buttons string) []string {
 	return append(out, row(""), edge("╰", "╯"))
 }
 
-// sidebar draws the TUI's sidebar for h rows at opening frame f: the five
-// sections, each closed by a line, then an empty row. lit shows the
-// section names in full color, otherwise they are faint. It returns the
-// sidebar cells, the divider column beside them and the rows of the section
-// lines, where the frame's left border joins them.
+// sidebar draws the TUI's sidebar for h rows at opening frame f. It holds the
+// five sections, each closed by a line, then the row where the TUI has its
+// theme icon, empty here. lit shows the section names in full color,
+// otherwise they are faint. It returns the sidebar cells, the divider column
+// beside them and the rows of the section lines, where the frame's left
+// border joins them.
 func sidebar(h, f int, lit bool) (cells, divider []string, sections map[int]bool) {
 	border := theme.FrameBorder
 	sections = map[int]bool{}
@@ -140,7 +137,7 @@ func sidebar(h, f int, lit bool) (cells, divider []string, sections map[int]bool
 // content into the TUI's shape, with the help line, already styled, below.
 func frame(bar []string, f int, lit bool, content []string, help string) string {
 	border := theme.FrameBorder
-	h := sideRows
+	h := theme.ContentRows
 	cells, divider, sections := sidebar(h, f, lit)
 	out := []string{border.Render("╭" + strings.Repeat("─", frameInside) + "╮")}
 	for _, b := range bar {
@@ -177,7 +174,7 @@ func frame(bar []string, f int, lit bool, content []string, help string) string 
 	}
 	out = append(out, border.Render("╰"+bottom+"╯"))
 	// The help line is padded on both sides to the frame's width, so
-	// centring the whole screen leaves it where it is.
+	// centering the whole screen leaves it where it is.
 	pad := max(0, (theme.FrameWidth-lipgloss.Width(help))/2)
 	out = append(out, strings.Repeat(" ", pad)+help+strings.Repeat(" ", max(0, theme.FrameWidth-pad-lipgloss.Width(help))))
 	return strings.Join(out, "\n")
