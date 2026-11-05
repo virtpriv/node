@@ -669,7 +669,7 @@ func buildInstallSteps(
 		// The unprivileged TUI uses fixed helper operations. The owner can
 		// separately authenticate with sudo for general host maintenance.
 		{Key: "journal.access",
-			Name: "Giving your " + paths.AdminUser + " user access to system logs",
+			Name: "Keeping system logs on disk for your " + paths.AdminUser + " user to read",
 			Fn:   host.SetupJournalAccess},
 		{Key: "helper.enable",
 			Name: "Starting the node's root helper",

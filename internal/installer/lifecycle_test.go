@@ -347,6 +347,7 @@ func TestProductionLifecycleEvidenceInventory(t *testing.T) {
 		paths.AdminSudoers,
 		paths.AptTor,
 		paths.AptSources,
+		paths.JournaldDropIn,
 		paths.BitcoinDir,
 		paths.BitcoinDataDir,
 		paths.BitcoindService,
