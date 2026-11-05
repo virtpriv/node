@@ -427,38 +427,14 @@ func (s *SystemHomeScreen) View(
 			svcLine += " " + theme.Dim.Render(stateText)
 		}
 		if name == "lnd" && status != nil &&
-			status.WalletState.Fresh() && status.WalletState.Value == lndrpc.WalletStateLocked {
-			svcLine += "  " + theme.Warning.Render("locked")
+			status.WalletState.Known() && status.WalletState.Value == lndrpc.WalletStateLocked {
+			// Shown while it sets the sidebar's dot, so the dot has a reason.
+			svcLine += "  " + theme.Warning.Render(observationText(status.WalletState, "locked"))
 		}
 
 		if s.svcPending != nil && s.svcPending.request.Service() == name {
 			svcLine += "  " +
 				theme.Dim.Render(servicePendingText(s.svcPending.request))
-		} else if isSelected && s.svcPending == nil {
-			// Standard service hints, dim
-			hint := theme.Dim.Render(
-				"  r restart  s stop  a start  l logs")
-			// LND-specific destructive hotkeys. The
-			// hotkey letter itself is rendered in red
-			// so users see they're sensitive, while
-			// the description stays dim.
-			if name == "lnd" &&
-				s.ctx.Cfg.P2PMode == "tor" {
-				hint += "  " +
-					theme.Warning.Render("p") +
-					theme.Dim.Render(" p2p")
-			}
-			if name == "lnd" &&
-				s.ctx.walletExists() {
-				uLabel := " unlock"
-				if s.ctx.Cfg.AutoUnlock {
-					uLabel = " lock"
-				}
-				hint += "  " +
-					theme.Warning.Render("u") +
-					theme.Dim.Render(uLabel)
-			}
-			svcLine += hint
 		}
 
 		svcVis := lipgloss.Width(svcLine)
@@ -495,6 +471,21 @@ func (s *SystemHomeScreen) View(
 			"└"+strings.Repeat("─", boxW-2)+"┘"))
 
 	midLines = append(midLines, "")
+
+	// Security updates card, shown only while it has something to say.
+	if status != nil {
+		if lines := securityUpdatesLines(status, time.Now()); len(lines) > 0 {
+			midLines = append(midLines,
+				"  "+border.Render("┌"+strings.Repeat("─", boxW-2)+"┐"),
+				"  "+border.Render("│")+pad(titleStyle.Render(" Security updates"), boxW-2)+border.Render("│"))
+			for _, line := range lines {
+				midLines = append(midLines, "  "+border.Render("│")+pad(clampLine(" "+line, boxW-2), boxW-2)+border.Render("│"))
+			}
+			midLines = append(midLines,
+				"  "+border.Render("└"+strings.Repeat("─", boxW-2)+"┘"),
+				"")
+		}
+	}
 
 	// Resources card
 	midLines = append(midLines,
@@ -535,12 +526,6 @@ func (s *SystemHomeScreen) View(
 				" "+theme.Label.Render("LND:  ")+
 					theme.Value.Render(
 						observationText(status.LNDSize, status.LNDSize.Value)))
-		}
-		resRows = append(resRows, securityUpdatesRow(status.Updates, time.Now()))
-		if status.Reboot.Value {
-			resRows = append(resRows,
-				" "+theme.Warning.Render(
-					observationText(status.Reboot, "⚠ Reboot required")))
 		}
 
 		for _, rl := range resRows {
@@ -750,7 +735,7 @@ func (s *SystemHomeScreen) buttonActions() []sysBtn {
 	// after a reboot, failed startup, or a completed VPN binary replacement.
 	actions := []sysBtn{sysBtnUpdates, sysBtnAccounts, sysBtnSettings}
 	if s.rebootPending != nil || s.rebootAccepted ||
-		(s.ctx.Status != nil && s.ctx.Status.Reboot.Value) {
+		(s.ctx.Status != nil && s.ctx.Status.Reboot.Value.Required) {
 		actions = append(actions, sysBtnReboot)
 	}
 	return actions
@@ -794,20 +779,65 @@ func (s *SystemHomeScreen) svcName(i int) string {
 	return ""
 }
 
-// securityUpdatesRow is the Resources card's line about Debian's automatic
-// security updates. It warns once a run is overdue.
-func securityUpdatesRow(o app.Observation[system.SecurityUpdates], now time.Time) string {
-	label := " " + theme.Label.Render("Security updates: ")
-	if !o.Known() {
-		return label + theme.Value.Render(observationText(o, ""))
+// securityUpdatesLines are the Security updates card's lines, none on a
+// normal day. Each is something the owner may act on. Red marks what sets the
+// sidebar's dot.
+func securityUpdatesLines(status *statusSnapshot, now time.Time) []string {
+	var lines []string
+
+	if u := status.Updates; u.Known() {
+		if state, since := app.SecurityUpdatesStatus(u.Value, now); state == app.SecurityUpdatesOverdue {
+			days := int(now.Sub(since) / (24 * time.Hour))
+			lines = append(lines, theme.Warning.Render(observationText(u, fmt.Sprintf("No updates for %d days", days))),
+				"", theme.Value.Render("Select Updates, then Update Packages, to install them now."))
+		}
 	}
-	state, since := app.SecurityUpdatesStatus(o.Value, now)
-	when := since.Local().Format("2 Jan 15:04")
-	switch state {
-	case app.SecurityUpdatesOverdue:
-		return " " + theme.Warning.Render(observationText(o, "⚠ Security updates: none since "+when))
-	case app.SecurityUpdatesNotRunYet:
-		return label + theme.Value.Render(observationText(o, "not run yet"))
+
+	if r := status.Reboot; r.Known() && r.Value.Required {
+		if app.RebootLate(r.Value, now) {
+			lines = append(lines, theme.Warning.Render(observationText(r, "Reboot required. The node did not reboot by itself.")),
+				"", theme.Value.Render("Select Reboot to do it now."))
+		} else {
+			// The nightly run reboots the machine right after it. Without its
+			// time, the line says only that a reboot is required.
+			line := "Reboot required"
+			if status.Timers.Known() {
+				for _, t := range status.Timers.Value {
+					if t.Name == "apt-daily-upgrade.timer" && t.State == system.AptTimerRunning && !t.Next.IsZero() {
+						line += ", automatic " + inHours(t.Next.Sub(now))
+					}
+				}
+			}
+			lines = append(lines, theme.Value.Render(observationText(r, line)))
+		}
 	}
-	return label + theme.Value.Render(observationText(o, "last run "+when))
+
+	if status.Timers.Known() {
+		var off []string
+		for _, t := range status.Timers.Value {
+			if t.State != system.AptTimerRunning {
+				off = append(off, t.Name)
+			}
+		}
+		if len(off) > 0 {
+			lines = append(lines, theme.Warning.Render(observationText(status.Timers, "Security updates are off")),
+				theme.Value.Render("To turn them on, quit and run:"), "")
+			for _, name := range off {
+				lines = append(lines, theme.Value.Render("sudo systemctl enable --now "+name))
+			}
+		}
+	}
+	return lines
+}
+
+// inHours says how far ahead a time is, to the nearest hour.
+func inHours(d time.Duration) string {
+	switch h := int(d.Round(time.Hour).Hours()); {
+	case d < time.Hour:
+		return "in under an hour"
+	case h == 1:
+		return "in ~1 hour"
+	default:
+		return fmt.Sprintf("in ~%d hours", h)
+	}
 }

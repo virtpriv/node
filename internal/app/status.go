@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"time"
 
@@ -57,8 +58,9 @@ type StatusSnapshot struct {
 	Memory      Observation[system.MemInfo]
 	Bitcoin     Observation[bitcoin.BlockchainInfo]
 	LNDSize     Observation[string]
-	Reboot      Observation[bool]
+	Reboot      Observation[system.RebootFlag]
 	Updates     Observation[system.SecurityUpdates]
+	Timers      Observation[[]system.AptTimer]
 	PublicIP    Observation[string]
 	WalletState Observation[lndrpc.WalletState]
 	Node        Observation[lndrpc.NodeInfo]
@@ -85,6 +87,7 @@ func (s StatusSnapshot) Retain(previous StatusSnapshot) StatusSnapshot {
 	s.LNDSize = retain(s.LNDSize, previous.LNDSize)
 	s.Reboot = retain(s.Reboot, previous.Reboot)
 	s.Updates = retain(s.Updates, previous.Updates)
+	s.Timers = retain(s.Timers, previous.Timers)
 	s.PublicIP = retain(s.PublicIP, previous.PublicIP)
 	s.WalletState = retain(s.WalletState, previous.WalletState)
 	s.Node = retain(s.Node, previous.Node)
@@ -107,8 +110,9 @@ type statusSources struct {
 	memory   func() (system.MemInfo, error)
 	bitcoin  func(context.Context, int) (bitcoin.BlockchainInfo, error)
 	size     func(context.Context) (string, error)
-	reboot   func() (bool, error)
+	reboot   func() (system.RebootFlag, error)
 	updates  func() (system.SecurityUpdates, error)
+	timers   func(context.Context) ([]system.AptTimer, error)
 	publicIP func(context.Context) (string, error)
 }
 
@@ -140,7 +144,8 @@ func NewStatusCollector() *StatusCollector {
 	return &StatusCollector{ctx: ctx, cancel: cancel, sources: statusSources{
 		service: readNodeService, disk: system.ReadDisk,
 		memory: system.ReadMemory, bitcoin: bitcoin.GetBlockchainInfo,
-		reboot: system.ReadRebootRequired, publicIP: system.ReadPublicIPv4,
+		reboot: system.ReadRebootFlag, publicIP: system.ReadPublicIPv4,
+		timers: system.ReadAptTimers,
 		updates: func() (system.SecurityUpdates, error) {
 			return system.ReadSecurityUpdates(paths.AutoUpgrades)
 		},
@@ -219,6 +224,7 @@ func (c *StatusCollector) Collect(cfg config.AppConfig, walletExists bool, clien
 	wg.Go(func() { s.Memory = observe(c.sources.memory()) })
 	wg.Go(func() { s.Reboot = observe(c.sources.reboot()) })
 	wg.Go(func() { s.Updates = observe(c.sources.updates()) })
+	wg.Go(func() { s.Timers = observe(c.sources.timers(ctx)) })
 	wg.Go(func() {
 		profile, err := cfg.NetworkConfig()
 		if err != nil {
@@ -313,4 +319,42 @@ func SecurityUpdatesStatus(u system.SecurityUpdates, now time.Time) (SecurityUpd
 		return SecurityUpdatesOverdue, u.LastRun
 	}
 	return SecurityUpdatesCurrent, u.LastRun
+}
+
+// rebootLateAfter is when a standing restart flag is late. The nightly run
+// restarts the machine right after it, and Debian's timer starts the run once
+// a day at 6:00 with up to an hour's random delay. So the longest normal wait
+// is about 25 hours, plus the run itself through Tor.
+const rebootLateAfter = 30 * time.Hour
+
+// RebootLate reports whether the flag has stood longer than a nightly run
+// should take to act on it.
+func RebootLate(f system.RebootFlag, now time.Time) bool {
+	return f.Required && now.Sub(f.Since) > rebootLateAfter
+}
+
+// SystemWarning reports whether the owner should look at System. That is
+// when no nightly run succeeded for 48 hours, a nightly timer is off or
+// stopped, a service stopped, LND is locked, or a restart is late. A restart
+// that waits for the next night leaves the owner nothing to do. Each reading
+// counts by its last known value, so a failed read keeps a warning it
+// showed, and one never read sets none.
+func (s StatusSnapshot) SystemWarning(now time.Time) bool {
+	if s.Updates.Known() {
+		if state, _ := SecurityUpdatesStatus(s.Updates.Value, now); state == SecurityUpdatesOverdue {
+			return true
+		}
+	}
+	if s.Timers.Known() && slices.ContainsFunc(s.Timers.Value, func(t system.AptTimer) bool { return t.State != system.AptTimerRunning }) {
+		return true
+	}
+	for _, o := range s.Services {
+		if o.Known() && !o.Value {
+			return true
+		}
+	}
+	if s.WalletState.Known() && s.WalletState.Value == lndrpc.WalletStateLocked {
+		return true
+	}
+	return s.Reboot.Known() && RebootLate(s.Reboot.Value, now)
 }

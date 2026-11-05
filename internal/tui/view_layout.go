@@ -3,6 +3,7 @@ package tui
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -57,7 +58,8 @@ func (m Model) viewMain() string {
 	// The sidebar: each section's box, closed by a line.
 	var sideRows []string
 	var sideLines []bool
-	for _, block := range m.nav.BlockRows(sidebarW) {
+	warning := m.screenCtx.Status != nil && m.screenCtx.Status.SystemWarning(time.Now())
+	for _, block := range m.nav.BlockRows(sidebarW, warning) {
 		for _, row := range block {
 			sideRows = append(sideRows, row)
 			sideLines = append(sideLines, false)

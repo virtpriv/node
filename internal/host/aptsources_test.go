@@ -34,6 +34,7 @@ type fakeAptMachine struct {
 	pkgs    []string          // dpkg-query lines, each status, package and version
 	env     []string          // systemctl show-environment lines
 	timers  map[string]string // the nightly timers' UnitFileState
+	active  map[string]string // their ActiveState, left out when missing
 }
 
 type fakeTarget struct {
@@ -59,6 +60,8 @@ func newFakeApt(t *testing.T) *fakeAptMachine {
 	m.env = []string{"LANG=C.UTF-8", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"}
 	m.timers = map[string]string{"apt-daily.timer": "enabled", "apt-daily-upgrade.timer": "enabled",
 		"apt-daily.service": "static", "apt-daily-upgrade.service": "static"}
+	m.active = map[string]string{"apt-daily.timer": "active", "apt-daily-upgrade.timer": "active",
+		"apt-daily.service": "inactive", "apt-daily-upgrade.service": "inactive"}
 	return m
 }
 
@@ -201,11 +204,30 @@ func (m *fakeAptMachine) run(name string, args ...string) (string, error) {
 		if args[0] != "show" {
 			return strings.Join(m.env, "\n"), nil
 		}
+		// systemctl show prints only the properties asked for.
+		var props []string
+		for _, a := range args {
+			if list, ok := strings.CutPrefix(a, "--property="); ok {
+				props = strings.Split(list, ",")
+			}
+		}
 		var blocks []string
 		for _, a := range args {
-			if state, ok := m.timers[a]; ok {
-				blocks = append(blocks, "Id="+a+"\nUnitFileState="+state)
+			state, ok := m.timers[a]
+			if !ok {
+				continue
 			}
+			values := map[string]string{"Id": a, "UnitFileState": state}
+			if v, ok := m.active[a]; ok {
+				values["ActiveState"] = v
+			}
+			var lines []string
+			for _, p := range props {
+				if v, ok := values[p]; ok {
+					lines = append(lines, p+"="+v)
+				}
+			}
+			blocks = append(blocks, strings.Join(lines, "\n"))
 		}
 		return strings.Join(blocks, "\n\n"), nil
 	}
@@ -552,6 +574,15 @@ func TestAptUpdatesRefusesADisabledTimer(t *testing.T) {
 	m.debianImage()
 	m.timers["apt-daily.timer"] = "disabled"
 	wantRefused(t, m.baseline().Updates, "apt-daily.timer")
+}
+
+// systemd always prints a timer's ActiveState, so a node never shows this. A
+// timer whose running state cannot be read is refused, not passed.
+func TestAptUpdatesRefusesAnUnreadableTimerState(t *testing.T) {
+	m := newFakeApt(t)
+	m.debianImage()
+	delete(m.active, "apt-daily-upgrade.timer")
+	wantRefused(t, m.baseline().Updates, "cannot read the nightly update timers")
 }
 
 func TestAptUpdatesRefusesBackportsPackages(t *testing.T) {

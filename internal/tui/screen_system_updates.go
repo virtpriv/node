@@ -108,9 +108,9 @@ func (s *UpdatesScreen) View(w, _ int) string {
 		p.blank()
 		p.valueWrap(s.home.pkgResult)
 	}
-	if status := s.ctx.Status; status != nil && status.Reboot.Fresh() && status.Reboot.Value {
+	if status := s.ctx.Status; status != nil && status.Reboot.Fresh() && status.Reboot.Value.Required {
 		p.blank()
-		p.line(" A reboot is needed. Select Reboot on the System tab.")
+		p.line(" A reboot is required. Select Reboot on the System tab.")
 	}
 	return p.render()
 }

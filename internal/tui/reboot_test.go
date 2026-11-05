@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/system"
 )
 
 type rebootsStub struct {
@@ -31,7 +32,7 @@ func TestRebootHiddenCompletionRetryAndDuplicateAdmission(t *testing.T) {
 	m.focusContent()
 	s := NewSystemHomeScreen(m.screenCtx)
 	m.sectionScreens[secSystem] = s
-	m.screenCtx.Status = &app.StatusSnapshot{Reboot: freshStatus(true)}
+	m.screenCtx.Status = &app.StatusSnapshot{Reboot: freshStatus(system.RebootFlag{Required: true})}
 	m.statusScope = m.currentStatusScope()
 	s.btnIdx = slices.Index(s.buttonActions(), sysBtnReboot)
 	m.sectionScreens[secAddons] = NewAddonsHomeScreen(m.screenCtx)
@@ -128,7 +129,7 @@ func TestRebootRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 	s := NewSystemHomeScreen(m.screenCtx)
 	m.sectionScreens[secSystem] = s
 	m.statusScope = m.currentStatusScope()
-	m.screenCtx.Status = &app.StatusSnapshot{Reboot: freshStatus(true), Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
+	m.screenCtx.Status = &app.StatusSnapshot{Reboot: freshStatus(system.RebootFlag{Required: true}), Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
 	s.btnIdx = slices.Index(s.buttonActions(), sysBtnReboot)
 	before, beforeDone := startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
 	statusUpdate(&m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -140,7 +141,7 @@ func TestRebootRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 	if tor := m.screenCtx.Status.Services["tor"]; !tor.Known() || !tor.Value {
 		t.Fatal("invalidation discarded the last observed service state")
 	}
-	before.result <- app.StatusSnapshot{Reboot: freshStatus(true), Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
+	before.result <- app.StatusSnapshot{Reboot: freshStatus(system.RebootFlag{Required: true}), Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
 	during, duringDone := startStatusCommand(t, statusUpdate(&m, <-beforeDone), reader)
 	if m.screenCtx.Status.Reboot.Fresh() {
 		t.Fatal("pre-request read published")
@@ -149,16 +150,16 @@ func TestRebootRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 	if statusUpdate(&m, resultCmd()) != nil {
 		t.Fatal("completion started overlapping status collector")
 	}
-	during.result <- app.StatusSnapshot{Reboot: freshStatus(true), Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
+	during.result <- app.StatusSnapshot{Reboot: freshStatus(system.RebootFlag{Required: true}), Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
 	after, afterDone := startStatusCommand(t, statusUpdate(&m, <-duringDone), reader)
 	if m.screenCtx.Status.Reboot.Fresh() {
 		t.Fatal("read predating completion published")
 	}
-	after.result <- app.StatusSnapshot{Reboot: freshStatus(false), Services: map[string]app.Observation[bool]{"tor": freshStatus(false)}}
+	after.result <- app.StatusSnapshot{Reboot: freshStatus(system.RebootFlag{}), Services: map[string]app.Observation[bool]{"tor": freshStatus(false)}}
 	if statusUpdate(&m, <-afterDone) != nil {
 		t.Fatal("refresh did not coalesce")
 	}
-	if !m.screenCtx.Status.Reboot.Fresh() || m.screenCtx.Status.Reboot.Value ||
+	if !m.screenCtx.Status.Reboot.Fresh() || m.screenCtx.Status.Reboot.Value.Required ||
 		!m.screenCtx.Status.Services["tor"].Fresh() || m.screenCtx.Status.Services["tor"].Value {
 		t.Fatal("post-request observation did not recover")
 	}
@@ -187,7 +188,7 @@ func TestRebootRejectsReplacedScreenRequestsAndResults(t *testing.T) {
 	}
 	m.sectionScreens[secSystem] = replacement
 	m.statusScope = m.currentStatusScope()
-	m.screenCtx.Status = &app.StatusSnapshot{Reboot: freshStatus(false)}
+	m.screenCtx.Status = &app.StatusSnapshot{Reboot: freshStatus(system.RebootFlag{})}
 	fake.results <- app.RebootResult{Outcome: app.RebootAccepted}
 	if statusUpdate(&m, resultCmd()) != nil || !m.screenCtx.Status.Reboot.Fresh() {
 		t.Fatal("retired owner result invalidated current status")

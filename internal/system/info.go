@@ -4,6 +4,7 @@ package system
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -116,12 +118,112 @@ func ReadServiceState(ctx context.Context, name string) (string, error) {
 	}
 }
 
-func ReadRebootRequired() (bool, error) {
-	_, err := os.Stat("/var/run/reboot-required")
+// The restart flag Debian's tools read, in the form Debian's own kernel hook
+// writes it. The flag is an empty file, and the .pkgs file beside it lists
+// one name per line. unattended-upgrades restarts the machine when the flag
+// exists. Debian's hook and vpn's reboot check add the names, which only
+// support reads. The screen shows the flag and its time.
+const (
+	RebootRequiredFlag = "/var/run/reboot-required"
+	RebootRequiredPkgs = "/var/run/reboot-required.pkgs"
+)
+
+// RebootFlag is the restart flag. Since is the flag file's time.
+type RebootFlag struct {
+	Required bool
+	Since    time.Time
+}
+
+// ReadRebootFlag reads the restart flag, which every account can read.
+func ReadRebootFlag() (RebootFlag, error) {
+	info, err := os.Stat(RebootRequiredFlag)
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return RebootFlag{}, nil
 	}
-	return err == nil, err
+	if err != nil {
+		return RebootFlag{}, err
+	}
+	return RebootFlag{Required: true, Since: info.ModTime()}, nil
+}
+
+// AptTimers are Debian's two timers that start the nightly update.
+var AptTimers = []string{"apt-daily.timer", "apt-daily-upgrade.timer"}
+
+// AptTimerProperties are the systemctl show properties JudgeAptTimer needs,
+// with Id to name each record.
+const AptTimerProperties = "Id,UnitFileState,ActiveState"
+
+// AptTimerState is how one of AptTimers stands.
+type AptTimerState int
+
+const (
+	// AptTimerRunning is switched on and waiting for its next run.
+	AptTimerRunning AptTimerState = iota
+	// AptTimerOff is a timer not switched on, so it does not start again
+	// after a restart.
+	AptTimerOff
+	// AptTimerStopped is switched on but not running now. A restart starts it.
+	AptTimerStopped
+)
+
+// JudgeAptTimer reads one timer's record from systemctl show. systemd always
+// prints a timer's ActiveState, so a record without one cannot be judged.
+func JudgeAptTimer(unit map[string]string) (AptTimerState, error) {
+	active, ok := unit["ActiveState"]
+	if !ok {
+		return 0, errors.New("cannot read the nightly update timers")
+	}
+	switch {
+	case unit["UnitFileState"] != "enabled":
+		return AptTimerOff, nil
+	case active != "active":
+		return AptTimerStopped, nil
+	}
+	return AptTimerRunning, nil
+}
+
+// AptTimer is one of AptTimers. Next is when it next runs, zero when unknown.
+type AptTimer struct {
+	Name  string
+	State AptTimerState
+	Next  time.Time
+}
+
+// ReadAptTimers reads the two timers, which every account can read.
+func ReadAptTimers(ctx context.Context) ([]AptTimer, error) {
+	units, err := ReadUnitProperties(ctx, AptTimers, "UnitFileState", "ActiveState")
+	if err != nil {
+		return nil, err
+	}
+	timers := make([]AptTimer, 0, len(AptTimers))
+	for _, name := range AptTimers {
+		state, err := JudgeAptTimer(units[name])
+		if err != nil {
+			return nil, err
+		}
+		timers = append(timers, AptTimer{Name: name, State: state})
+	}
+	// systemctl show prints the next run as a date whatever --timestamp
+	// says, so it comes from list-timers, which gives microseconds, or null
+	// when there is none. The time only adds to the screen, so a failed
+	// read leaves it unknown and keeps the states.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "systemctl", append([]string{"list-timers", "--all", "--output=json"}, AptTimers...)...)
+	cmd.WaitDelay = 2 * time.Second
+	var listed []struct {
+		Next *int64 `json:"next"`
+		Unit string `json:"unit"`
+	}
+	if out, err := cmd.Output(); err != nil || json.Unmarshal(out, &listed) != nil {
+		return timers, nil
+	}
+	for _, l := range listed {
+		if i := slices.Index(AptTimers, l.Unit); i >= 0 && l.Next != nil && *l.Next > 0 {
+			timers[i].Next = time.UnixMicro(*l.Next)
+		}
+	}
+	return timers, nil
 }
 
 // DirSize measures the disk space a directory tree uses, with du, and

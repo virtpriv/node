@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/virtpriv/node/internal/system"
 )
 
 // The node checks show the reboot check reading a real machine. These cases
@@ -142,7 +144,7 @@ func TestRebootFlagKeepsDebiansFormAndNamesEachReasonOnce(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "/var/run"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, rebootRequiredPkgs), []byte("linux-image-6.12.115+deb13-cloud-amd64\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, system.RebootRequiredPkgs), []byte("linux-image-6.12.115+deb13-cloud-amd64\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	h := rebootHost{root: root}
@@ -155,11 +157,11 @@ func TestRebootFlagKeepsDebiansFormAndNamesEachReasonOnce(t *testing.T) {
 	if again, err := h.raise(reasons); err != nil || len(again) != 0 {
 		t.Fatalf("a second raise added %v, error %v", again, err)
 	}
-	data, _ := os.ReadFile(filepath.Join(root, rebootRequiredPkgs))
+	data, _ := os.ReadFile(filepath.Join(root, system.RebootRequiredPkgs))
 	if got := strings.Fields(string(data)); !slices.Equal(got, []string{"linux-image-6.12.115+deb13-cloud-amd64", "ssh.service"}) {
 		t.Fatalf("reboot-required.pkgs holds %q", got)
 	}
-	if flag, err := os.ReadFile(filepath.Join(root, rebootRequiredFlag)); err != nil || len(flag) != 0 {
+	if flag, err := os.ReadFile(filepath.Join(root, system.RebootRequiredFlag)); err != nil || len(flag) != 0 {
 		t.Fatalf("reboot-required holds %q, error %v, want it empty as Debian leaves it", flag, err)
 	}
 }

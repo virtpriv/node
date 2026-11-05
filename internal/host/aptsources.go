@@ -89,9 +89,6 @@ Signed-By: ` + debianKeyring + `
 // whatever they hold is replaced, and on a resumed install they are vpn's.
 var vpnAptSettingFiles = []string{paths.AptTor, paths.AutoUpgrades, paths.UnattendedUpgrades, paths.AptRebootCheck}
 
-// debianAptTimers start Debian's nightly job, debianAptJobUnits are the job.
-var debianAptTimers = []string{"apt-daily.timer", "apt-daily-upgrade.timer"}
-
 // AptBaseline is the preflight's three apt answers. A nil error passes.
 type AptBaseline struct {
 	Sources, Updates, Proxy error
@@ -964,17 +961,27 @@ func (h aptHost) checkUpdates(settings aptSettingFiles) error {
 	}
 
 	// The nightly job runs from Debian's two apt timers. Only an enabled
-	// timer starts again after a reboot. The job's own units have no install
-	// section, so they are never enabled, but a masked one never runs.
-	units := append(slices.Clone(debianAptTimers), debianAptJobUnits...)
-	states, err := h.run("systemctl", append([]string{"show", "--property=Id,UnitFileState"}, units...)...)
+	// timer starts again after a restart, and only a running one starts the
+	// job before it. The job's own units have no install section, so they
+	// are never enabled, but a masked one never runs.
+	units := append(slices.Clone(system.AptTimers), debianAptJobUnits...)
+	states, err := h.run("systemctl", append([]string{"show", "--property=" + system.AptTimerProperties}, units...)...)
 	if err != nil {
 		f.add("cannot read the nightly update timers: %v", err)
 	} else {
 		parsed := system.ParseUnitProperties(states)
-		for _, unit := range units {
-			state := parsed[unit]["UnitFileState"]
-			if (slices.Contains(debianAptTimers, unit) && state != "enabled") || strings.HasPrefix(state, "masked") {
+		for _, timer := range system.AptTimers {
+			switch state, err := system.JudgeAptTimer(parsed[timer]); {
+			case err != nil:
+				f.add("%v", err)
+			case state == system.AptTimerOff:
+				f.add("found %s switched off, which stops the nightly updates", timer)
+			case state == system.AptTimerStopped:
+				f.add("found %s stopped, which stops the nightly updates", timer)
+			}
+		}
+		for _, unit := range debianAptJobUnits {
+			if strings.HasPrefix(parsed[unit]["UnitFileState"], "masked") {
 				f.add("found %s switched off, which stops the nightly updates", unit)
 			}
 		}

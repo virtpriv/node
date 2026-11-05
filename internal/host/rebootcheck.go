@@ -14,14 +14,6 @@ import (
 	"github.com/virtpriv/node/internal/system"
 )
 
-// The flag Debian's tools read, in the form Debian's own kernel hook writes
-// it: an empty file, and one name per line in the .pkgs file beside it.
-// unattended-upgrades reboots when the first exists.
-const (
-	rebootRequiredFlag = "/var/run/reboot-required"
-	rebootRequiredPkgs = "/var/run/reboot-required.pkgs"
-)
-
 // rebootCheckUnits are the services that run programs from Debian's packages
 // and keep running across an update. LND and vpn's helper are built with no
 // outside libraries, so Debian's updates never leave them on old code.
@@ -219,16 +211,16 @@ func (h rebootHost) raise(reasons []rebootReason) ([]rebootReason, error) {
 	if len(reasons) == 0 {
 		return nil, nil
 	}
-	flag, err := os.OpenFile(h.path(rebootRequiredFlag), os.O_WRONLY|os.O_CREATE, 0o644)
+	flag, err := os.OpenFile(h.path(system.RebootRequiredFlag), os.O_WRONLY|os.O_CREATE, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("cannot raise the restart flag: %w", unwrapPath(err))
 	}
 	if err := flag.Close(); err != nil {
 		return nil, fmt.Errorf("cannot raise the restart flag: %w", err)
 	}
-	data, err := os.ReadFile(h.path(rebootRequiredPkgs))
+	data, err := os.ReadFile(h.path(system.RebootRequiredPkgs))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("cannot read %s: %w", rebootRequiredPkgs, unwrapPath(err))
+		return nil, fmt.Errorf("cannot read %s: %w", system.RebootRequiredPkgs, unwrapPath(err))
 	}
 	listed := strings.Fields(string(data))
 	var added []rebootReason
@@ -247,16 +239,16 @@ func (h rebootHost) raise(reasons []rebootReason) ([]rebootReason, error) {
 	if len(added) == 0 {
 		return nil, nil
 	}
-	pkgs, err := os.OpenFile(h.path(rebootRequiredPkgs), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	pkgs, err := os.OpenFile(h.path(system.RebootRequiredPkgs), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
-		return nil, fmt.Errorf("cannot write %s: %w", rebootRequiredPkgs, unwrapPath(err))
+		return nil, fmt.Errorf("cannot write %s: %w", system.RebootRequiredPkgs, unwrapPath(err))
 	}
 	if _, err := pkgs.WriteString(lines.String()); err != nil {
 		pkgs.Close()
-		return nil, fmt.Errorf("cannot write %s: %w", rebootRequiredPkgs, err)
+		return nil, fmt.Errorf("cannot write %s: %w", system.RebootRequiredPkgs, err)
 	}
 	if err := pkgs.Close(); err != nil {
-		return nil, fmt.Errorf("cannot write %s: %w", rebootRequiredPkgs, err)
+		return nil, fmt.Errorf("cannot write %s: %w", system.RebootRequiredPkgs, err)
 	}
 	return added, nil
 }
