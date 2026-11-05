@@ -789,7 +789,7 @@ func securityUpdatesLines(status *statusSnapshot, now time.Time) []string {
 		if state, since := app.SecurityUpdatesStatus(u.Value, now); state == app.SecurityUpdatesOverdue {
 			days := int(now.Sub(since) / (24 * time.Hour))
 			lines = append(lines, theme.Warning.Render(observationText(u, fmt.Sprintf("No updates for %d days", days))),
-				theme.Value.Render("Update Packages shows why."))
+				"", theme.Value.Render("Select Updates, then Update Packages, to install them now."))
 		}
 	}
 
