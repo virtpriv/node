@@ -46,7 +46,12 @@ func TestTLSBoardPublicationFailurePreservesPreviousCredential(t *testing.T) {
 	cert := stagingCertificate(t)
 	failure := errors.New("injected rename failure")
 	synctest.Test(t, func(t *testing.T) {
-		err := stageLNDTLSCert("source", func(string) ([]byte, error) { return cert, nil }, func(data []byte) error {
+		err := stageLNDTLSCert("source", "key", func(path string) ([]byte, error) {
+			if path == "key" {
+				return []byte("-----BEGIN EC PRIVATE KEY-----\n"), nil
+			}
+			return cert, nil
+		}, func() error { return nil }, func(data []byte) error {
 			return b.write("cert", data, func(tmp, dst string) error {
 				assertBoardMetadata(t, tmp, 0o640)
 				previous, err := os.ReadFile(dst)
