@@ -484,9 +484,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.completeStatus(msg)
 		return m, cmd
 	case latestVersionMsg:
-		m.latestVersion = string(msg)
 		m.screenCtx.LatestVersion = string(msg)
 		m.screenCtx.LatestChecked = true
+		if msg == "" {
+			return m, retryLatestVersionCmd()
+		}
 		return m, nil
 	case connectionInfoResultMsg:
 		return m, m.completeConnectionInfo(msg)
@@ -1004,7 +1006,7 @@ func (m Model) handleTabBarKey(
 		if m.tabCursorX == 1 && m.activeTab > 0 {
 			return m.closeTab(m.activeTab)
 		}
-		// Enter on tab label: focus content
+		// Enter on a tab label focuses its content.
 		m.focusContent()
 		if m.activeTab == 0 {
 			m.subview = svNone
@@ -1244,7 +1246,7 @@ func (m Model) routeToScreen(kind tabKind, msg tea.Msg) (Model, tea.Cmd, bool) {
 // shape every Update-switch arm needs. If no matching tab
 // is open, returns (m, nil) and the msg is dropped.
 //
-// This is the boilerplate collapsed: any async message
+// This is the boilerplate collapsed. Any async message
 // whose only job is "deliver to the screen that started
 // the work" uses this. Pre-routing state mutations do NOT
 // go here. Those stay inline in Update so ordering stays

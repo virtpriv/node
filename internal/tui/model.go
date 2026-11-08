@@ -207,7 +207,6 @@ type Model struct {
 	// section home screens (nil = legacy path)
 	sectionScreens [numSections]Screen
 
-	latestVersion   string
 	statusCollector statusReader
 	statusActive    *statusRequest
 	statusPending   bool
