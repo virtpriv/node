@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/virtpriv/node/internal/logger"
@@ -157,31 +158,60 @@ const aptRebootCheckHook = `// Virtual Private Node checks after each package ch
 DPkg::Post-Invoke {"if [ -x ` + paths.BinaryPath + ` ]; then ` + paths.BinaryPath + ` reboot-check || true; fi";};
 `
 
-// InstallFail2ban installs the SSH intrusion-prevention service, once
-// Debian's own job is not running.
+// InstallFail2ban installs the SSH intrusion-prevention service and
+// nftables, once Debian's own job is not running. Debian's fail2ban bans
+// through nft, which only the nftables package brings. fail2ban merely
+// recommends it, so a host that already has iptables gets none, and its bans
+// would be recorded but never enforced. nftables' own service stays off.
 func InstallFail2ban() error {
 	job := newDebianAptJob()
-	return job.run(func() error { return installPackages(job, "fail2ban") })
+	return job.run(func() error { return installPackages(job, "fail2ban", "nftables") })
 }
 
-// ConfigureFail2ban writes the initial SSH jail and starts the service.
+var (
+	observeSSHForFail2ban = ObserveInitialSSHState
+	writeFail2banJail     = func(content []byte) error {
+		return system.WriteFileRoot(paths.Fail2banJail, content, 0644)
+	}
+	runFail2banCommand = func(args ...string) error {
+		return system.RunRoot(args[0], args[1:]...)
+	}
+)
+
+// ConfigureFail2ban writes the SSH jail and starts the service. A ban covers
+// every port sshd listens on, observed right before the write as the firewall
+// step does, so a failed observation writes nothing. A port added after the
+// install is not covered, as it is not opened in the firewall either.
 func ConfigureFail2ban() error {
-	content := `# Virtual Private Node, stricter SSH login protection.
+	obs, err := observeSSHForFail2ban()
+	if err != nil {
+		return fmt.Errorf("observe SSH ports before fail2ban setup: %w", err)
+	}
+	if err := writeFail2banJail([]byte(fail2banJail(obs.Ports))); err != nil {
+		return err
+	}
+	if err := runFail2banCommand("systemctl", "enable", "fail2ban"); err != nil {
+		return err
+	}
+	return runFail2banCommand("systemctl", "restart", "fail2ban")
+}
+
+// fail2banJail names the ban action InstallFail2ban guarantees and lists the
+// ports comma separated, the form the action turns into one nft port set.
+func fail2banJail(sshPorts []int) string {
+	ports := make([]string, len(sshPorts))
+	for i, p := range sshPorts {
+		ports[i] = strconv.Itoa(p)
+	}
+	return `# Virtual Private Node, stricter SSH login protection.
+# Bans go through nftables, on every port sshd listened on at install.
 [sshd]
 enabled = true
 mode = aggressive
-port = ssh
+banaction = nftables
+port = ` + strings.Join(ports, ",") + `
 maxretry = 5
 findtime = 600
 bantime = 600
 `
-	if err := system.WriteFileRoot(paths.Fail2banJail,
-		[]byte(content), 0644); err != nil {
-		return err
-	}
-	if err := system.RunRoot("systemctl", "enable",
-		"fail2ban"); err != nil {
-		return err
-	}
-	return system.RunRoot("systemctl", "restart", "fail2ban")
 }
