@@ -340,7 +340,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	}
 
 	// Both paths leave the connect command in the shell. The install terminal
-	// never opens the node TUI: the owner reaches it by logging in over SSH.
+	// never opens the node TUI. The owner reaches it by logging in over SSH.
 	printConnectInstructions()
 	return nil
 }
@@ -363,8 +363,8 @@ func withRootLoginOff(err error, ledger *installLedger) error {
 const workFolderPrefix = "vpn-install-"
 
 // removeKilledRunFolders removes the download folders of runs that were
-// killed before they could remove their own. Only vpn's own are touched: a
-// real folder, not a link, owned by root, private, with vpn's name. The
+// killed before they could remove their own. Only vpn's own are touched, each
+// a real folder, not a link, owned by root, private, with vpn's name. The
 // install lock means no other run is using one.
 func removeKilledRunFolders(base string) {
 	entries, err := os.ReadDir(base)
@@ -644,7 +644,9 @@ func buildInstallSteps(
 				os.RemoveAll(lndWork)
 				return host.WriteLNDService()
 			}},
-		{Key: "lnd.start", Name: "Starting LND", Fn: host.EnableAndRestartLND},
+		// Recorded only once LND's TLS pair is complete and on disk. A rerun
+		// starts LND from no TLS files, see StartLNDWithNewTLSFiles.
+		{Key: "lnd.start", Name: "Starting LND", Fn: host.StartLNDWithNewTLSFiles},
 		{Key: "lnd.tls-san", Kind: StepGate,
 			Name: "Checking LND's certificate",
 			Fn:   host.VerifyLNDTLSOnionSAN},

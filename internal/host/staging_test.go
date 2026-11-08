@@ -50,14 +50,17 @@ func TestStageTLSRequiresConsecutiveStableCertificate(t *testing.T) {
 				reads := [][]byte{first, interruption, first, final, final}
 				count, published := 0, 0
 				start := time.Now()
-				err := stageLNDTLSCert("cert", func(string) ([]byte, error) {
+				err := stageLNDTLSCert("cert", "key", func(path string) ([]byte, error) {
+					if path == "key" {
+						return []byte("-----BEGIN EC PRIVATE KEY-----\n"), nil
+					}
 					if count >= len(reads) {
 						t.Fatal("stable source was not published")
 					}
 					data := reads[count]
 					count++
 					return data, nil
-				}, func(data []byte) error {
+				}, func() error { return nil }, func(data []byte) error {
 					published++
 					if !bytes.Equal(data, final) || time.Since(start) < 2*time.Second {
 						t.Fatal("published an unstable or invalid certificate")
@@ -72,9 +75,56 @@ func TestStageTLSRequiresConsecutiveStableCertificate(t *testing.T) {
 	}
 }
 
+// LND writes its key just after its certificate, both without a sync. A copy
+// published while the key is empty or missing would outlive LND's own files
+// after a power cut, so the stager waits for the key and syncs first.
+func TestStageTLSWaitsForLNDKeyAndSyncsBeforePublishing(t *testing.T) {
+	cert := stagingCertificate(t)
+	key := []byte("-----BEGIN EC PRIVATE KEY-----\nAAAA\n-----END EC PRIVATE KEY-----\n")
+	for name, notReady := range map[string]func() ([]byte, error){
+		"empty":   func() ([]byte, error) { return nil, nil },
+		"missing": func() ([]byte, error) { return nil, os.ErrNotExist },
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				start := time.Now()
+				synced, published := 0, 0
+				err := stageLNDTLSCert("cert", "key", func(path string) ([]byte, error) {
+					if path == "cert" {
+						return cert, nil
+					}
+					if time.Since(start) < 2*time.Second {
+						return notReady()
+					}
+					return key, nil
+				}, func() error {
+					if time.Since(start) < 2*time.Second {
+						t.Fatal("synced before the key was written")
+					}
+					synced++
+					return nil
+				}, func(data []byte) error {
+					if synced != 1 {
+						t.Fatal("published before LND's files were synced")
+					}
+					published++
+					return nil
+				})
+				if err != nil || published != 1 {
+					t.Fatalf("published=%d err=%v", published, err)
+				}
+			})
+		})
+	}
+}
+
 func TestCredentialReadTimeoutNeverPublishes(t *testing.T) {
+	noSync := func() error { return nil }
 	for name, stage := range map[string]func(string, func(string) ([]byte, error), func([]byte) error) error{
-		"TLS": stageLNDTLSCert, "macaroon": stageLNDMacaroon,
+		"TLS": func(src string, read func(string) ([]byte, error), publish func([]byte) error) error {
+			return stageLNDTLSCert(src, src, read, noSync, publish)
+		},
+		"macaroon": stageLNDMacaroon,
 	} {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
