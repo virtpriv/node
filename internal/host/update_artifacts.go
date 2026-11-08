@@ -80,6 +80,30 @@ func ExtractUpdateArchive(archive, dest string, members map[string]string) error
 	return nil
 }
 
+// programDir holds the component programs vpn installs and updates.
+const programDir = "/usr/local/bin"
+
+// installPrograms unpacks the programs of a verified component archive and
+// places each in /usr/local/bin, the way a managed update does, so that a
+// power cut leaves the old program or the whole new one. Archive owners and
+// modes are ignored. Each program ends root owned with mode 0755.
+func installPrograms(c protocol.Component, version, workDir string) error {
+	archive, members, err := UpdateArchive(c, version)
+	if err != nil {
+		return err
+	}
+	staged := filepath.Join(workDir, "bin")
+	if err := ExtractUpdateArchive(filepath.Join(workDir, archive), staged, members); err != nil {
+		return err
+	}
+	for _, name := range members {
+		if err := files.Copy(filepath.Join(staged, name), filepath.Join(programDir, name), 0755); err != nil {
+			return fmt.Errorf("install %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
 func StageUpdateComponent(c protocol.Component, a protocol.Artifact, dir string) (map[string]string, error) {
 	if err := files.Directory(dir, 0700); err != nil {
 		return nil, err
@@ -93,7 +117,7 @@ func StageUpdateComponent(c protocol.Component, a protocol.Artifact, dir string)
 		// already installed companion tools on the same release, without
 		// introducing tools that are absent from this node.
 		for _, name := range []string{"bitcoin-tx", "bitcoin-wallet", "bitcoin-util", "bitcoin-qt"} {
-			if err := files.Check(filepath.Join("/usr/local/bin", name), false); err == nil {
+			if err := files.Check(filepath.Join(programDir, name), false); err == nil {
 				members["bitcoin-"+a.Version+"/bin/"+name] = name
 			} else if !os.IsNotExist(err) {
 				return nil, err

@@ -10,6 +10,7 @@ import (
 	"github.com/virtpriv/node/internal/artifact"
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/system"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 // DownloadBitcoinCore fetches the release archive and detached manifest over Tor.
@@ -31,33 +32,11 @@ func DownloadBitcoinCore(version, workDir string) error {
 		filepath.Join(workDir, "SHA256SUMS.asc"))
 }
 
-// bitcoinCorePrograms are the programs a node uses from Core's archive. The
-// archive also holds a desktop app, a launcher and tools vpn never runs.
-var bitcoinCorePrograms = []string{"bitcoind", "bitcoin-cli"}
-
-// InstallBitcoinCoreBinaries installs the archive after VerifyBitcoinCore succeeds.
-// Only bitcoinCorePrograms are unpacked and installed. tar fails when one is
-// missing from the archive. The caller owns the private workspace and
+// InstallBitcoinCoreBinaries installs bitcoind and bitcoin-cli after
+// VerifyBitcoinCore succeeds. The caller owns the private workspace and
 // lifecycle admission.
 func InstallBitcoinCoreBinaries(version, workDir string) error {
-	filename := fmt.Sprintf("bitcoin-%s-x86_64-linux-gnu.tar.gz", version)
-	members := make([]string, 0, len(bitcoinCorePrograms))
-	for _, name := range bitcoinCorePrograms {
-		members = append(members, fmt.Sprintf("bitcoin-%s/bin/%s", version, name))
-	}
-	args := append([]string{"-xzf", filepath.Join(workDir, filename),
-		"-C", workDir}, members...)
-	if err := system.Run("tar", args...); err != nil {
-		return err
-	}
-	for _, member := range members {
-		if err := system.RunRoot("install", "-m", "0755",
-			"-o", "root", "-g", "root",
-			filepath.Join(workDir, member), "/usr/local/bin/"); err != nil {
-			return err
-		}
-	}
-	return nil
+	return installPrograms(protocol.Bitcoin, version, workDir)
 }
 
 // bitcoinCoreSigners are the trusted Bitcoin Core builder keys.

@@ -2,6 +2,7 @@ package host
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/system"
+	"github.com/virtpriv/node/internal/update/files"
 )
 
 // InstallInitialBinary places the running executable at the fixed VPN path.
@@ -24,8 +26,17 @@ func InstallInitialBinary() error {
 	if self == paths.BinaryPath {
 		return nil
 	}
-	if err := system.RunRoot("install", "-m", "755",
-		self, paths.BinaryPath); err != nil {
+	// Copy the running program itself, even if its file was changed or
+	// replaced after it started.
+	running, err := os.Open("/proc/self/exe")
+	if err != nil {
+		return fmt.Errorf("install binary: %w", err)
+	}
+	defer running.Close()
+	if err := files.Replace(paths.BinaryPath, 0755, func(w io.Writer) error {
+		_, err := io.Copy(w, running)
+		return err
+	}); err != nil {
 		return fmt.Errorf("install binary: %w", err)
 	}
 	logger.Install("binary installed to %s (from %s)",
