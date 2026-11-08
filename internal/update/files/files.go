@@ -1,4 +1,5 @@
-// Package files provides the durable file operations used by managed updates.
+// Package files provides the durable file operations used by managed updates
+// and by the install to place programs.
 // Paths are chosen by trusted code and must be under owned, non-writable parents.
 package files
 
@@ -28,7 +29,7 @@ func Check(path string, directory bool) error {
 }
 
 // Directory checks ancestors before creating anything. Root-owned sticky
-// parents are permitted for isolated tests; production uses /var/lib and /run.
+// parents such as /tmp are permitted, where the install and tests stage files.
 func Directory(path string, mode os.FileMode) error {
 	parent := filepath.Dir(path)
 	if path != parent {

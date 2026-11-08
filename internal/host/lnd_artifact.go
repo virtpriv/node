@@ -10,6 +10,7 @@ import (
 	"github.com/virtpriv/node/internal/artifact"
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/system"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 // DownloadLND fetches the release archive and manifest over Tor.
@@ -33,26 +34,10 @@ func DownloadLND(version, workDir string) error {
 	return nil
 }
 
-// InstallLNDBinaries installs the archive after VerifyLND succeeds.
+// InstallLNDBinaries installs lnd and lncli after VerifyLND succeeds.
 // The caller owns the private workspace and lifecycle admission.
 func InstallLNDBinaries(version, workDir string) error {
-	filename := fmt.Sprintf("lnd-linux-amd64-v%s.tar.gz", version)
-	if err := system.Run("tar", "-xzf",
-		filepath.Join(workDir, filename),
-		"-C", workDir); err != nil {
-		return err
-	}
-	extractDir := filepath.Join(workDir,
-		fmt.Sprintf("lnd-linux-amd64-v%s", version))
-	for _, bin := range []string{"lnd", "lncli"} {
-		src := filepath.Join(extractDir, bin)
-		if err := system.RunRoot("install", "-m", "0755",
-			"-o", "root", "-g", "root",
-			src, "/usr/local/bin/"); err != nil {
-			return err
-		}
-	}
-	return nil
+	return installPrograms(protocol.LND, version, workDir)
 }
 
 // lndSigner is the trusted LND release signer.

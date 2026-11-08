@@ -9,6 +9,7 @@ import (
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/system"
 	"github.com/virtpriv/node/internal/update/files"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 // syncthingSigner is the trusted Syncthing release signer.
@@ -27,7 +28,7 @@ import (
 // cannot check (ERRSIG/NO_PUBKEY) and which makes gpg exit
 // non-zero even on a genuine release. This is why exit-code
 // trust is unusable here and VALIDSIG parsing is the sole
-// source of truth (the v0.6.1 finding A/B design).
+// source of truth.
 var syncthingSigner = struct {
 	name        string
 	fingerprint string
@@ -59,23 +60,10 @@ func downloadSyncthing(version, workDir string) error {
 	return nil
 }
 
-// extractAndInstallSyncthing unpacks the verified tarball and
-// installs the binary to /usr/local/bin (LND pattern).
-// Tarball layout (verified June 9 2026):
-// syncthing-linux-amd64-v<ver>/syncthing
+// extractAndInstallSyncthing installs the syncthing program after
+// verifySyncthing succeeds.
 func extractAndInstallSyncthing(version, workDir string) error {
-	filename := syncthingArchiveName(version)
-	if err := system.Run("tar", "-xzf",
-		filepath.Join(workDir, filename),
-		"-C", workDir); err != nil {
-		return err
-	}
-	src := filepath.Join(workDir,
-		fmt.Sprintf("syncthing-linux-amd64-v%s", version),
-		"syncthing")
-	return system.RunRoot("install", "-m", "0755",
-		"-o", "root", "-g", "root",
-		src, "/usr/local/bin/")
+	return installPrograms(protocol.Syncthing, version, workDir)
 }
 
 // ── Syncthing verification ──────────────────────────────
@@ -132,13 +120,13 @@ func verifySyncthingSig(workDir, keyFile, fingerprint string) ([]byte, error) {
 	distinct, hasBadSig := result.Signers, result.Bad
 	if !hasBadSig && distinct < 1 && len(result.Revoked) > 0 {
 		logger.Verify("FAIL: Syncthing release signing key is revoked")
-		return nil, fmt.Errorf("the syncthing release signing key has been revoked; a newer VPN release is needed")
+		return nil, fmt.Errorf("Syncthing's release signing key has been revoked, a newer VPN release is needed")
 	}
 
 	if hasBadSig {
 		logger.Verify("FAIL: bad Syncthing signature detected")
 		return nil, fmt.Errorf(
-			"bad Syncthing signature detected — verification aborted")
+			"bad Syncthing signature detected, verification aborted")
 	}
 
 	if distinct < 1 {
