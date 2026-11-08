@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/system"
 )
@@ -18,11 +19,21 @@ type githubRelease struct {
 	Prerelease bool   `json:"prerelease"`
 }
 
-const versionCacheMaxAge = 24 * time.Hour
+const (
+	versionCacheMaxAge = 24 * time.Hour
+	latestReleaseURL   = "https://api.github.com/repos/virtpriv/node/releases/latest"
+	latestTries        = 3
+	latestTryTimeout   = 10 * time.Second
+)
 
-// CheckLatestVersion returns a cached version for up to 24 hours or fetches it
-// over Tor and may update the cache. Empty means unavailable; a returned version
-// does not establish update eligibility or that it is newer than this binary.
+// CheckLatestVersion returns a cached version for up to 24 hours or asks
+// GitHub over Tor and may update the cache. Empty means unavailable. A returned
+// version does not establish update eligibility or that it is newer than this
+// binary.
+//
+// Each try runs on its own Tor circuit (torsocks -i), so a try that failed on
+// one exit, such as an exit past GitHub's hourly limit for its address, is not
+// repeated there. The tries stop at the first stable answer.
 func CheckLatestVersion() string {
 	if cached := readVersionCache(); cached != "" {
 		return cached
@@ -31,18 +42,23 @@ func CheckLatestVersion() string {
 	if _, err := exec.LookPath("torsocks"); err != nil {
 		return ""
 	}
-	output, err := system.RunOutputWithTimeout(10*time.Second,
-		"torsocks", "curl", "-sL",
-		"https://api.github.com/repos/virtpriv/node/releases/latest")
-	if err != nil {
-		return ""
-	}
-
-	version := stableReleaseVersion([]byte(output))
-	if version != "" {
+	for try := 1; try <= latestTries; try++ {
+		output, err := system.RunOutputWithTimeout(latestTryTimeout,
+			"torsocks", "-i", "curl", "-sfL", latestReleaseURL)
+		if err != nil {
+			logger.TUI("release check try %d of %d failed: %v", try, latestTries, err)
+			continue
+		}
+		version := stableReleaseVersion([]byte(output))
+		if version == "" {
+			logger.TUI("release check try %d of %d found no stable release in GitHub's answer", try, latestTries)
+			continue
+		}
+		logger.TUI("release check found v%s at try %d", version, try)
 		writeVersionCache(version)
+		return version
 	}
-	return version
+	return ""
 }
 
 // GitHub's latest endpoint normally excludes prereleases. Check the tag too so

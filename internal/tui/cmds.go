@@ -26,6 +26,16 @@ func fetchLatestVersionCmd() tea.Cmd {
 	}
 }
 
+// latestVersionRetry is how long an open TUI waits to ask again after a
+// release check found nothing.
+const latestVersionRetry = 10 * time.Minute
+
+func retryLatestVersionCmd() tea.Cmd {
+	return tea.Tick(latestVersionRetry, func(time.Time) tea.Msg {
+		return latestVersionMsg(release.CheckLatestVersion())
+	})
+}
+
 // ── Syncthing actions ────────────────────────────────────
 
 func requestSyncthingDevicesCmd(owner *ScreenContext) tea.Cmd {
