@@ -72,7 +72,8 @@ func syncthingArchiveName(version string) string {
 	return fmt.Sprintf("syncthing-linux-amd64-v%s.tar.gz", version)
 }
 
-// verifySyncthing checks the release that downloadSyncthing left in workDir.
+// verifySyncthing checks the release that downloadSyncthing left in workDir,
+// then the archive against the hash this release pins.
 func verifySyncthing(version, workDir string) error {
 	keyFile := filepath.Join(workDir, "syncthing-release-key.txt")
 	if err := system.DownloadRequireTor(
@@ -80,7 +81,10 @@ func verifySyncthing(version, workDir string) error {
 		logger.Verify("FAIL: download Syncthing signing key: %v", err)
 		return fmt.Errorf("download Syncthing signing key: %w", err)
 	}
-	return verifySyncthingFiles(version, workDir, keyFile, syncthingSigner.fingerprint)
+	if err := verifySyncthingFiles(version, workDir, keyFile, syncthingSigner.fingerprint); err != nil {
+		return err
+	}
+	return checkPinnedArchive(protocol.Syncthing, workDir)
 }
 
 // verifySyncthingFiles checks the signature on the checksum file and then the
@@ -99,7 +103,7 @@ func verifySyncthingFiles(version, workDir, keyFile, fingerprint string) error {
 // verifySyncthingSig returns the signed checksum text once the pinned release
 // key is accepted for it.
 func verifySyncthingSig(workDir, keyFile, fingerprint string) ([]byte, error) {
-	logger.Verify("--- Syncthing signature verification ---")
+	logger.Verify("Syncthing signature verification")
 
 	ascFile := filepath.Join(workDir, "sha256sum.txt.asc")
 	if _, err := os.Stat(ascFile); err != nil {
@@ -143,7 +147,7 @@ func verifySyncthingSig(workDir, keyFile, fingerprint string) ([]byte, error) {
 // verifySyncthingChecksum compares the archive with the one checksum the
 // signed text gives for it.
 func verifySyncthingChecksum(version, workDir string, signedText []byte) error {
-	logger.Verify("--- Syncthing checksum verification ---")
+	logger.Verify("Syncthing checksum verification")
 	name := syncthingArchiveName(version)
 	want, err := artifact.SignedSHA256(signedText, name)
 	if err != nil {

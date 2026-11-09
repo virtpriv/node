@@ -43,9 +43,10 @@ func InstallLNDBinaries(version, workDir string) error {
 // lndSigner is the trusted LND release signer.
 // Source: github.com/lightningnetwork/lnd/tree/master/scripts/keys
 // Cross-check: roasbeef.asc at the listed URL. Verified against
-// the LND v0.21.4-beta manifest signature (October 6 2026).
+// the LND v0.21.6-beta manifest signature (November 9 2026).
 // Primary-key fingerprint. The signing subkey (2962...) is
-// owned by this primary.
+// owned by this primary. It expired on October 29 2026, before
+// v0.21.6-beta was signed, and an expired key still counts.
 var lndSigner = struct {
 	name        string
 	fingerprint string
@@ -56,9 +57,10 @@ var lndSigner = struct {
 	keyURL:      "https://raw.githubusercontent.com/lightningnetwork/lnd/master/scripts/keys/roasbeef.asc",
 }
 
-// VerifyLND requires the pinned release signer before checking the archive.
+// VerifyLND requires the pinned release signer, then checks the archive
+// against the signed manifest and the hash this release pins.
 func VerifyLND(version, workDir string) error {
-	logger.Verify("--- LND signature verification ---")
+	logger.Verify("LND signature verification")
 
 	manifestFile := filepath.Join(workDir, "manifest.txt")
 	if _, err := os.Stat(manifestFile); err != nil {
@@ -115,11 +117,14 @@ func VerifyLND(version, workDir string) error {
 
 	logger.Verify(
 		"OK LND: signature valid (roasbeef, pinned fingerprint)")
-	return verifyLNDChecksum(workDir)
+	if err := verifyLNDChecksum(workDir); err != nil {
+		return err
+	}
+	return checkPinnedArchive(protocol.LND, workDir)
 }
 
 func verifyLNDChecksum(workDir string) error {
-	logger.Verify("--- LND checksum verification ---")
+	logger.Verify("LND checksum verification")
 	manifestFile := filepath.Join(workDir, "manifest.txt")
 	if _, err := os.Stat(manifestFile); err != nil {
 		logger.Verify("FAIL: LND manifest not found")

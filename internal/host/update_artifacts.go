@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/virtpriv/node/internal/component"
+	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/update/files"
 	"github.com/virtpriv/node/internal/update/protocol"
 )
@@ -29,6 +31,45 @@ func UpdateArchive(c protocol.Component, version string) (string, map[string]str
 		return "syncthing-linux-amd64-v" + version + ".tar.gz", map[string]string{prefix + "syncthing": "syncthing"}, nil
 	}
 	return "", nil, errors.New("unsupported component")
+}
+
+// errArchiveNotTested is the refusal of an archive whose SHA-256 differs from
+// the one the running VPN release was built and tested with.
+var errArchiveNotTested = errors.New("upstream archive differs from the tested VPN release")
+
+// checkPinnedArchive compares the archive of c in workDir with the SHA-256
+// this VPN release pins for it in internal/component. It runs after the
+// signature and signed checksum checks, so an archive is accepted only when it
+// is the one this release was tested with, even if the upstream signing keys
+// were taken. An update runs it in the new release's worker, whose pins equal
+// the plan's.
+func checkPinnedArchive(c protocol.Component, workDir string) error {
+	var label, version, want string
+	switch c {
+	case protocol.Bitcoin:
+		label, version, want = "Bitcoin Core", component.BitcoinCoreVersion, component.BitcoinCoreArchiveSHA256
+	case protocol.LND:
+		label, version, want = "LND", component.LNDVersion, component.LNDArchiveSHA256
+	case protocol.Syncthing:
+		label, version, want = "Syncthing", component.SyncthingVersion, component.SyncthingArchiveSHA256
+	default:
+		return errors.New("unsupported component")
+	}
+	name, _, err := UpdateArchive(c, version)
+	if err != nil {
+		return err
+	}
+	got, err := files.Hash(filepath.Join(workDir, name))
+	if err != nil {
+		logger.Verify("FAIL: %s archive: %v", label, err)
+		return fmt.Errorf("checksum failed: %w", err)
+	}
+	if got != want {
+		logger.Verify("FAIL: %s archive differs from the hash pinned in this VPN release", label)
+		return errArchiveNotTested
+	}
+	logger.Verify("OK %s archive matches the pinned hash", label)
+	return nil
 }
 
 // ExtractUpdateArchive only copies explicitly selected regular members. Tar
@@ -149,7 +190,7 @@ func StageUpdateComponent(c protocol.Component, a protocol.Artifact, dir string)
 		return nil, err
 	}
 	if hash != a.SHA256 {
-		return nil, errors.New("upstream archive differs from the tested VPN release")
+		return nil, errArchiveNotTested
 	}
 	if err := ExtractUpdateArchive(filepath.Join(dir, archive), filepath.Join(dir, "bin"), members); err != nil {
 		return nil, err

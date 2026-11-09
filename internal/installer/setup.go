@@ -537,6 +537,10 @@ func buildInstallSteps(
 			}},
 		{Key: "ipv6.disable", Name: "Turning off IPv6",
 			Fn: host.DisableIPv6},
+		// Before any program listens. LND and Syncthing are Go programs,
+		// which listen with Multipath TCP by default.
+		{Key: "mptcp.disable", Name: "Turning off Multipath TCP",
+			Fn: host.DisableMPTCP},
 		{Key: "tor.configure", Name: "Setting up Tor and your onion addresses",
 			Fn: func() error {
 				if err := host.WriteTorConfig(cfg); err != nil {

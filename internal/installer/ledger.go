@@ -34,6 +34,7 @@ var baseInstallStepKeys = []string{
 	"identity.access",
 	"service-identities.v1",
 	"ipv6.disable",
+	"mptcp.disable",
 	"tor.configure",
 	"tor.gate",
 	"apt.tor",

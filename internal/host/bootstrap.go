@@ -101,6 +101,21 @@ net.ipv6.conf.lo.disable_ipv6 = 1
 	return system.RunRootSilent("sysctl", "--system")
 }
 
+// DisableMPTCP turns Multipath TCP off for the whole machine, as LND advises
+// Linux operators since v0.21.6. The published attack on CVE-2026-98432 needs
+// an MPTCP listener, and Go programs such as LND and Syncthing open one by
+// default. This closes that attack only. The kernel update is the fix.
+func DisableMPTCP() error {
+	content := `# Virtual Private Node turns Multipath TCP off.
+net.mptcp.enabled = 0
+`
+	if err := system.WriteFileRoot(
+		paths.DisableMPTCPConf, []byte(content), 0644); err != nil {
+		return err
+	}
+	return system.RunRootSilent("sysctl", "--system")
+}
+
 // ConfigureUnattendedUpgrades writes vpn's rules for Debian's
 // unattended-upgrade, which every package update runs, and apt's hook for
 // the reboot check. The three origin lines are Debian's own, from the
