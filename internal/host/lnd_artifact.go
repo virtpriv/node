@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/virtpriv/node/internal/artifact"
+	"github.com/virtpriv/node/internal/component"
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/system"
 	"github.com/virtpriv/node/internal/update/protocol"
@@ -40,25 +41,35 @@ func InstallLNDBinaries(version, workDir string) error {
 	return installPrograms(protocol.LND, version, workDir)
 }
 
-// lndSigner is the trusted LND release signer.
-// Source: github.com/lightningnetwork/lnd/tree/master/scripts/keys
-// Cross-check: roasbeef.asc at the listed URL. Verified against
-// the LND v0.21.6-beta manifest signature (November 9 2026).
-// Primary-key fingerprint. The signing subkey (2962...) is
-// owned by this primary. It expired on October 29 2026, before
-// v0.21.6-beta was signed, and an expired key still counts.
-var lndSigner = struct {
-	name        string
-	fingerprint string
-	keyURL      string
-}{
-	name:        "roasbeef",
-	fingerprint: "A5B61896952D9FDA83BC054CDC42612E89237182",
-	keyURL:      "https://raw.githubusercontent.com/lightningnetwork/lnd/master/scripts/keys/roasbeef.asc",
+// lndSigners are the LND developers whose keys may sign a release, by the
+// name in their signature and key file names, with each key's primary
+// fingerprint.
+// Source: scripts/verify-install.sh and scripts/keys in
+// github.com/lightningnetwork/lnd at master 11f79be (November 6 2026). Each
+// key file's primary fingerprint matched the script's list. Every LND final
+// release from v0.20.0 to v0.21.6-beta carries at least four of their
+// signatures (November 9 2026). An expired key still counts.
+var lndSigners = map[string]string{
+	"roasbeef":    "A5B61896952D9FDA83BC054CDC42612E89237182",
+	"bhandras":    "9FC6B0BFD597A94DBF09708280E5375C094198D8",
+	"sputn1ck":    "4DC235556B18694E08518DBB671103D881A5F0E4",
+	"yyforyongyu": "E85497D2DBA0EB9ADB0024279BCD95C4FF296868",
+	"hieblmi":     "32F7EA1E7A0339F7D37164B9F82D456EA023C9BF",
+	"suheb":       "3E9BD4436C288039CA827A9200C9E2BC2E45666F",
+	"ziggie1984":  "5F75437E11695F86D50C11BB1AFF9C4DCED6D666",
+	"ViktorT-11":  "C20A78516A0944900EBFCA29961CC8259AE675D4",
+	"georgetsagk": "1583B601BB57CC7CD2DF8A87E08DEA9B12B66AF6",
+	"gijswijs":    "7530B54D5E45A68760E68926019A44857735FD20",
+	"boris":       "BCEE34B0F9CD832214CE53005EA98470361ACB4F",
 }
 
-// VerifyLND requires the pinned release signer, then checks the archive
-// against the signed manifest and the hash this release pins.
+// lndMinSigners is how many distinct listed developers must have signed.
+// LND's own script asks for five, but it is meant for LND's latest release
+// only, and LND removes the key of a developer who stops signing.
+const lndMinSigners = 3
+
+// VerifyLND requires three distinct listed LND developers, then checks the
+// archive against the signed manifest and the hash this release pins.
 func VerifyLND(version, workDir string) error {
 	logger.Verify("LND signature verification")
 
@@ -69,54 +80,64 @@ func VerifyLND(version, workDir string) error {
 			manifestFile)
 	}
 
-	// Download signature file.
-	sigFile := filepath.Join(workDir,
-		fmt.Sprintf("manifest-roasbeef-v%s.sig", version))
-	sigURL := fmt.Sprintf(
-		"https://github.com/lightningnetwork/lnd/releases/download/v%s/manifest-roasbeef-v%s.sig",
-		version, version)
-	if err := system.DownloadRequireTor(
-		sigURL, sigFile); err != nil {
-		logger.Verify("FAIL: download LND signature: %v", err)
-		return fmt.Errorf("download LND signature: %w", err)
+	// Pin every listed key, whichever signatures and keys arrive.
+	pinnedFPs := make(map[string]bool, len(lndSigners))
+	for _, fingerprint := range lndSigners {
+		pinnedFPs[fingerprint] = true
 	}
 
-	// Download signing key.
-	keyFile := filepath.Join(workDir, "lnd-key-roasbeef.asc")
-	if err := system.DownloadRequireTor(
-		lndSigner.keyURL, keyFile); err != nil {
-		logger.Verify("FAIL: download LND signing key: %v", err)
-		return fmt.Errorf("download LND signing key: %w", err)
+	// Each developer signs in a file of their own. gpg reads every
+	// signature in one file, as in Bitcoin Core's SHA256SUMS.asc, so the
+	// files are joined. A signer whose file or key cannot be downloaded is
+	// left out, as LND removes the keys of developers who stop signing.
+	var signatures []byte
+	var keyFiles []string
+	for _, name := range component.LNDSigners {
+		if _, listed := lndSigners[name]; !listed {
+			logger.Verify("FAIL: %s is not a listed LND developer", name)
+			return fmt.Errorf("LND signer %s is not pinned in this VPN release", name)
+		}
+		sigFile := filepath.Join(workDir,
+			fmt.Sprintf("manifest-%s-v%s.sig", name, version))
+		sigURL := fmt.Sprintf(
+			"https://github.com/lightningnetwork/lnd/releases/download/v%s/manifest-%s-v%s.sig",
+			version, name, version)
+		if err := system.DownloadRequireTor(sigURL, sigFile); err != nil {
+			logger.Verify("SKIP %s: signature download failed: %v", name, err)
+			continue
+		}
+		keyFile := filepath.Join(workDir, "lnd-key-"+name+".asc")
+		keyURL := "https://raw.githubusercontent.com/lightningnetwork/lnd/master/scripts/keys/" + name + ".asc"
+		if err := system.DownloadRequireTor(keyURL, keyFile); err != nil {
+			logger.Verify("SKIP %s: key download failed: %v", name, err)
+			continue
+		}
+		signature, err := os.ReadFile(sigFile)
+		if err != nil {
+			return fmt.Errorf("read LND signature: %w", err)
+		}
+		signatures = append(signatures, signature...)
+		keyFiles = append(keyFiles, keyFile)
+		logger.Verify("OK %s: signature and key downloaded", name)
+	}
+	if len(keyFiles) == 0 {
+		logger.Verify("FAIL: no LND signature downloaded with its key")
+		return fmt.Errorf("could not download any LND signatures")
 	}
 
-	pinnedFPs := map[string]bool{lndSigner.fingerprint: true}
-
+	joined := filepath.Join(workDir, "manifest-signatures.sig")
+	if err := os.WriteFile(joined, signatures, 0o600); err != nil {
+		return fmt.Errorf("write LND signatures: %w", err)
+	}
 	result, err := artifact.VerifySignature(
-		[]string{keyFile}, sigFile, manifestFile, pinnedFPs)
+		keyFiles, joined, manifestFile, pinnedFPs)
 	if err != nil {
 		return fmt.Errorf(
-			"LND signature verification failed: %w", err)
+			"signature verification failed: %w", err)
 	}
-	distinct, hasBadSig := result.Signers, result.Bad
-	if !hasBadSig && distinct < 1 && len(result.Revoked) > 0 {
-		logger.Verify("FAIL: LND release signing key is revoked")
-		return fmt.Errorf("LND's release signing key has been revoked, a newer VPN release is needed")
+	if err := requirePinnedSigners("LND", result, lndMinSigners); err != nil {
+		return err
 	}
-
-	if hasBadSig {
-		logger.Verify("FAIL: bad LND signature detected")
-		return fmt.Errorf(
-			"bad LND signature detected, verification aborted")
-	}
-
-	if distinct < 1 {
-		logger.Verify(
-			"FAIL: LND signature not valid against pinned fingerprint")
-		return fmt.Errorf("LND signature verification failed")
-	}
-
-	logger.Verify(
-		"OK LND: signature valid (roasbeef, pinned fingerprint)")
 	if err := verifyLNDChecksum(workDir); err != nil {
 		return err
 	}

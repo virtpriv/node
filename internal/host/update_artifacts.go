@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/virtpriv/node/internal/artifact"
 	"github.com/virtpriv/node/internal/component"
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/update/files"
@@ -69,6 +70,32 @@ func checkPinnedArchive(c protocol.Component, workDir string) error {
 		return errArchiveNotTested
 	}
 	logger.Verify("OK %s archive matches the pinned hash", label)
+	return nil
+}
+
+// requirePinnedSigners applies a component's signer threshold to what its
+// signatures proved. A bad signature refuses the whole file, and a revoked
+// signer never counts.
+func requirePinnedSigners(label string, result artifact.Result, minValid int) error {
+	if result.Bad {
+		logger.Verify("FAIL: bad signature detected")
+		return errors.New("bad signature detected, verification aborted")
+	}
+	logger.Verify("%s valid pinned signatures: %d/%d required",
+		label, result.Signers, minValid)
+	if result.Signers < minValid {
+		logger.Verify(
+			"FAIL: insufficient valid signatures: got %d, need %d, revoked signers %d",
+			result.Signers, minValid, len(result.Revoked))
+		if len(result.Revoked) > 0 {
+			return fmt.Errorf(
+				"insufficient valid signatures: got %d, need %d. %d pinned signer key(s) revoked, a newer VPN release is needed",
+				result.Signers, minValid, len(result.Revoked))
+		}
+		return fmt.Errorf("insufficient valid signatures: got %d, need %d",
+			result.Signers, minValid)
+	}
+	logger.Verify("OK %s: %d valid pinned signatures", label, result.Signers)
 	return nil
 }
 

@@ -16,3 +16,8 @@ const (
 	LNDArchiveSHA256         = "47db47290df2d183393259a7b313ddcfc7376e9cd941bd691858250246fc763e"
 	SyncthingArchiveSHA256   = "3d222b609f7ab2944e02748cb10488b4160d446b49e0eafc107ef2a525ab3486"
 )
+
+// LNDSigners names the LND developers whose signatures on the pinned LND
+// version's manifest were checked at the bump, spelled as in their signature
+// file names. Change it only together with LNDVersion.
+var LNDSigners = []string{"boris", "gijswijs", "roasbeef", "suheb", "ViktorT-11", "ziggie1984"}

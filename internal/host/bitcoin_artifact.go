@@ -133,34 +133,9 @@ func VerifyBitcoinCore(workDir string) error {
 		return fmt.Errorf(
 			"signature verification failed: %w", err)
 	}
-	distinct, hasBadSig := result.Signers, result.Bad
-
-	if hasBadSig {
-		logger.Verify("FAIL: bad signature detected")
-		return fmt.Errorf(
-			"bad signature detected, verification aborted")
+	if err := requirePinnedSigners("Bitcoin Core", result, minValid); err != nil {
+		return err
 	}
-
-	logger.Verify(
-		"Bitcoin Core valid pinned signatures: %d/%d required",
-		distinct, minValid)
-
-	if distinct < minValid {
-		logger.Verify(
-			"FAIL: insufficient valid signatures: got %d, need %d, revoked signers %d",
-			distinct, minValid, len(result.Revoked))
-		if len(result.Revoked) > 0 {
-			return fmt.Errorf(
-				"insufficient valid signatures: got %d, need %d. %d pinned signer key(s) revoked, a newer VPN release is needed",
-				distinct, minValid, len(result.Revoked))
-		}
-		return fmt.Errorf(
-			"insufficient valid signatures: got %d, need %d",
-			distinct, minValid)
-	}
-
-	logger.Verify("OK Bitcoin Core: %d valid pinned signatures",
-		distinct)
 	if err := verifyBitcoinChecksum(workDir); err != nil {
 		return err
 	}
