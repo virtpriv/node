@@ -192,7 +192,8 @@ All software is verified with GPG signatures and SHA256 checksums:
   [bitcoin-core/guix.sigs](https://github.com/bitcoin-core/guix.sigs).
   Requires 3 of 5 valid signatures. A bad signature (BADSIG) from any
   key is a hard stop.
-- **LND:** Roasbeef's signing key verified against known fingerprint.
+- **LND:** 11 developer keys from LND's own list. Requires 3 of 11
+  valid signatures. A bad signature (BADSIG) from any key is a hard stop.
 - **Syncthing:** pinned release binary, verified against the Syncthing
   release signing key's known fingerprint. The release checksums are
   clearsigned by the same key. VPN also writes Syncthing's

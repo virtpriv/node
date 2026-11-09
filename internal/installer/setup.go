@@ -634,7 +634,7 @@ func buildInstallSteps(
 				return host.DownloadLND(component.LNDVersion, lndWork)
 			}},
 		{Key: "lnd.verify", Group: "lnd",
-			Name: "Verifying LND software and signature",
+			Name: "Verifying LND software and signatures",
 			Fn: func() error {
 				return host.VerifyLND(component.LNDVersion, lndWork)
 			}},
