@@ -42,9 +42,9 @@ func InstallBitcoinCoreBinaries(version, workDir string) error {
 // bitcoinCoreSigners are the trusted Bitcoin Core builder keys.
 // Source: github.com/bitcoin-core/guix.sigs/tree/main/builder-keys
 // Cross-check: each key's fingerprint against the .gpg file at
-// the listed URL. Verified against the Bitcoin Core 31.1
-// SHA256SUMS.asc, which all five signed (October 19 2026).
-// Each attested every final release from 29.3 to 31.1 in guix.sigs.
+// the listed URL. Verified against the Bitcoin Core 31.2
+// SHA256SUMS.asc, which all five signed (November 9 2026).
+// Each attested every final release from 29.3 to 31.2 in guix.sigs.
 // Primary-key fingerprints, not subkeys. Threshold: 3 of 5
 // distinct signers required, the default of Core's own
 // contrib/verify-binaries script.
@@ -80,10 +80,11 @@ var bitcoinCoreSigners = []struct {
 	},
 }
 
-// VerifyBitcoinCore requires three distinct pinned signers before checking the archive.
+// VerifyBitcoinCore requires three distinct pinned signers, then checks the
+// archive against the signed checksum list and the hash this release pins.
 func VerifyBitcoinCore(workDir string) error {
 	const minValid = 3
-	logger.Verify("--- Bitcoin Core signature verification ---")
+	logger.Verify("Bitcoin Core signature verification")
 
 	sumsFile := filepath.Join(workDir, "SHA256SUMS")
 	sigFile := filepath.Join(workDir, "SHA256SUMS.asc")
@@ -160,11 +161,14 @@ func VerifyBitcoinCore(workDir string) error {
 
 	logger.Verify("OK Bitcoin Core: %d valid pinned signatures",
 		distinct)
-	return verifyBitcoinChecksum(workDir)
+	if err := verifyBitcoinChecksum(workDir); err != nil {
+		return err
+	}
+	return checkPinnedArchive(protocol.Bitcoin, workDir)
 }
 
 func verifyBitcoinChecksum(workDir string) error {
-	logger.Verify("--- Bitcoin Core checksum verification ---")
+	logger.Verify("Bitcoin Core checksum verification")
 	// exec.Command used directly because sha256sum --check needs
 	// working directory set to where the tarball was downloaded.
 	cmd := exec.Command("sha256sum",
