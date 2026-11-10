@@ -11,9 +11,9 @@ import (
 )
 
 func TestP2PObservationOwnershipAndReviewedConsent(t *testing.T) {
-	w := app.NewHelperWorkflows("2.1.1")
+	w := app.NewWorkflows("2.1.1")
 	w.Close() // Submission has real operation identity without root IPC.
-	ctx := &ScreenContext{Cfg: config.Default(), HelperWorkflows: w}
+	ctx := &ScreenContext{Cfg: config.Default(), Workflows: w}
 	s := NewP2PUpgradeScreen(ctx)
 	other := NewP2PUpgradeScreen(ctx)
 	if s.Init() == nil || other.Init() == nil || s.Init() != nil {
@@ -76,9 +76,9 @@ func TestP2PObservationOwnershipAndReviewedConsent(t *testing.T) {
 }
 
 func TestP2PObservationRetryReplacementAndClose(t *testing.T) {
-	w := app.NewHelperWorkflows("2.1.1")
+	w := app.NewWorkflows("2.1.1")
 	defer w.Close()
-	ctx := &ScreenContext{Cfg: config.Default(), HelperWorkflows: w}
+	ctx := &ScreenContext{Cfg: config.Default(), Workflows: w}
 	s := NewP2PUpgradeScreen(ctx)
 	s.Init()
 	first := s.addressRead

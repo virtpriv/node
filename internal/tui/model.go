@@ -253,12 +253,12 @@ func NewModel(
 		nav: NewNavSidebar(),
 	}
 	m.screenCtx = &ScreenContext{
-		NodeUpdates:     app.NewNodeUpdates(),
-		Syncthing:       app.NewSyncthing(),
-		HelperWorkflows: app.NewHelperWorkflows(component.SyncthingVersion),
-		Cfg:             cfg,
-		State:           state,
-		Version:         version,
+		NodeUpdates: app.NewNodeUpdates(),
+		Syncthing:   app.NewSyncthing(),
+		Workflows:   app.NewWorkflows(component.SyncthingVersion),
+		Cfg:         cfg,
+		State:       state,
+		Version:     version,
 	}
 	m.screenCtx.ChannelHistory = &channelHistoryContext{reader: app.NewChannelHistoryReader()}
 	m.screenCtx.OnChain = &OnChainContext{reader: app.NewOnChainReader()}
@@ -342,26 +342,17 @@ func run(
 		if m.screenCtx.ConnectionInfo != nil {
 			m.screenCtx.ConnectionInfo.Close()
 		}
-		if m.screenCtx.Reboots != nil {
-			m.screenCtx.Reboots.Close()
-		}
-		if m.screenCtx.PackageUpdates != nil {
-			m.screenCtx.PackageUpdates.Close()
-		}
-		if m.screenCtx.ServiceControls != nil {
-			m.screenCtx.ServiceControls.Close()
+		if m.screenCtx.Jobs != nil {
+			m.screenCtx.Jobs.Close()
 		}
 		m.screenCtx.ChannelHistory.reader.Close()
 		m.screenCtx.OnChain.reader.Close()
 		m.screenCtx.PaymentHistory.reader.Close()
 		m.statusCollector.Close()
-		if m.screenCtx.AutoUnlock != nil {
-			m.screenCtx.AutoUnlock.Close()
-		}
 		if m.screenCtx.WalletCreation != nil {
 			m.screenCtx.WalletCreation.Close()
 		}
-		m.screenCtx.HelperWorkflows.Close()
+		m.screenCtx.Workflows.Close()
 		if updater, ok := m.screenCtx.NodeUpdates.(*app.NodeUpdates); ok {
 			updater.Close()
 		}
@@ -401,5 +392,6 @@ func (m Model) Init() tea.Cmd {
 		requestStatusCmd,
 		fetchWalletStateCmd(m.screenCtx),
 		fetchLatestVersionCmd(),
+		restoreSystemJobsCmd(m.screenCtx),
 		tickEveryCmd(m.pollInterval()))
 }

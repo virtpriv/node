@@ -142,8 +142,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.routeNodeUpdate(msg.owner, msg)
 	case nodeUpdateTick:
 		return m.routeNodeUpdate(msg.owner, msg)
+	case settingsPrepareMsg:
+		for _, tab := range m.tabs {
+			if tab.Screen == msg.owner {
+				_, cmd := msg.owner.HandleMsg(msg)
+				return m, cmd
+			}
+		}
+		return m, nil
 	case settingsReviewMsg:
-		// A closed form drops the node's answer, as Node Updates does.
+		// A closed form drops the node's answer. The Prepare job keeps its
+		// review, which Node Updates shows when it opens.
 		for _, tab := range m.tabs {
 			if tab.Screen == msg.owner {
 				_, cmd := msg.owner.HandleMsg(msg)
@@ -669,10 +678,38 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case helperProgressMsg:
+	case workflowProgressMsg:
 		for _, tab := range m.tabs {
 			if progress := helperProgress(tab.Screen); progress != nil && progress.operation == msg.operation {
 				_, cmd := progress.HandleMsg(msg)
+				return m, cmd
+			}
+		}
+		// The screen was closed while its job ran. The setting the job
+		// changed is still published.
+		if result := msg.event.Result; result != nil && result.Config != nil {
+			publishWorkflowConfig(m.screenCtx, msg.operation.Kind(), result.Config)
+			return m, emitRefreshStatus
+		}
+		if msg.event.Result == nil {
+			// Keep reading the closed screen's watch to its end.
+			return m, (&InstallProgressScreen{operation: msg.operation}).waitProgress()
+		}
+		return m, nil
+	case latestWorkflowMsg:
+		for _, tab := range m.tabs {
+			if tab.Screen == msg.owner {
+				_, cmd := tab.Screen.HandleMsg(msg)
+				return m, cmd
+			}
+		}
+		return m, nil
+	case restoredJobsMsg:
+		return m, m.restoreSystemJobs(msg)
+	case autoUnlockRestoreMsg:
+		for _, tab := range m.tabs {
+			if tab.Screen == msg.owner && msg.owner != nil {
+				_, cmd := msg.owner.HandleMsg(msg)
 				return m, cmd
 			}
 		}
@@ -1059,7 +1096,9 @@ func (m Model) closeTab(
 
 	closingTab := tabs[tabIdx]
 	// Keep submitted operations reachable until their bounded calls return.
-	if autoUnlockBusy(closingTab.Screen) || walletCreationBusy(closingTab.Screen) || onChainSendBusy(closingTab.Screen) || channelOpenBusy(closingTab.Screen) || channelCloseBusy(closingTab.Screen) || m.sshTabBusy(closingTab) || m.helperTabBusy(closingTab) || m.syncthingTabBusy(closingTab) {
+	// A Syncthing install or P2P switch is a job of its own: its screen may
+	// close, and opens on the job again.
+	if autoUnlockBusy(closingTab.Screen) || walletCreationBusy(closingTab.Screen) || onChainSendBusy(closingTab.Screen) || channelOpenBusy(closingTab.Screen) || channelCloseBusy(closingTab.Screen) || m.sshTabBusy(closingTab) || m.syncthingTabBusy(closingTab) {
 		return m, nil
 	}
 

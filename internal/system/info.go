@@ -17,8 +17,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/virtpriv/node/internal/bytesize"
 )
 
 // DiskInfo is the size and use of a filesystem in bytes. The screen formats
@@ -226,25 +224,24 @@ func ReadAptTimers(ctx context.Context) ([]AptTimer, error) {
 	return timers, nil
 }
 
-// DirSize measures the disk space a directory tree uses, with du, and
-// formats it for the screen, because the helper sends it as text. Root
-// only, because the data directories it is used on belong to service
-// users. The unprivileged status screen gets the LND size through the
-// helper's dir-size operation (which calls this as root) and the Bitcoin
-// size from bitcoind's own RPC. It never calls this directly.
-func DirSize(path string) string {
+// DirSize measures the disk space a directory tree uses, in bytes, with du.
+// Root only, because the data directories it is used on belong to service
+// users. The unprivileged status screen gets the LND size through vpnd's
+// dir-size read (which calls this as root) and the Bitcoin size from
+// bitcoind's own RPC. It never calls this directly.
+func DirSize(path string) (uint64, error) {
 	if os.Geteuid() != 0 {
-		return "N/A"
+		return 0, errors.New("measuring a data folder requires root")
 	}
 	out, err := exec.Command("du", "-s", "-B1", path).Output()
 	if err != nil {
-		return "N/A"
+		return 0, fmt.Errorf("du %s: %w", path, err)
 	}
 	bytes, ok := parseDu(string(out))
 	if !ok {
-		return "N/A"
+		return 0, fmt.Errorf("du %s: unreadable output", path)
 	}
-	return bytesize.Format(bytes)
+	return bytes, nil
 }
 
 // parseDu reads du -s -B1 output, the bytes used, a tab and the path.

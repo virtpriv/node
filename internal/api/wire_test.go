@@ -1,6 +1,4 @@
-// internal/helper/wire_test.go
-
-package helper
+package api
 
 import (
 	"encoding/json"

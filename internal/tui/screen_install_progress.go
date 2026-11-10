@@ -7,71 +7,52 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/theme"
 	"github.com/virtpriv/node/internal/tui/steplist"
 )
 
-// helperProgressMsg identifies one operation and its ordered application event.
-type helperProgressMsg struct {
-	operation *app.HelperOperation
-	event     app.HelperProgress
+// workflowProgressMsg identifies one watched workflow and one look at it.
+type workflowProgressMsg struct {
+	operation *app.Operation
+	event     app.WorkflowProgress
 }
 
 type closeHelperProgressMsg struct{ screen *InstallProgressScreen }
 
-type progressStep struct {
-	Name   string
-	Status int
-	Err    error
-	// times holds when the step began and ended. The helper's events carry
-	// no times, so the screen notes them as the events arrive.
-	times steplist.Step
-}
-
-const (
-	_ = iota
-	progressRunning
-	progressDone
-	progressFailed
-)
-
-// InstallProgressScreen renders one application-owned helper operation. Only
-// the event loop mutates its presentation state and publishes configuration.
+// InstallProgressScreen draws one Syncthing install or P2P switch job from
+// its record: its steps, when each began and ended, and its outcome. The job
+// runs in its own service, so the owner may leave this screen while it runs
+// and find it again here. Only the event loop changes what the screen holds
+// and publishes configuration.
 type InstallProgressScreen struct {
-	ctx             *ScreenContext
-	operation       *app.HelperOperation
-	steps           []progressStep
-	onDone          func() tea.Cmd
-	onFail          func() tea.Cmd
-	current         int
-	started         bool
-	done            bool
-	failed          bool
-	helperSucceeded bool
-	nothingChanged  bool
-	spin            steplist.Spinner
+	ctx       *ScreenContext
+	operation *app.Operation
+	names     []string
+	job       api.Job
+	onDone    func() tea.Cmd
+	onFail    func() tea.Cmd
+	started   bool
+	opened    time.Time
+	done      bool
+	result    app.WorkflowResult
+	// local is the TUI's own last step, reading the node's configuration.
+	local steplist.Step
+	spin  steplist.Spinner
 }
 
-func NewInstallProgressScreen(ctx *ScreenContext, operation *app.HelperOperation, onDone, onFail func() tea.Cmd) *InstallProgressScreen {
-	names := operation.Steps()
-	steps := make([]progressStep, len(names))
-	for i, name := range names {
-		steps[i].Name = name
-	}
-	return &InstallProgressScreen{ctx: ctx, operation: operation, steps: steps, onDone: onDone, onFail: onFail, spin: steplist.NewSpinner()}
+func NewInstallProgressScreen(ctx *ScreenContext, operation *app.Operation, onDone, onFail func() tea.Cmd) *InstallProgressScreen {
+	return &InstallProgressScreen{ctx: ctx, operation: operation, names: operation.Steps(), onDone: onDone, onFail: onFail, spin: steplist.NewSpinner()}
 }
 
 func (s *InstallProgressScreen) Init() tea.Cmd {
 	if s.started {
 		return nil
 	}
-	s.started = true
-	if len(s.steps) > 0 {
-		s.steps[0].Status = progressRunning
-		s.steps[0].times.Start(time.Now())
-	}
+	s.started, s.opened = true, time.Now()
 	return s.waitProgress()
 }
 
@@ -82,83 +63,128 @@ func (s *InstallProgressScreen) waitProgress() tea.Cmd {
 		if !ok {
 			return nil
 		}
-		return helperProgressMsg{operation: operation, event: event}
+		return workflowProgressMsg{operation: operation, event: event}
 	}
 }
 
 func (s *InstallProgressScreen) HandleKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
-	if s.done {
-		switch keyStr {
-		case "ctrl+c":
-			return s, tea.Quit
-		case "enter":
+	switch keyStr {
+	case "ctrl+c":
+		return s, tea.Quit
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+	case "backspace":
+		return s, emitFocusParent
+	case "enter":
+		if s.done {
 			return s, func() tea.Msg { return closeHelperProgressMsg{screen: s} }
-		case "left":
-			return s, emitFocusSidebar
-		case "up", "shift+tab":
-			if s.ctx.HasTabs {
-				return s, emitFocusTabBar
-			}
-		case "backspace":
-			return s, emitFocusParent
 		}
 	}
-	// During active install, all keys are ignored.
 	return s, nil
 }
 
 func (s *InstallProgressScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
-	m, ok := msg.(helperProgressMsg)
-	if !ok || m.operation != s.operation || !s.started || s.done || m.event.Index != s.current {
+	m, ok := msg.(workflowProgressMsg)
+	if !ok || m.operation != s.operation || !s.started || s.done {
 		return s, nil
 	}
-	if result := m.event.Result; result != nil {
-		if result.Err == nil && (s.current != len(s.steps) || !result.HelperSucceeded) {
-			return s, nil
-		}
-		s.done = true
-		s.failed = result.Err != nil
-		s.helperSucceeded = result.HelperSucceeded
-		s.nothingChanged = result.NothingChanged
-		if result.Config != nil {
-			// Publish only the setting this operation owns. A delayed reload must not
-			// overwrite another workflow's newer setting, such as auto-unlock.
-			switch s.operation.Kind() {
-			case app.SyncthingInstall:
-				s.ctx.Cfg.SyncthingEnabled = result.Config.SyncthingEnabled
-			case app.P2PUpgrade:
-				s.ctx.Cfg.P2PMode = result.Config.P2PMode
-				s.ctx.Cfg.P2PAddress = result.Config.P2PAddress
-			}
-		}
-		if s.failed {
-			if s.current < len(s.steps) {
-				s.steps[s.current].Status = progressFailed
-				s.steps[s.current].Err = result.Err
-				s.steps[s.current].times.End(time.Now())
-			}
-			logger.Install("helper workflow: %v", result.Err)
-			if s.onFail != nil {
-				return s, s.onFail()
-			}
-		} else if s.onDone != nil {
-			return s, s.onDone()
+	if m.event.Job.ID != "" {
+		s.job = m.event.Job
+	}
+	result := m.event.Result
+	if result == nil {
+		return s, s.waitProgress()
+	}
+	s.done, s.result = true, *result
+	now := time.Now()
+	if result.JobDone {
+		s.local.Start(s.job.Ended)
+		s.local.End(now)
+	}
+	if result.Config != nil {
+		publishWorkflowConfig(s.ctx, s.operation.Kind(), result.Config)
+	}
+	if result.Err != nil {
+		logger.Install("%s: %v", s.job.Title, result.Err)
+		if s.onFail != nil {
+			return s, s.onFail()
 		}
 		return s, nil
 	}
-	if s.current >= len(s.steps) {
-		return s, nil
+	if s.onDone != nil {
+		return s, s.onDone()
 	}
-	s.steps[s.current].Status = progressDone
-	s.steps[s.current].times.End(time.Now())
-	s.current++
-	if s.current < len(s.steps) {
-		s.steps[s.current].Status = progressRunning
-		s.steps[s.current].times.Start(time.Now())
+	return s, nil
+}
+
+// publishWorkflowConfig publishes only the setting the workflow owns. A
+// delayed reload must not overwrite another workflow's newer setting, such
+// as auto-unlock.
+func publishWorkflowConfig(ctx *ScreenContext, kind app.WorkflowKind, cfg *config.AppConfig) {
+	switch kind {
+	case app.SyncthingInstall:
+		ctx.Cfg.SyncthingEnabled = cfg.SyncthingEnabled
+	case app.P2PUpgrade:
+		ctx.Cfg.P2PMode = cfg.P2PMode
+		ctx.Cfg.P2PAddress = cfg.P2PAddress
 	}
-	return s, s.waitProgress()
+}
+
+func (s *InstallProgressScreen) failed() bool { return s.done && s.result.Err != nil }
+
+// steps draws the job's record. Before the first look the first step runs
+// from when the screen opened.
+func (s *InstallProgressScreen) steps() []steplist.Step {
+	steps := make([]steplist.Step, len(s.names))
+	jobSteps := len(s.names) - 1
+	j := s.job
+	current := j.StepNumber - 1
+	if j.ID == "" {
+		current = 0
+		if s.started && !s.done {
+			steps[0].Start(s.opened)
+		}
+	}
+	for i := range jobSteps {
+		steps[i].Name = s.names[i]
+		if i < len(j.StepStarts) {
+			steps[i].Started = j.StepStarts[i]
+		}
+		if i < len(j.StepEnds) {
+			steps[i].Ended = j.StepEnds[i]
+		}
+		switch {
+		case j.State == api.JobDone || i < current:
+			steps[i].State = steplist.Done
+		case i == current && j.State == api.JobFailed:
+			steps[i].State = steplist.Failed
+			steps[i].Err = j.Error
+		case i == current && j.Finished():
+			// Unknown: the step is not marked failed, the outcome below
+			// says it was not confirmed.
+		case i == current && !s.done:
+			steps[i].State = steplist.Running
+		}
+	}
+	last := &steps[jobSteps]
+	*last = s.local
+	last.Name = s.names[jobSteps]
+	switch {
+	case s.done && s.result.JobDone && s.result.Err != nil:
+		last.State = steplist.Failed
+		last.Err = s.result.Err.Error()
+	case s.done && s.result.JobDone:
+		last.State = steplist.Done
+	case j.State == api.JobDone:
+		last.State = steplist.Running
+	}
+	return steps
 }
 
 // ── View ────────────────────────────────────────────────
@@ -167,51 +193,31 @@ func (s *InstallProgressScreen) View(
 	w, h int,
 ) string {
 	p := newPane(w)
-
-	steps := make([]steplist.Step, len(s.steps))
-	for i, step := range s.steps {
-		steps[i] = step.times
-		steps[i].Name = step.Name
-		switch step.Status {
-		case progressDone:
-			steps[i].State = steplist.Done
-		case progressRunning:
-			steps[i].State = steplist.Running
-		case progressFailed:
-			steps[i].State = steplist.Failed
-			if step.Err != nil {
-				steps[i].Err = step.Err.Error()
-			}
-		}
-	}
-	rows, from, to := steplist.Rows(steps, max(p.w-1, 16), s.spin.View(), time.Now(), 0)
+	rows, from, to := steplist.Rows(s.steps(), max(p.w-1, 16), s.spin.View(), time.Now(), 0)
 	// The outcome below the list and the button row stay in view.
-	p.lines = append(p.lines, steplist.Window(rows, from, to, max(1, h-progressBelowRows), s.done && !s.failed)...)
+	p.lines = append(p.lines, steplist.Window(rows, from, to, max(1, h-progressBelowRows), s.done && !s.failed())...)
 
 	p.blank()
 
-	if s.done && !s.failed {
+	switch {
+	case s.done && !s.failed():
 		p.line(" " + theme.Good.Render("Complete."))
+	case s.done && s.result.JobDone:
+		p.warnWrap("The change completed, but this screen could not read the node's new configuration.")
+	case s.done && s.result.Outcome == app.JobNotStarted:
+		p.fitText(lipgloss.NewStyle(), "The workflow stopped before changing anything.", 0)
+	case s.done && s.result.Outcome == app.JobUnconfirmed:
+		p.warnWrap("The change was not confirmed. It may have finished. Check the node before trying again.")
+	case s.done:
+		p.warnWrap("The workflow did not complete successfully. Changes may have been applied. Check the node before trying again.")
+	default:
+		p.dim("Closing this screen does not stop the change.")
 		return p.renderWithBottomButtons(
-			[]string{"Done"}, 0,
-			s.ctx.ContentFocused, h)
-	} else if s.failed {
-		switch {
-		case s.helperSucceeded:
-			p.warnWrap("The helper completed the change, but local configuration could not be refreshed.")
-		case s.nothingChanged:
-			p.fitText(lipgloss.NewStyle(), "The workflow stopped before changing anything.", 0)
-		default:
-			p.warnWrap("The workflow did not complete successfully. Changes may have been applied. Check the node before trying again.")
-		}
-		return p.renderWithBottomButtons(
-			[]string{"Done"}, 0,
-			s.ctx.ContentFocused, h)
+			[]string{"Installing..."}, 0, false, h)
 	}
-
-	p.dim("Do not close the terminal.")
 	return p.renderWithBottomButtons(
-		[]string{"Installing..."}, 0, false, h)
+		[]string{"Done"}, 0,
+		s.ctx.ContentFocused, h)
 }
 
 // progressBelowRows is what the screen shows under its list at most: an
@@ -222,7 +228,7 @@ const progressBelowRows = 6
 // the screen shows.
 func (s *InstallProgressScreen) spinner() *steplist.Spinner { return &s.spin }
 func (s *InstallProgressScreen) stepRuns() bool {
-	return s.started && !s.done && s.current < len(s.steps)
+	return s.started && !s.done
 }
 
 // ── HelpBindings ────────────────────────────────────────
@@ -231,5 +237,9 @@ func (s *InstallProgressScreen) HelpBindings() []key.Binding {
 	if s.done {
 		return resultBindings(s.ctx.HasTabs)
 	}
-	return inFlightBindings()
+	bindings := []key.Binding{kSidebar}
+	if s.ctx.HasTabs {
+		bindings = append(bindings, kShiftTabBar)
+	}
+	return append(bindings, kBack, kQuit)
 }

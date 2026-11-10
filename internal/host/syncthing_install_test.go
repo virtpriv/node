@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/component"
 	"github.com/virtpriv/node/internal/config"
-	"github.com/virtpriv/node/internal/helper"
 )
 
 // The client must wait for every provisioning step, credential staging and
@@ -18,7 +18,7 @@ func TestSyncthingProvisioningMatchesClientProgress(t *testing.T) {
 	cfg := config.Default()
 	cfg.SyncthingEnabled = true
 	steps, _ := syncthingInstallSteps(cfg)
-	if got, want := len(steps)+2, len(helper.SyncthingInstallStepNames(component.SyncthingVersion)); got != want {
+	if got, want := len(steps)+2, len(api.SyncthingInstallStepNames(component.SyncthingVersion)); got != want {
 		t.Fatalf("root reports %d steps, client waits for %d", got, want)
 	}
 }

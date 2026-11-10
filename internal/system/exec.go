@@ -33,16 +33,15 @@ func run(env []string, name string, args ...string) error {
 }
 
 // requireRoot checks the process's effective UID. It never elevates privileges.
-// Root installer, helper and credential-staging commands can use these wrappers.
-// Unprivileged callers must use the helper's fixed operations for root work.
+// The root installer, vpnd, jobs and credential staging can use these wrappers.
+// Unprivileged callers must use vpnd's fixed requests for root work.
 func requireRoot(name string) error {
 	if os.Geteuid() == 0 {
 		return nil
 	}
 	return fmt.Errorf(
 		"%s requires root: this operation must go through "+
-			"the node's root helper (vpn helperd), not run "+
-			"directly. This is a bug worth reporting", name)
+			"vpnd, not run directly. This is a bug worth reporting", name)
 }
 
 // RunRoot requires the process to be root, then executes the command directly.
@@ -288,8 +287,8 @@ func DownloadRequireTor(url, dest string) error {
 // It always runs through torsocks and refuses to start without it.
 // Wget has 60-second DNS, connect and read-idle timeouts and three tries.
 // These do not bound the whole transfer. Curl has a 60-second connect timeout
-// and an 1800-second transfer limit. Helper socket deadlines do not bound
-// this synchronous subprocess work.
+// and an 1800-second transfer limit. Nothing else bounds this synchronous
+// subprocess work.
 func doDownload(url, dest string) error {
 	wrapper := torWrapper()
 	if wrapper == "" {
@@ -313,7 +312,7 @@ func torWrapper() string {
 
 // ReadFileRoot requires the process to be root and returns os.ReadFile's result,
 // preserving errors for os.IsNotExist checks. Ordinary unprivileged TUI reads use
-// staged files. Separate helper operations can refresh privileged evidence.
+// staged files. Separate jobs can refresh privileged evidence.
 func ReadFileRoot(path string) ([]byte, error) {
 	if os.Geteuid() == 0 {
 		return os.ReadFile(path)

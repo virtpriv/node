@@ -7,26 +7,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/app"
-	"github.com/virtpriv/node/internal/servicecontrol"
 )
-
-type serviceControlStub struct {
-	requests []servicecontrol.Request
-	results  chan app.ServiceActionResult
-}
-
-func (s *serviceControlStub) Control(r servicecontrol.Request) <-chan app.ServiceActionResult {
-	s.requests = append(s.requests, r)
-	s.results = make(chan app.ServiceActionResult, 1)
-	return s.results
-}
-func (*serviceControlStub) Close() {}
 
 func TestServiceActionIdentityAndCompletionWhileHidden(t *testing.T) {
 	m, _ := statusModelFixture(t)
-	fake := &serviceControlStub{}
-	m.screenCtx.ServiceControls = fake
+	fake := &fakeJobs{}
+	m.screenCtx.Jobs = fake
 	m.nav.ActiveItem = secSystem
 	m.focusContent()
 	s := NewSystemHomeScreen(m.screenCtx)
@@ -41,10 +29,10 @@ func TestServiceActionIdentityAndCompletionWhileHidden(t *testing.T) {
 	}
 	requestMsg := requestCmd()
 	resultCmd := statusUpdate(&m, requestMsg)
-	if len(fake.requests) != 1 || fake.requests[0].Service() != "bitcoind" || fake.requests[0].Action() != "restart" {
-		t.Fatalf("wrong command: %v", fake.requests)
+	if fake.calls != 1 || fake.service(0) != (api.ServiceActionParams{Unit: "bitcoind", Action: "restart"}) {
+		t.Fatalf("wrong command: %v", fake.params)
 	}
-	if statusUpdate(&m, requestMsg) != nil || len(fake.requests) != 1 {
+	if statusUpdate(&m, requestMsg) != nil || fake.calls != 1 {
 		t.Fatal("replayed admission started twice")
 	}
 	press(tea.KeyDown)
@@ -71,11 +59,11 @@ func TestServiceActionIdentityAndCompletionWhileHidden(t *testing.T) {
 		}
 	}
 	press('r')
-	if press('y') != nil || len(fake.requests) != 1 {
+	if press('y') != nil || fake.calls != 1 {
 		t.Fatal("accepted a second action while busy")
 	}
 	m.nav.ActiveItem = secOnChain
-	fake.results <- app.ServiceActionResult{Outcome: app.ServiceActionUnconfirmed, Err: errors.New("injected read failure")}
+	fake.results <- done(app.JobUnconfirmed, errors.New("injected read failure"))
 	oldResult := resultCmd()
 	statusUpdate(&m, oldResult)
 	if s.svcPending != nil {
@@ -90,10 +78,10 @@ func TestServiceActionIdentityAndCompletionWhileHidden(t *testing.T) {
 	newRequest := press('y')()
 	newResult := statusUpdate(&m, newRequest)
 	statusUpdate(&m, oldResult)
-	if s.svcPending == nil || len(fake.requests) != 2 || fake.requests[1].Service() != "lnd" {
+	if s.svcPending == nil || fake.calls != 2 || fake.service(1).Unit != "lnd" {
 		t.Fatal("old completion cleared newer action")
 	}
-	fake.results <- app.ServiceActionResult{Outcome: app.ServiceActionCompleted}
+	fake.results <- fake.serviceDone()
 	statusUpdate(&m, newResult())
 	if s.svcPending != nil || !strings.Contains(s.svcResult, "lnd restart completed") {
 		t.Fatal("new action did not complete")
@@ -102,8 +90,8 @@ func TestServiceActionIdentityAndCompletionWhileHidden(t *testing.T) {
 
 func TestServiceMutationRejectsPredatingStatusAtAdmissionAndCompletion(t *testing.T) {
 	m, reader := statusModelFixture(t)
-	fake := &serviceControlStub{}
-	m.screenCtx.ServiceControls = fake
+	fake := &fakeJobs{}
+	m.screenCtx.Jobs = fake
 	m.nav.ActiveItem = secSystem
 	m.focusContent()
 	s := NewSystemHomeScreen(m.screenCtx)
@@ -123,7 +111,7 @@ func TestServiceMutationRejectsPredatingStatusAtAdmissionAndCompletion(t *testin
 	if m.screenCtx.Status.Services["tor"].Fresh() {
 		t.Fatal("pre-action read published")
 	}
-	fake.results <- app.ServiceActionResult{Outcome: app.ServiceActionCompleted}
+	fake.results <- fake.serviceDone()
 	if statusUpdate(&m, resultCmd()) != nil {
 		t.Fatal("completion started overlapping collector")
 	}

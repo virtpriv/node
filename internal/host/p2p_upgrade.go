@@ -25,11 +25,11 @@ type p2pUpgradeOps struct {
 }
 
 // UpgradeP2PToHybrid completes accepted root work independently of the terminal.
-// The helper supplies its fixed freshness-matrix action, keeping TLS staging
+// Its job supplies the fixed freshness matrix action, keeping TLS staging
 // inside the transition's completion boundary and before desired-state publication.
 func UpgradeP2PToHybrid(request p2p.UpgradeRequest, stage func() error, progress func(int)) error {
 	if os.Geteuid() != 0 {
-		return nothingChanged(errors.New("hybrid P2P requires the root helper"))
+		return nothingChanged(errors.New("hybrid P2P requires root"))
 	}
 	return upgradeP2PToHybrid(request, p2pUpgradeOps{
 		load: config.Load, address: system.ReadPublicIPv4,

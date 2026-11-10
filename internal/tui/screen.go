@@ -6,11 +6,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"time"
 
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/app"
-	"github.com/virtpriv/node/internal/autounlock"
 	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/lndrpc"
-	"github.com/virtpriv/node/internal/servicecontrol"
 	"github.com/virtpriv/node/internal/syncthing"
 )
 
@@ -49,14 +48,15 @@ type Screen interface {
 // read the current observation when rendering. No screen owns a second copy.
 
 type ScreenContext struct {
-	NodeUpdates         nodeUpdates
-	ChannelHistory      *channelHistoryContext
-	PaymentHistory      *paymentHistoryContext
-	OnChain             *OnChainContext
-	AutoUnlock          autoUnlockChanges
-	ServiceControls     serviceControls
-	PackageUpdates      packageUpdates
-	Reboots             reboots
+	NodeUpdates    nodeUpdates
+	ChannelHistory *channelHistoryContext
+	PaymentHistory *paymentHistoryContext
+	OnChain        *OnChainContext
+	// Jobs starts and watches the changes vpnd runs as jobs.
+	Jobs jobRunner
+	// shownJobs are the jobs whose outcome this TUI has shown, so a screen
+	// opened again does not show it a second time.
+	shownJobs           map[string]bool
 	ConnectionInfo      connectionInfoReader
 	Fees                feeReader
 	Syncthing           *app.Syncthing
@@ -71,7 +71,7 @@ type ScreenContext struct {
 	walletReadPending   bool
 	walletClient        *walletClientRequest
 	walletGeneration    uint64 // Scopes retained observations. Routine reads do not change it.
-	HelperWorkflows     *app.HelperWorkflows
+	Workflows           *app.Workflows
 	SSHAccess           *app.SSHAccess
 	AccountAccess       accountAccess
 	sshAuthRevision     uint64
@@ -86,16 +86,30 @@ type ScreenContext struct {
 	LatestChecked       bool   // the release check has answered, found or not
 }
 
-type serviceControls interface {
-	Control(servicecontrol.Request) <-chan app.ServiceActionResult
+// jobRunner starts and watches vpnd's jobs. Closing it stops watching, never
+// a job.
+type jobRunner interface {
+	Start(kind string, params any) <-chan app.JobUpdate
+	Watch(id string) <-chan app.JobUpdate
+	Latest(kind string) (api.Job, bool, error)
 	Close()
 }
 
-func (c *ScreenContext) serviceControls() serviceControls {
-	if c.ServiceControls == nil {
-		c.ServiceControls = app.NewServiceControls()
+func (c *ScreenContext) markShown(id string) {
+	if id == "" {
+		return
 	}
-	return c.ServiceControls
+	if c.shownJobs == nil {
+		c.shownJobs = map[string]bool{}
+	}
+	c.shownJobs[id] = true
+}
+
+func (c *ScreenContext) jobs() jobRunner {
+	if c.Jobs == nil {
+		c.Jobs = app.NewJobs()
+	}
+	return c.Jobs
 }
 
 func (c *ScreenContext) syncthing() *app.Syncthing {
@@ -265,42 +279,4 @@ func (c *ScreenContext) sshAccess() *app.SSHAccess {
 		return c.SSHAccess
 	}
 	return app.NewSSHAccess()
-}
-
-type autoUnlockChanges interface {
-	Enable(autounlock.Password) <-chan app.AutoUnlockResult
-	Disable() <-chan app.AutoUnlockResult
-	Close()
-}
-
-func (c *ScreenContext) autoUnlock() autoUnlockChanges {
-	if c.AutoUnlock == nil {
-		c.AutoUnlock = app.NewAutoUnlockChanges()
-	}
-	return c.AutoUnlock
-}
-
-type packageUpdates interface {
-	Update() <-chan app.PackageUpdateResult
-	Close()
-}
-
-func (c *ScreenContext) packageUpdates() packageUpdates {
-	if c.PackageUpdates == nil {
-		c.PackageUpdates = app.NewPackageUpdates()
-	}
-	return c.PackageUpdates
-}
-
-// reboots releases local helper observation when the terminal exits.
-type reboots interface {
-	Request() <-chan app.RebootResult
-	Close()
-}
-
-func (c *ScreenContext) reboots() reboots {
-	if c.Reboots == nil {
-		c.Reboots = app.NewReboots()
-	}
-	return c.Reboots
 }

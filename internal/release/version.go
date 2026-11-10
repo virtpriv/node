@@ -29,16 +29,6 @@ func IsStable(version string) bool {
 // Development builds and noncanonical strings cannot authorize an update.
 // Compatibility of a newer release is a separate check.
 func Newer(current, target string) (bool, error) {
-	if _, err := SameMajor(current, target); err != nil {
-		return false, err
-	}
-	return semver.Compare("v"+target, "v"+current) > 0, nil
-}
-
-// SameMajor checks the current self-update version shape and major-version
-// policy for both the TUI and helper. It does not establish newer ordering
-// or compatibility of an appliance transition.
-func SameMajor(current, target string) (bool, error) {
 	if !ValidVersion(current) {
 		return false, fmt.Errorf(
 			"running version %q is not a release build, "+
@@ -48,6 +38,5 @@ func SameMajor(current, target string) (bool, error) {
 		return false, fmt.Errorf(
 			"%q is not a valid release version", target)
 	}
-	return strings.SplitN(current, ".", 2)[0] ==
-		strings.SplitN(target, ".", 2)[0], nil
+	return semver.Compare("v"+target, "v"+current) > 0, nil
 }

@@ -30,7 +30,8 @@ import (
 
 	"github.com/lightningnetwork/lnd/lnrpc"
 
-	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/api"
+	"github.com/virtpriv/node/internal/board"
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/paths"
 )
@@ -159,11 +160,7 @@ func requestCredentialRestage(ctx context.Context) bool {
 		return false
 	}
 	credRestageAt = time.Now()
-	session, err := helper.StartContext(ctx, helper.VerbStageLNDCredentials, nil)
-	if err == nil {
-		err = session.Wait(nil)
-	}
-	if err != nil {
+	if err := api.Call(ctx, api.VerbStageLNDCredentials, nil, nil); err != nil {
 		logger.Status("stage-lnd-credentials: %v", err)
 		return false
 	}
@@ -260,7 +257,7 @@ func NewStagedClient() (*Client, error) {
 }
 
 func stagedTLSCredentials() (credentials.TransportCredentials, error) {
-	certData, err := helper.ReadBoard(paths.StateLNDTLSCert)
+	certData, err := board.Read(paths.StateLNDTLSCert)
 	if err != nil {
 		return nil, fmt.Errorf("read TLS cert: %w", err)
 	}
@@ -281,7 +278,7 @@ func (c *Client) loadStaged() error {
 
 	// Read the staged admin macaroon copy (staged at wallet
 	// creation, re-staged whenever an operation invalidates it).
-	macBytes, err := helper.ReadBoard(paths.StateLNDMacaroon)
+	macBytes, err := board.Read(paths.StateLNDMacaroon)
 	if err != nil {
 		return fmt.Errorf("read macaroon: %w", err)
 	}

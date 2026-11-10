@@ -534,7 +534,7 @@ func renderWalletStateUnavailable(w, h int) string {
 	p.warn("The TUI could not verify whether an LND wallet exists.")
 	p.blank()
 	p.dim("Wallet actions are disabled rather than guessing.")
-	p.dim("Check: journalctl -u vpn-helperd")
+	p.dim("Check: journalctl -t vpnd")
 	return p.renderWithBottomButtons(
 		[]string{"Unavailable"}, 0, false, h)
 }

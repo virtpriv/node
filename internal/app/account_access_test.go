@@ -10,7 +10,7 @@ import (
 	"testing/synctest"
 
 	"github.com/virtpriv/node/internal/accountaccess"
-	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/sshkeys"
 )
 
@@ -27,7 +27,7 @@ func TestAccountImportRechecksSourceBeforeOwnerWrite(t *testing.T) {
 			r := NewAccountAccess(ssh)
 			defer r.Close()
 			r.call = func(_ context.Context, verb string, params, result any) error {
-				if verb != helper.VerbReadAccount {
+				if verb != api.VerbReadAccount {
 					t.Fatalf("verb: %s", verb)
 				}
 				switch failure {

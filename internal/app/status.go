@@ -7,9 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/bitcoin"
+	"github.com/virtpriv/node/internal/bytesize"
 	"github.com/virtpriv/node/internal/config"
-	"github.com/virtpriv/node/internal/helper"
 	"github.com/virtpriv/node/internal/lndrpc"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/servicecontrol"
@@ -150,18 +151,11 @@ func NewStatusCollector() *StatusCollector {
 			return system.ReadSecurityUpdates(paths.AutoUpgrades)
 		},
 		size: func(ctx context.Context) (string, error) {
-			s, err := helper.StartContext(ctx, helper.VerbDirSize, helper.DirSizeParams{Which: "lnd"})
-			if err != nil {
+			var result api.DirSizeResult
+			if err := api.Call(ctx, api.VerbDirSize, api.DirSizeParams{Which: "lnd"}, &result); err != nil {
 				return "", err
 			}
-			var result helper.DirSizeResult
-			if err := s.Wait(&result); err != nil {
-				return "", err
-			}
-			if result.Size == "" || result.Size == "N/A" {
-				return "", errors.New("LND directory size unavailable")
-			}
-			return result.Size, nil
+			return bytesize.Format(result.Bytes), nil
 		},
 	}}
 }

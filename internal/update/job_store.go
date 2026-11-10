@@ -17,7 +17,7 @@ import (
 )
 
 const Root = paths.PrivateDir + "/updates"
-const LockPath = paths.RuntimeDir + "/operations.lock"
+const LockPath = paths.OperationsLock
 const Service = protocol.WorkerUnit
 
 // A record is the part of current.json that the installed helper and the
@@ -39,6 +39,8 @@ type record struct {
 		} `json:"manifest"`
 		Network string `json:"network"`
 	} `json:"review"`
+	// JobID is the Node Update's job ID in the vpn API, saved at Start.
+	JobID       string          `json:"job_id"`
 	WorkerHash  string          `json:"worker_hash"`
 	ConfigHash  string          `json:"config_hash"`
 	Phase       string          `json:"phase"`
@@ -110,8 +112,14 @@ func amendRecord(root string, set map[string]any) error {
 // each side effect. Completed is advisory: live files and service invocations
 // are verified again after an interruption.
 type job struct {
-	Previous   string          `json:"previous,omitempty"`
-	Schema     int             `json:"schema"`
+	Previous string `json:"previous,omitempty"`
+	Schema   int    `json:"schema"`
+	// JobID, Accepted and Ended are the Node Update as a job of the vpn API:
+	// its ID and when Start accepted it, written by the installed side, and
+	// when it completed or was canceled.
+	JobID      string          `json:"job_id,omitempty"`
+	Accepted   time.Time       `json:"accepted,omitzero"`
+	Ended      time.Time       `json:"ended,omitzero"`
 	Review     protocol.Review `json:"review"`
 	WorkerHash string          `json:"worker_hash"`
 	PlanHash   string          `json:"plan_hash"`
@@ -182,7 +190,7 @@ func readJSON(path string, result any) error {
 	return nil
 }
 
-// InstalledVersion prevents a helper left in memory from applying older rules
+// InstalledVersion prevents a vpnd left in memory from applying older rules
 // after the worker has published the new executable.
 func InstalledVersion(version string) error {
 	j, err := loadRecord(Root)
@@ -190,7 +198,7 @@ func InstalledVersion(version string) error {
 		return err
 	}
 	if j != nil && j.Phase == "complete" && j.Review.Manifest.Version != version {
-		return errors.New("VPN was updated, reconnect to its helper")
+		return errors.New("VPN was updated. Quit and run vpn to open it again.")
 	}
 	return nil
 }
@@ -245,15 +253,13 @@ func saveJob(root string, j *job) error {
 	return writeJSON(filepath.Join(root, "current.json"), j)
 }
 
-// MutationGuard is called while holding LockPath. An interrupted job continues
-// to exclude conflicting writes even while no worker is running.
-func MutationGuard() error {
+// Unfinished reports an unfinished Node Update and its job ID, for the vpn
+// API's busy rule. An interrupted update keeps other changes out even while
+// no worker runs.
+func Unfinished() (bool, string, error) {
 	j, err := loadRecord(Root)
-	if err != nil {
-		return err
+	if err != nil || j == nil {
+		return false, "", err
 	}
-	if j != nil && j.active() {
-		return errors.New("an update is unfinished, open Node Updates")
-	}
-	return nil
+	return j.active(), j.JobID, nil
 }

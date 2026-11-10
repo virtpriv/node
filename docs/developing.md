@@ -65,9 +65,14 @@ mainnet value.
 ## Owner account and access
 
 vpn leaves sudo credential caching at the host default. The TUI runs
-unprivileged as `vpn`. Its privileged node operations go through a
-socket-activated root helper with fixed, validated operations and kernel
-peer-identity checks.
+unprivileged as `vpn`. Its privileged node operations go through the vpn API,
+served by `vpnd`, a socket-activated root service with fixed, validated
+requests and kernel peer-identity checks. Reads answer at once. Each change is
+a job: `vpnd` records it under `/var/lib/vpn/private/jobs/`, starts it in its
+own systemd service (`vpn-job-<id>.service`, through `systemd-run`) and
+answers with its ID, and the TUI reads the job's record until it ends. One
+change runs at a time, and a second is refused at once, naming the job in the
+way. `journalctl -t vpnd` shows `vpnd` and every job.
 
 **System → Accounts** lists `vpn` and supported login accounts, plus root as a
 protected system account whose keys can also be imported. The screen does not
@@ -105,10 +110,14 @@ Completion means systemd reported `active` after Start or Restart, or
 certificate. These checks do not establish wallet unlock, blockchain
 synchronization or network reachability.
 
-An unconfirmed outcome can mean the helper connection was lost while the host
-continued working. An older helper that supplies no verified result also
-produces an unconfirmed outcome, so the TUI and helper must come from the same
-build.
+An unconfirmed outcome means a job ended without a result, for example killed
+or cut by a power cut, or that the TUI lost `vpnd`'s answers. It is never
+retried. A job's outcome stays readable after the TUI closes and after a
+restart: a running job always shows on the screen of its kind, a completed one
+for 24 hours, a failed or unknown one until a newer job of its kind. Every
+request carries the API number its TUI speaks, and `vpnd` refuses a number it
+does not serve, so a TUI left open across an update may be asked to open
+again.
 
 Update Packages waits while Debian's daily update runs, at most an hour. It then
 refreshes the package lists, runs Debian's `unattended-upgrade` with vpn's rules
@@ -120,8 +129,8 @@ After every package change apt runs `vpn reboot-check`, from
 `/etc/apt/apt.conf.d/99-vpn-reboot-check`. It raises Debian's restart flag,
 `/var/run/reboot-required`, when the running kernel is older than the newest one
 installed, or when Tor, SSH, Bitcoin Core or fail2ban still runs a program or
-library file an update replaced. LND and the root helper carry their libraries
-inside their programs, so they are not checked. Install step 11 and Update
+library file an update replaced. LND and vpn carry their libraries inside
+their programs, so they are not checked. Install step 11 and Update
 Packages also run the check directly, since with nothing to install apt runs no
 hook. The check never makes apt fail. When the flag is up, Debian's nightly job
 restarts the node right after its run. The install, Update Packages and a node

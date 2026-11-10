@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/app"
 	"github.com/virtpriv/node/internal/autounlock"
 	"github.com/virtpriv/node/internal/config"
@@ -94,7 +96,7 @@ func TestAutoUnlockHelperResponseFailureIsUnknownWithoutRawError(t *testing.T) {
 		Err: errors.New("injected socket detail"),
 	})
 	view := s.View(82, 34)
-	for _, want := range []string{"Auto-Unlock Change Not Confirmed", "may still finish", "before retrying"} {
+	for _, want := range []string{"Auto-Unlock Change Not Confirmed", "may have completed", "check the final state"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("helper failure view missing %q:\n%s", want, view)
 		}
@@ -161,7 +163,7 @@ func TestSystemServiceRowShowsLockedLND(t *testing.T) {
 func deliverAutoUnlock(t *testing.T, s *AutoUnlockScreen, result app.AutoUnlockResult) {
 	t.Helper()
 	fake := &autoUnlockStub{results: make(chan app.AutoUnlockResult, 1)}
-	s.ctx.AutoUnlock = fake
+	s.ctx.Jobs = fake
 	var cmd tea.Cmd
 	if s.mode == autoUnlockEnable {
 		s.pw1.SetValue("test wallet password")
@@ -177,32 +179,59 @@ func deliverAutoUnlock(t *testing.T, s *AutoUnlockScreen, result app.AutoUnlockR
 	s.HandleMsg(cmd())
 }
 
+// autoUnlockStub stands for vpnd's auto-unlock jobs. A test sends the
+// result it wants on results, and the stub turns it into the job's final
+// update, as vpnd's record would give it.
 type autoUnlockStub struct {
 	calls    int
 	enable   bool
-	password autounlock.Password
+	password string
 	results  chan app.AutoUnlockResult
 }
 
-func (f *autoUnlockStub) Enable(password autounlock.Password) <-chan app.AutoUnlockResult {
+func (f *autoUnlockStub) Start(kind string, params any) <-chan app.JobUpdate {
 	f.calls++
-	f.enable = true
-	f.password = password
-	return f.results
+	f.enable = kind == api.KindAutoUnlockOn
+	if p, ok := params.(api.AutoUnlockOnParams); ok {
+		f.password = p.Password
+	}
+	updates := make(chan app.JobUpdate, 1)
+	enable, results := f.enable, f.results
+	go func() {
+		updates <- autoUnlockUpdate(enable, <-results)
+		close(updates)
+	}()
+	return updates
 }
-func (f *autoUnlockStub) Disable() <-chan app.AutoUnlockResult {
-	f.calls++
-	f.enable = false
-	return f.results
+
+func (f *autoUnlockStub) Watch(string) <-chan app.JobUpdate  { return make(chan app.JobUpdate) }
+func (*autoUnlockStub) Latest(string) (api.Job, bool, error) { return api.Job{}, false, nil }
+func (*autoUnlockStub) Close()                               {}
+
+func autoUnlockUpdate(enable bool, r app.AutoUnlockResult) app.JobUpdate {
+	kind := api.KindAutoUnlockOff
+	if enable {
+		kind = api.KindAutoUnlockOn
+	}
+	u := app.JobUpdate{Job: api.Job{Kind: kind}, Final: true, Err: r.Err}
+	switch r.Observation {
+	case app.AutoUnlockObserved:
+		raw, _ := json.Marshal(r.Transition)
+		u.Job.State, u.Job.Result, u.Outcome = api.JobDone, raw, app.JobCompleted
+	case app.AutoUnlockNotStarted:
+		u.Outcome = app.JobNotStarted
+	default:
+		u.Outcome = app.JobUnconfirmed
+	}
+	return u
 }
-func (*autoUnlockStub) Close() {}
 
 func TestAutoUnlockOwnsSubmissionAndHiddenCompletion(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "enable", true: "disable"}[enabled], func(t *testing.T) {
 			ctx := autoUnlockTestContext(enabled)
 			fake := &autoUnlockStub{results: make(chan app.AutoUnlockResult, 1)}
-			ctx.AutoUnlock = fake
+			ctx.Jobs = fake
 			s := NewAutoUnlockScreen(ctx)
 			var cmd tea.Cmd
 			if enabled {
@@ -218,7 +247,7 @@ func TestAutoUnlockOwnsSubmissionAndHiddenCompletion(t *testing.T) {
 				_, cmd = s.tryConfirm()
 			}
 			if cmd == nil || fake.calls != 1 || fake.enable == enabled ||
-				(!enabled && fake.password.Text() != "test wallet password") ||
+				(!enabled && fake.password != "test wallet password") ||
 				s.pw1.Value() != "" || s.pw2.Value() != "" {
 				t.Fatal("submission did not preserve the operation and clear the form")
 			}
@@ -285,7 +314,7 @@ func TestAutoUnlockOwnsSubmissionAndHiddenCompletion(t *testing.T) {
 func TestAutoUnlockBusyTabAndDelayedDone(t *testing.T) {
 	ctx := autoUnlockTestContext(true)
 	fake := &autoUnlockStub{results: make(chan app.AutoUnlockResult, 1)}
-	ctx.AutoUnlock = fake
+	ctx.Jobs = fake
 	s := NewAutoUnlockScreen(ctx)
 	cancel := s.closeCommand()
 	_, cmd := s.HandleKey("enter", tea.KeyPressMsg{})
@@ -365,7 +394,7 @@ func TestAutoUnlockPasteAndByteValidation(t *testing.T) {
 	}
 	fake := &autoUnlockStub{results: make(chan app.AutoUnlockResult, 1)}
 	ctx := autoUnlockTestContext(false)
-	ctx.AutoUnlock = fake
+	ctx.Jobs = fake
 	s := NewAutoUnlockScreen(ctx)
 	s.pw1.SetValue(strings.Repeat("界", 171))
 	s.pw2.SetValue(s.pw1.Value())

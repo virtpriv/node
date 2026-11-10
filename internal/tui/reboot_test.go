@@ -12,22 +12,10 @@ import (
 	"github.com/virtpriv/node/internal/system"
 )
 
-type rebootsStub struct {
-	calls   int
-	results chan app.RebootResult
-}
-
-func (s *rebootsStub) Request() <-chan app.RebootResult {
-	s.calls++
-	s.results = make(chan app.RebootResult, 1)
-	return s.results
-}
-func (*rebootsStub) Close() {}
-
 func TestRebootHiddenCompletionRetryAndDuplicateAdmission(t *testing.T) {
 	m, _ := statusModelFixture(t)
-	fake := &rebootsStub{}
-	m.screenCtx.Reboots = fake
+	fake := &fakeJobs{}
+	m.screenCtx.Jobs = fake
 	m.nav.ActiveItem, m.nav.Cursor = secSystem, secSystem
 	m.focusContent()
 	s := NewSystemHomeScreen(m.screenCtx)
@@ -74,7 +62,7 @@ func TestRebootHiddenCompletionRetryAndDuplicateAdmission(t *testing.T) {
 	if m.nav.ActiveSection() == secSystem {
 		t.Fatal("System did not hide")
 	}
-	fake.results <- app.RebootResult{Outcome: app.RebootUnconfirmed, Err: errors.New("injected lost reboot reply")}
+	fake.results <- done(app.JobUnconfirmed, errors.New("injected lost reboot reply"))
 	oldResult := resultCmd()
 	statusUpdate(&m, oldResult)
 	if s.rebootPending != nil {
@@ -103,7 +91,7 @@ func TestRebootHiddenCompletionRetryAndDuplicateAdmission(t *testing.T) {
 	if s.rebootPending == nil || fake.calls != 2 {
 		t.Fatal("old completion cleared new attempt")
 	}
-	fake.results <- app.RebootResult{Outcome: app.RebootAccepted}
+	fake.results <- done(app.JobCompleted, nil)
 	statusUpdate(&m, newResult())
 	view = ansi.Strip(m.viewMain())
 	if s.rebootPending != nil || !strings.Contains(view, "Reboot requested.") || strings.Contains(view, "unconfirmed") {
@@ -122,8 +110,8 @@ func TestRebootHiddenCompletionRetryAndDuplicateAdmission(t *testing.T) {
 
 func TestRebootRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 	m, reader := statusModelFixture(t)
-	fake := &rebootsStub{}
-	m.screenCtx.Reboots = fake
+	fake := &fakeJobs{}
+	m.screenCtx.Jobs = fake
 	m.nav.ActiveItem = secSystem
 	m.focusContent()
 	s := NewSystemHomeScreen(m.screenCtx)
@@ -146,7 +134,7 @@ func TestRebootRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 	if m.screenCtx.Status.Reboot.Fresh() {
 		t.Fatal("pre-request read published")
 	}
-	fake.results <- app.RebootResult{Outcome: app.RebootAccepted}
+	fake.results <- done(app.JobCompleted, nil)
 	if statusUpdate(&m, resultCmd()) != nil {
 		t.Fatal("completion started overlapping status collector")
 	}
@@ -171,8 +159,8 @@ func TestRebootRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 
 func TestRebootRejectsReplacedScreenRequestsAndResults(t *testing.T) {
 	m, _ := statusModelFixture(t)
-	fake := &rebootsStub{}
-	m.screenCtx.Reboots = fake
+	fake := &fakeJobs{}
+	m.screenCtx.Jobs = fake
 	old := NewSystemHomeScreen(m.screenCtx)
 	old.rebootPending = &rebootAttempt{}
 	request := rebootRequestMsg{owner: old, attempt: old.rebootPending}
@@ -189,7 +177,7 @@ func TestRebootRejectsReplacedScreenRequestsAndResults(t *testing.T) {
 	m.sectionScreens[secSystem] = replacement
 	m.statusScope = m.currentStatusScope()
 	m.screenCtx.Status = &app.StatusSnapshot{Reboot: freshStatus(system.RebootFlag{})}
-	fake.results <- app.RebootResult{Outcome: app.RebootAccepted}
+	fake.results <- done(app.JobCompleted, nil)
 	if statusUpdate(&m, resultCmd()) != nil || !m.screenCtx.Status.Reboot.Fresh() {
 		t.Fatal("retired owner result invalidated current status")
 	}

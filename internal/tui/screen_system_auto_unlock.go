@@ -3,11 +3,13 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/app"
 	"github.com/virtpriv/node/internal/autounlock"
 	"github.com/virtpriv/node/internal/logger"
@@ -40,6 +42,27 @@ type autoUnlockDoneMsg struct {
 	owner   *AutoUnlockScreen
 	attempt uint64
 	result  app.AutoUnlockResult
+	final   bool
+	updates <-chan app.JobUpdate
+}
+
+// autoUnlockRestoreMsg is the newest auto-unlock job, read when the screen
+// opens.
+type autoUnlockRestoreMsg struct {
+	owner   *AutoUnlockScreen
+	attempt uint64
+	job     api.Job
+	found   bool
+}
+
+func watchAutoUnlockCmd(s *AutoUnlockScreen, attempt uint64, updates <-chan app.JobUpdate) tea.Cmd {
+	return func() tea.Msg {
+		u, ok := <-updates
+		if !ok {
+			return nil
+		}
+		return autoUnlockDoneMsg{owner: s, attempt: attempt, result: app.AutoUnlockResultOf(u), final: u.Final, updates: updates}
+	}
 }
 
 type closeAutoUnlockMsg struct {
@@ -69,6 +92,10 @@ type AutoUnlockScreen struct {
 
 	// Final verified host result, available only after successful observation.
 	result autounlock.Result
+
+	// restored says the result shown came from the record of a job this
+	// screen did not start, so Done leads to the form instead of closing.
+	restored bool
 }
 
 func NewAutoUnlockScreen(
@@ -113,11 +140,28 @@ func newAutoUnlockPwInput() textinput.Model {
 
 // ── Screen interface ────────────────────────────────────
 
+// Init also reads the newest auto-unlock job, so a screen opened during a
+// change shows it running, and an outcome this TUI has not shown yet
+// appears (decision 3).
 func (s *AutoUnlockScreen) Init() tea.Cmd {
+	restore := s.restoreCmd()
 	if s.mode == autoUnlockEnable {
-		return s.pw1.Focus()
+		return tea.Batch(s.pw1.Focus(), restore)
 	}
-	return nil
+	return restore
+}
+
+func (s *AutoUnlockScreen) restoreCmd() tea.Cmd {
+	runner, attempt := s.ctx.jobs(), s.attempt
+	return func() tea.Msg {
+		msg := autoUnlockRestoreMsg{owner: s, attempt: attempt}
+		for _, kind := range []string{api.KindAutoUnlockOn, api.KindAutoUnlockOff} {
+			if j, ok, err := runner.Latest(kind); err == nil && ok && (!msg.found || j.ID > msg.job.ID) {
+				msg.job, msg.found = j, true
+			}
+		}
+		return msg
+	}
 }
 
 func (s *AutoUnlockScreen) HandleKey(
@@ -162,7 +206,7 @@ func (s *AutoUnlockScreen) HandleKey(
 					s.resetToEnableForm()
 					return s, s.pw1.Focus()
 				}
-				return s, s.closeCommand()
+				return s, s.doneCommand()
 			case "up", "shift+tab":
 				if s.ctx.HasTabs {
 					return s, emitFocusTabBar
@@ -176,7 +220,7 @@ func (s *AutoUnlockScreen) HandleKey(
 		case "ctrl+c":
 			return s, tea.Quit
 		case "enter":
-			return s, s.closeCommand()
+			return s, s.doneCommand()
 		case "left":
 			return s, emitFocusSidebar
 		case "up", "shift+tab":
@@ -426,10 +470,38 @@ func (s *AutoUnlockScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
 	switch m := msg.(type) {
+	case autoUnlockRestoreMsg:
+		if m.owner != s || m.attempt != s.attempt || s.state != auStateForm || !m.found {
+			return s, nil
+		}
+		if !m.job.Finished() {
+			s.mode = autoUnlockDisable
+			if m.job.Kind == api.KindAutoUnlockOn {
+				s.mode = autoUnlockEnable
+			}
+			s.state = auStateRunning
+			s.attempt++
+			return s, watchAutoUnlockCmd(s, s.attempt, s.ctx.jobs().Watch(m.job.ID))
+		}
+		if s.ctx.shownJobs[m.job.ID] || !jobVisible(m.job, time.Now()) {
+			return s, nil
+		}
+		s.mode = autoUnlockDisable
+		if m.job.Kind == api.KindAutoUnlockOn {
+			s.mode = autoUnlockEnable
+		}
+		s.state, s.restored = auStateRunning, true
+		return s, func() tea.Msg {
+			return autoUnlockDoneMsg{owner: s, attempt: s.attempt, result: app.AutoUnlockResultOf(finalUpdate(m.job)), final: true}
+		}
 	case autoUnlockDoneMsg:
 		if m.owner != s || m.attempt != s.attempt || s.state != auStateRunning {
 			return s, nil
 		}
+		if !m.final {
+			return s, watchAutoUnlockCmd(s, m.attempt, m.updates)
+		}
+		s.ctx.markShown(m.result.JobID)
 		s.observation = m.result.Observation
 		s.result = m.result.Transition
 		if m.result.Observation != app.AutoUnlockObserved {
@@ -503,14 +575,31 @@ func (s *AutoUnlockScreen) startOperation(password autounlock.Password) tea.Cmd 
 	s.result = autounlock.Result{}
 	s.pw1.Reset()
 	s.pw2.Reset()
-	var results <-chan app.AutoUnlockResult
+	s.restored = false
+	var updates <-chan app.JobUpdate
 	if s.mode == autoUnlockEnable {
-		results = s.ctx.autoUnlock().Enable(password)
+		updates = s.ctx.jobs().Start(api.KindAutoUnlockOn, api.AutoUnlockOnParams{Password: password.Text()})
 	} else {
-		results = s.ctx.autoUnlock().Disable()
+		updates = s.ctx.jobs().Start(api.KindAutoUnlockOff, nil)
 	}
-	attempt := s.attempt
-	return func() tea.Msg { return autoUnlockDoneMsg{owner: s, attempt: attempt, result: <-results} }
+	return watchAutoUnlockCmd(s, s.attempt, updates)
+}
+
+// doneCommand leaves a result. After a restored result the form follows,
+// so an old outcome never stands in the owner's way.
+func (s *AutoUnlockScreen) doneCommand() tea.Cmd {
+	if !s.restored {
+		return s.closeCommand()
+	}
+	s.restored = false
+	if s.ctx.Cfg.AutoUnlock {
+		s.attempt++
+		s.mode, s.state, s.result, s.errMsg = autoUnlockDisable, auStateForm, autounlock.Result{}, ""
+		s.focusZone, s.btnIdx = auZoneButtons, 1
+		return nil
+	}
+	s.resetToEnableForm()
+	return s.pw1.Focus()
 }
 
 func (s *AutoUnlockScreen) closeCommand() tea.Cmd {
@@ -688,11 +777,11 @@ func (s *AutoUnlockScreen) viewError(
 	case app.AutoUnlockUnknown:
 		p.title(theme.Header, "Auto-Unlock Change Not Confirmed")
 		p.blank()
-		p.warnWrap("The change may have completed, or the helper may still finish it. Do not assume LND is online or that auto-unlock is correctly configured. Have your administrator check the final state before retrying.")
+		p.warnWrap("The change may have completed. Do not assume LND is online or that auto-unlock is correctly configured. Have your administrator check the final state before retrying.")
 	case app.AutoUnlockNotStarted:
 		p.title(theme.Header, "Auto-Unlock Change Not Started")
 		p.blank()
-		p.warnWrap("The request was not sent to the helper. Reopen the TUI before trying again.")
+		p.warnWrap("The change was not started. " + s.errMsg)
 	default:
 		p.title(theme.Header, "Repair Required")
 		p.blank()

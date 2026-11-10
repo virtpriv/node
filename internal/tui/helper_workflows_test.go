@@ -4,19 +4,21 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/app"
 	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/p2p"
 )
 
-func progressFixture(t *testing.T, kind app.HelperWorkflowKind, ctx *ScreenContext) *InstallProgressScreen {
-	// A closed owner supplies real operation identity and step metadata without
+func progressFixture(t *testing.T, kind app.WorkflowKind, ctx *ScreenContext) *InstallProgressScreen {
+	// A closed owner supplies real operation identity and step names without
 	// sending a request. Tests deliver controlled events through Model.Update.
-	w := app.NewHelperWorkflows("2.1.1")
+	w := app.NewWorkflows("2.1.1")
 	w.Close()
-	var op *app.HelperOperation
+	var op *app.Operation
 	switch kind {
 	case app.SyncthingInstall:
 		op = w.InstallSyncthing()
@@ -28,7 +30,14 @@ func progressFixture(t *testing.T, kind app.HelperWorkflowKind, ctx *ScreenConte
 	return s
 }
 
-func TestHelperProgressRoutesToOwnerAndRejectsReplay(t *testing.T) {
+// look is the record of a running Syncthing install at step n.
+func look(n int) api.Job {
+	now := time.Now()
+	return api.Job{ID: "20261109-100000-aaaaaa", Kind: api.KindSyncthingInstall, Title: "Install Syncthing", State: api.JobStarted,
+		Steps: api.SyncthingInstallStepNames("2.1.1"), StepNumber: n, StepStarts: []time.Time{now}}
+}
+
+func TestProgressRoutesToOwnerAndRejectsReplay(t *testing.T) {
 	ctx := &ScreenContext{Cfg: config.Default()}
 	progress := progressFixture(t, app.SyncthingInstall, ctx)
 	owner := &SyncthingInstallScreen{ctx: ctx, step: syncInstallProgress, progress: progress}
@@ -40,41 +49,31 @@ func TestHelperProgressRoutesToOwnerAndRejectsReplay(t *testing.T) {
 	m.nav.ActiveItem = secWallet
 	completed := 0
 	progress.onDone = func() tea.Cmd { completed++; return nil }
-	send := func(index int, result *app.HelperWorkflowResult) tea.Cmd {
+	send := func(event app.WorkflowProgress) tea.Cmd {
 		t.Helper()
-		updated, cmd := m.Update(helperProgressMsg{operation: progress.operation, event: app.HelperProgress{Index: index, Result: result}})
+		updated, cmd := m.Update(workflowProgressMsg{operation: progress.operation, event: event})
 		m = updated.(Model)
 		return cmd
 	}
-	if send(0, &app.HelperWorkflowResult{HelperSucceeded: true}) != nil || progress.done {
-		t.Fatal("success accepted before progress completed")
-	}
-	if send(-1, nil) != nil || send(1, nil) != nil {
-		t.Fatal("out-of-order event scheduled another reader")
-	}
-	if send(0, nil) == nil || progress.current != 1 {
+	if send(app.WorkflowProgress{Job: look(3)}) == nil || progress.job.StepNumber != 3 {
 		t.Fatal("hidden owner lost progress to idle confirmation")
 	}
-	if send(0, nil) != nil || progress.current != 1 {
-		t.Fatal("duplicate progress scheduled a second reader")
-	}
-	for i := 1; i < len(progress.steps); i++ {
-		send(i, nil)
-	}
-	result := &app.HelperWorkflowResult{HelperSucceeded: true}
-	send(len(progress.steps), result)
-	send(len(progress.steps), result)
+	result := &app.WorkflowResult{JobDone: true, Outcome: app.JobCompleted}
+	send(app.WorkflowProgress{Result: result})
+	send(app.WorkflowProgress{Result: result})
 	if !progress.done || completed != 1 || idle.progress != nil {
 		t.Fatal("completion ownership or replay guard failed")
 	}
 	orphan := progressFixture(t, app.SyncthingInstall, ctx)
-	_, cmd := m.Update(helperProgressMsg{operation: orphan.operation, event: app.HelperProgress{Index: 0}})
-	if cmd != nil {
+	m.Update(workflowProgressMsg{operation: orphan.operation, event: app.WorkflowProgress{Job: look(5)}})
+	if progress.job.StepNumber != 3 {
 		t.Fatal("removed operation reached another screen")
 	}
 }
 
-func TestHelperActiveTabAndDelayedClose(t *testing.T) {
+// S6: a Syncthing install or P2P switch runs in its own job, so its tab may
+// be closed while it runs. Replacing the screen is still refused.
+func TestProgressTabClosesWhileItRunsAndDelayedDone(t *testing.T) {
 	ctx := &ScreenContext{Cfg: config.Default()}
 	progress := progressFixture(t, app.SyncthingInstall, ctx)
 	owner := &SyncthingInstallScreen{ctx: ctx, step: syncInstallProgress, progress: progress}
@@ -84,18 +83,15 @@ func TestHelperActiveTabAndDelayedClose(t *testing.T) {
 		{Kind: tabSyncthingInstall, Parent: tabSyncthing, Section: secAddons, Screen: owner},
 	}}
 	m.nav.ActiveItem = secAddons
-	for _, index := range []int{1, 2} {
-		updated, _ := m.closeTab(index)
-		if len(updated.(Model).tabs) != 2 {
-			t.Fatal("active operation was closed directly or through its parent")
-		}
-	}
 	updated, _ := m.Update(openTabMsg{Kind: tabSyncthingInstall, Replace: true, Screen: NewSyncthingInstallScreen(ctx)})
-	m = updated.(Model)
-	if m.tabs[1].Screen != owner {
-		t.Fatal("active operation was replaced")
+	if updated.(Model).tabs[1].Screen != owner {
+		t.Fatal("running operation was replaced")
 	}
-	progress.HandleMsg(helperProgressMsg{operation: progress.operation, event: app.HelperProgress{Result: &app.HelperWorkflowResult{Err: errors.New("lost connection")}}})
+	closed, _ := m.closeTab(2)
+	if len(closed.(Model).tabs) != 1 {
+		t.Fatal("a running job's tab could not be closed")
+	}
+	progress.HandleMsg(workflowProgressMsg{operation: progress.operation, event: app.WorkflowProgress{Result: &app.WorkflowResult{Outcome: app.JobUnconfirmed, Err: errors.New("lost connection")}}})
 	_, closeCmd := progress.HandleKey("enter", tea.KeyPressMsg{})
 	// The user navigates elsewhere before the Done command is delivered.
 	m.nav.ActiveItem = secSystem
@@ -113,51 +109,50 @@ func TestHelperActiveTabAndDelayedClose(t *testing.T) {
 	}
 }
 
-func TestHelperConfigurationPublicationPreservesNewerSettings(t *testing.T) {
+func TestProgressConfigurationPublicationPreservesNewerSettings(t *testing.T) {
 	ctx := &ScreenContext{Cfg: config.Default()}
 	progress := progressFixture(t, app.SyncthingInstall, ctx)
 	fresh := *ctx.Cfg
 	fresh.SyncthingEnabled = true
 	// This newer auto-unlock result arrives after the application read its file.
 	ctx.Cfg.AutoUnlock = true
-	for i := range progress.steps {
-		progress.HandleMsg(helperProgressMsg{operation: progress.operation, event: app.HelperProgress{Index: i}})
-	}
-	progress.HandleMsg(helperProgressMsg{operation: progress.operation, event: app.HelperProgress{Index: len(progress.steps), Result: &app.HelperWorkflowResult{HelperSucceeded: true, Config: &fresh}}})
+	progress.HandleMsg(workflowProgressMsg{operation: progress.operation, event: app.WorkflowProgress{Result: &app.WorkflowResult{JobDone: true, Outcome: app.JobCompleted, Config: &fresh}}})
 	if !ctx.Cfg.AutoUnlock || !ctx.Cfg.SyncthingEnabled {
 		t.Fatal("delayed reload replaced an unrelated newer setting")
 	}
 	ctx.Cfg.SyncthingEnabled = false
-	progress.HandleMsg(helperProgressMsg{operation: progress.operation, event: app.HelperProgress{Index: len(progress.steps), Result: &app.HelperWorkflowResult{Config: &fresh}}})
+	progress.HandleMsg(workflowProgressMsg{operation: progress.operation, event: app.WorkflowProgress{Result: &app.WorkflowResult{Config: &fresh}}})
 	if ctx.Cfg.SyncthingEnabled {
 		t.Fatal("replayed completion republished stale configuration")
 	}
 }
 
-// A failure says what is known about the node. The helper finished, nothing
-// was changed, or changes may have been applied. Only the helper's own report
-// that it stopped before any change may lift the warning.
-func TestHelperFailureDoesNotClaimRollback(t *testing.T) {
+// A failure says what is known about the node: the job completed, nothing
+// was changed, the change was not confirmed, or changes may have been
+// applied. Only the record's word that nothing changed lifts the warning.
+func TestProgressFailureDoesNotClaimRollback(t *testing.T) {
 	for _, tc := range []struct {
-		succeeded, unchanged bool
-		want                 string
+		result app.WorkflowResult
+		want   string
 	}{
-		{false, false, "Changes may have been applied"},
-		{true, false, "helper completed the change"},
-		{false, true, "stopped before changing anything"},
+		{app.WorkflowResult{Outcome: app.JobFailed}, "Changes may have been applied"},
+		{app.WorkflowResult{JobDone: true, Outcome: app.JobCompleted}, "could not read the node"},
+		{app.WorkflowResult{Outcome: app.JobNotStarted}, "stopped before changing anything"},
+		{app.WorkflowResult{Outcome: app.JobUnconfirmed}, "was not confirmed"},
 	} {
 		ctx := &ScreenContext{Cfg: config.Default()}
 		s := progressFixture(t, app.P2PUpgrade, ctx)
 		called := 0
 		s.onFail = func() tea.Cmd { called++; return nil }
-		message := helperProgressMsg{operation: s.operation, event: app.HelperProgress{Result: &app.HelperWorkflowResult{HelperSucceeded: tc.succeeded, NothingChanged: tc.unchanged, Err: errors.New("injected failure")}}}
+		tc.result.Err = errors.New("injected failure")
+		message := workflowProgressMsg{operation: s.operation, event: app.WorkflowProgress{Result: &tc.result}}
 		s.HandleMsg(message)
 		s.HandleMsg(message)
 		view := s.View(82, 34)
-		if !s.failed || !s.done || called != 1 || !strings.Contains(view, tc.want) || ctx.Cfg.P2PMode != "tor" {
+		if !s.failed() || !s.done || called != 1 || !strings.Contains(view, tc.want) || ctx.Cfg.P2PMode != "tor" {
 			t.Fatalf("failure lost its outcome or repeated completion: %s", view)
 		}
-		if tc.unchanged && strings.Contains(view, "may have been applied") {
+		if tc.result.Outcome == app.JobNotStarted && strings.Contains(view, "may have been applied") {
 			t.Fatalf("a refusal before any change still warns of changes: %s", view)
 		}
 	}

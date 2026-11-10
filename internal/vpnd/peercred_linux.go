@@ -1,8 +1,6 @@
-// internal/helperd/peercred_linux.go
-
 //go:build linux
 
-package helperd
+package vpnd
 
 import (
 	"net"

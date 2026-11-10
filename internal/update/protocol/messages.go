@@ -29,7 +29,9 @@ type Review struct {
 
 // Status deliberately excludes local paths, credentials and raw command output.
 type Status struct {
-	ID      string `json:"id"`
+	ID string `json:"id"`
+	// JobID is the Node Update's job ID in the vpn API.
+	JobID   string `json:"job_id,omitempty"`
 	Version string `json:"version"`
 	Phase   string `json:"phase"`
 	Step    string `json:"step"`

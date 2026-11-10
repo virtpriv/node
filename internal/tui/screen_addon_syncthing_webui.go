@@ -136,7 +136,7 @@ func (s *SyncthingWebUIScreen) View(w, h int) string {
 				p.monoField("Pass: ", "••••••••")
 			}
 		} else {
-			p.warnWrap("Staged Web UI password unavailable. Check the helper service, then retry.")
+			p.warnWrap("Staged Web UI password unavailable. Check vpnd, then retry.")
 		}
 	}
 	return p.renderWithBottomButtons(s.buttons(), s.btnIdx, s.ctx.ContentFocused && s.connection.loaded, h)

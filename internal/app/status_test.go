@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -220,5 +222,20 @@ func TestSecurityUpdatesWarnOnlyAfterTwoDays(t *testing.T) {
 				t.Fatalf("got %v since %v, want %v since %v", state, since, tc.state, tc.since)
 			}
 		})
+	}
+}
+
+func TestTorObservationUsesWorkerWhileWrapperIsActive(t *testing.T) {
+	dir := t.TempDir()
+	script := "#!/bin/sh\ncase \"$*\" in\n 'show --property=ActiveState --value tor@default.service') echo inactive;;\n 'show --property=ActiveState --value tor.service'|'show --property=ActiveState --value tor') echo active;;\n *) exit 2;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "systemctl"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	collector := NewStatusCollector()
+	defer collector.Close()
+	active, err := collector.sources.service(t.Context(), "tor")
+	if err != nil || active {
+		t.Fatalf("worker observation: active %v, err %v", active, err)
 	}
 }

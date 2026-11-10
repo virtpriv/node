@@ -34,53 +34,30 @@ func TestNewer(t *testing.T) {
 	}
 }
 
-// SameMajor supplies canonical version validation to Newer as well as the
-// legacy self-update gate. Keep the input-shape cases here, not in both tables.
-func TestSameMajor(t *testing.T) {
-	cases := []struct {
-		current, target string
-		same            bool
-		wantErr         bool
-	}{
-		{"0.7.0", "0.7.1", true, false},
-		{"0.7.0", "0.9.9", true, false},
-		{"0.7.0", "1.0.0", false, false},
-		{"1.2.3", "2.0.0", false, false},
-		{"10.0.0", "1.0.0", false, false}, // "10" != "1"
-		{"0.7.0", "0.7.1-rc.0", false, true},
-		{"0.7.0", "0.7.1-rc.01", false, true},
-		{"0.7.0", "0.7.1-beta.1", false, true},
-		{"0.7.0", "0.7.1-rc.1+build", false, true},
-		{"0.7.0-rc.01", "0.7.1", false, true},
-		{"dev", "0.7.1", false, true},
-		{"0.7.0", "dev", false, true},
-		{"0.7.0", "", false, true},
-		{"0.7.0", "v0.7.1", false, true},
-		{"0.7.0", "0.7.1-rc1", false, true},
-		{"0.7.0", "0.7.1+build", false, true},
-		{"0.7.0", "0.07.1", false, true},
-		{"00.7.0", "0.7.1", false, true},
-		{"0.7.0", "0.7.1\n", false, true},
-		{"0.7.0", "0.7", false, true},
-		{"0.7.0", "0.7.1.2", false, true},
-		{"0.7.0", "0.7.1;rm -rf /", false, true},
-	}
-	for _, c := range cases {
-		same, err := SameMajor(c.current, c.target)
-		if c.wantErr {
-			if err == nil {
-				t.Errorf("SameMajor(%q,%q): expected error",
-					c.current, c.target)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("SameMajor(%q,%q): %v", c.current, c.target, err)
-			continue
-		}
-		if same != c.same {
-			t.Errorf("SameMajor(%q,%q) = %v, want %v",
-				c.current, c.target, same, c.same)
+// Newer refuses every version outside the release contract, in either
+// position, before it compares anything.
+func TestNewerRefusesNonReleaseVersions(t *testing.T) {
+	for _, c := range []struct{ current, target string }{
+		{"0.7.0", "0.7.1-rc.0"},
+		{"0.7.0", "0.7.1-rc.01"},
+		{"0.7.0", "0.7.1-beta.1"},
+		{"0.7.0", "0.7.1-rc.1+build"},
+		{"0.7.0-rc.01", "0.7.1"},
+		{"dev", "0.7.1"},
+		{"0.7.0", "dev"},
+		{"0.7.0", ""},
+		{"0.7.0", "v0.7.1"},
+		{"0.7.0", "0.7.1-rc1"},
+		{"0.7.0", "0.7.1+build"},
+		{"0.7.0", "0.07.1"},
+		{"00.7.0", "0.7.1"},
+		{"0.7.0", "0.7.1\n"},
+		{"0.7.0", "0.7"},
+		{"0.7.0", "0.7.1.2"},
+		{"0.7.0", "0.7.1;rm -rf /"},
+	} {
+		if newer, err := Newer(c.current, c.target); err == nil || newer {
+			t.Errorf("Newer(%q,%q) = %v, %v, want a refusal", c.current, c.target, newer, err)
 		}
 	}
 }

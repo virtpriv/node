@@ -150,7 +150,7 @@ func (s *PairingScreen) View(w, h int) string {
 			p.labelLine("Macaroon:")
 			p.monoWrap(mac[:min(24, len(mac))] + "...")
 		} else {
-			p.warnWrap("Staged macaroon unavailable. Check the helper service, then retry.")
+			p.warnWrap("Staged macaroon unavailable. Check vpnd, then retry.")
 		}
 		if s.connection.displayFailed {
 			p.warnWrap("Macaroon display did not complete. Try Copyable Macaroon again.")

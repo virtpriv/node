@@ -2,17 +2,17 @@ package tui
 
 import (
 	"errors"
-	"strings"
-	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/app"
 	"github.com/virtpriv/node/internal/servicecontrol"
 )
 
+// serviceAttempt is one service job this TUI watches.
 type serviceAttempt struct {
 	request servicecontrol.Request
-	results <-chan app.ServiceActionResult
+	updates <-chan app.JobUpdate
 }
 
 type serviceActionRequestMsg struct {
@@ -23,30 +23,41 @@ type serviceActionRequestMsg struct {
 type serviceActionResultMsg struct {
 	owner   *SystemHomeScreen
 	attempt *serviceAttempt
-	result  app.ServiceActionResult
+	update  app.JobUpdate
+}
+
+func watchServiceCmd(owner *SystemHomeScreen, attempt *serviceAttempt) tea.Cmd {
+	updates := attempt.updates
+	return func() tea.Msg {
+		u, ok := <-updates
+		if !ok {
+			return nil
+		}
+		return serviceActionResultMsg{owner: owner, attempt: attempt, update: u}
+	}
 }
 
 func (m *Model) startServiceAction(msg serviceActionRequestMsg) tea.Cmd {
 	if msg.owner == nil || m.sectionScreens[secSystem] != msg.owner ||
-		msg.attempt == nil || msg.owner.svcPending != msg.attempt || msg.attempt.results != nil {
+		msg.attempt == nil || msg.owner.svcPending != msg.attempt || msg.attempt.updates != nil {
 		return nil
 	}
-	// Invalidate on the event loop before the application can send the request.
+	// Invalidate on the event loop before vpnd can accept the request.
 	m.invalidateServiceStatus(msg.attempt.request.Service())
-	results := m.screenCtx.serviceControls().Control(msg.attempt.request)
-	msg.attempt.results = results
-	return func() tea.Msg {
-		return serviceActionResultMsg{owner: msg.owner, attempt: msg.attempt, result: <-results}
-	}
+	msg.attempt.updates = m.screenCtx.jobs().Start(api.KindServiceAction, app.ServiceActionParams(msg.attempt.request))
+	return watchServiceCmd(msg.owner, msg.attempt)
 }
 
 func (m *Model) completeServiceAction(msg serviceActionResultMsg) tea.Cmd {
 	if msg.owner == nil || m.sectionScreens[secSystem] != msg.owner ||
-		msg.attempt == nil || msg.owner.svcPending != msg.attempt || msg.attempt.results == nil {
+		msg.attempt == nil || msg.owner.svcPending != msg.attempt || msg.attempt.updates == nil {
 		return nil
 	}
+	if !msg.update.Final {
+		return watchServiceCmd(msg.owner, msg.attempt)
+	}
 	msg.owner.svcPending = nil
-	msg.owner.svcResult = serviceResultText(msg.attempt.request, msg.result)
+	msg.owner.svcResult = serviceResultText(msg.attempt.request, app.VerifyServiceAction(msg.attempt.request, msg.update))
 	m.invalidateServiceStatus(msg.attempt.request.Service())
 	return m.admitStatus()
 }
@@ -69,33 +80,15 @@ func (m *Model) invalidateServiceStatus(service string) {
 	}
 }
 
-func serviceResultText(request servicecontrol.Request, result app.ServiceActionResult) string {
+func serviceResultText(request servicecontrol.Request, u app.JobUpdate) string {
 	label := request.Service() + " " + request.Action()
-	switch result.Outcome {
-	case app.ServiceActionCompleted:
+	switch u.Outcome {
+	case app.JobCompleted:
 		return label + " completed."
-	case app.ServiceActionNotStarted:
-		return label + " was not started. " + serviceErrorText(result.Err)
-	default:
-		return label + " outcome unconfirmed. " + serviceErrorText(result.Err) +
-			" Check status and logs before retrying; the host may still be working."
+	case app.JobNotStarted:
+		return label + " was not started. " + jobReason(u)
 	}
-}
-
-func serviceErrorText(err error) string {
-	if err == nil {
-		return "No verified completion received."
-	}
-	// Keep helper errors on one printable line; wrapping belongs to the view.
-	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return ' '
-		}
-		if r == '—' {
-			return ':'
-		}
-		return r
-	}, err.Error())
+	return label + " outcome unconfirmed. " + sentence(jobReason(u)) + " Check status and logs before retrying."
 }
 
 func servicePendingText(request servicecontrol.Request) string {

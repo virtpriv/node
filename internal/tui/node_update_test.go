@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/virtpriv/node/internal/app"
 	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/theme"
 	"github.com/virtpriv/node/internal/update/protocol"
@@ -120,6 +121,12 @@ func (s *nodeUpdateClientStub) Resume(id string) (protocol.Status, error) {
 }
 func (s *nodeUpdateClientStub) Cancel(string) (protocol.Status, error) {
 	return protocol.Status{}, nil
+}
+func (*nodeUpdateClientStub) LastPrepare() (app.PrepareJob, bool, error) {
+	return app.PrepareJob{}, false, nil
+}
+func (*nodeUpdateClientStub) AwaitPrepare(string) (protocol.Review, error) {
+	return protocol.Review{}, errors.New("no Prepare job")
 }
 
 func TestNodeUpdateSubmitsReviewedTokenAndRejectsStalePreparation(t *testing.T) {
@@ -350,7 +357,7 @@ func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 		"See \"systemctl status lnd.service\" and \"journalctl -xeu lnd.service\" for details.\n\n" +
 		"bitcoind did not stop cleanly, no binaries were replaced"
 	refusal := "this installed combination and network have no tested transition in the release plan; install the release it names first and review again"
-	outage := "update-status: helper unreachable: dial unix /run/vpn-helperd.sock: connect: no such file or directory; ask the host administrator to check the helper"
+	outage := "job-status: no answer from vpnd (dial unix /run/vpnd.sock: connect: no such file or directory). Check: systemctl status vpnd.socket, then journalctl -t vpnd"
 	var endless strings.Builder
 	for i := range 40 {
 		fmt.Fprintf(&endless, "step %d: the unit reported a failure that fills most of one row of this screen\n", i)
@@ -390,7 +397,7 @@ func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 				s.status, s.err, s.statusErr = failed(stop, true), errors.New(refusal), errors.New(outage)
 			},
 			buttons: []string{"Close", "Retry", "Cancel update", "Review"},
-			shown:   []string{firstStop, refusal, "update-status: helper unreachable"}},
+			shown:   []string{firstStop, refusal, "job-status: no answer from vpnd"}},
 		{name: "refused review without a job", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) { s.err = errors.New(refusal) },
 			buttons: []string{"Close", "Review"}, shown: []string{refusal}},

@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/config"
-	"github.com/virtpriv/node/internal/helper"
 	"github.com/virtpriv/node/internal/lndrpc"
 )
 
@@ -56,12 +56,7 @@ func NewWalletCreation() *WalletCreation {
 	return &WalletCreation{ctx: ctx, cancel: cancel,
 		read: lndrpc.ReadWalletSetupState,
 		stage: func(ctx context.Context) error {
-			session, err := helper.StartContext(ctx, helper.VerbStageLNDMacaroon, nil)
-			if err != nil {
-				return err
-			}
-			defer session.Close()
-			return session.Wait(nil)
+			return api.Call(ctx, api.VerbStageLNDMacaroon, nil, nil)
 		},
 	}
 }
@@ -107,10 +102,10 @@ func (w *WalletCreation) Prepare(network string) (string, error) {
 			case WalletAbsent:
 				return profile.LNDNetwork, nil
 			case WalletPresent:
-				return "", errors.New("an LND wallet already exists; creation was not started")
+				return "", errors.New("an LND wallet already exists, creation was not started")
 			default:
 				if state != "WAITING_TO_START" {
-					return "", fmt.Errorf("unrecognized LND wallet state %q; creation was not started", state)
+					return "", fmt.Errorf("unrecognized LND wallet state %q, creation was not started", state)
 				}
 			}
 		}
@@ -145,12 +140,12 @@ func (w *WalletCreation) Finalize(execution WalletExecution) WalletCreationResul
 	}
 	if execution.Created && result.Presence == WalletAbsent {
 		result.Presence = WalletUnknown
-		result.Err = errors.New("LND reports no wallet after successful creation; wallet state needs investigation")
+		result.Err = errors.New("LND reports no wallet after successful creation. Wallet state needs investigation")
 		return result
 	}
 	switch result.Presence {
 	case WalletUnknown:
-		result.Err = fmt.Errorf("wallet state is unknown; do not repeat creation: %w",
+		result.Err = fmt.Errorf("wallet state is unknown. Do not repeat creation: %w",
 			errors.Join(execution.Err, readErr, errors.New("no conclusive wallet state")))
 		return result
 	case WalletAbsent:
@@ -168,7 +163,7 @@ func (w *WalletCreation) Finalize(execution WalletExecution) WalletCreationResul
 	result.CredentialsStaged = true
 	result.Err = execution.Err
 	if !result.SeedAcknowledged {
-		result.Err = errors.Join(result.Err, errors.New("the wallet exists, but seed acknowledgement was not confirmed; preserve any seed you recorded and do not recreate the wallet"))
+		result.Err = errors.Join(result.Err, errors.New("the wallet exists, but seed acknowledgement was not confirmed. Keep any seed you recorded and do not create the wallet again"))
 	}
 	return result
 }
