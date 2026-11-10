@@ -97,7 +97,7 @@ func walletRuntimeModel(t *testing.T) (Model, *stubWalletRuntime) {
 		m.screenCtx.OnChain.reader.Close()
 		m.screenCtx.PaymentHistory.reader.Close()
 		m.statusCollector.Close()
-		m.screenCtx.HelperWorkflows.Close()
+		m.screenCtx.Workflows.Close()
 		m.screenCtx.Syncthing.Close()
 	})
 	return m, r

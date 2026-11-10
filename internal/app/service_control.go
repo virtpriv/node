@@ -1,97 +1,42 @@
 package app
 
 import (
-	"context"
-	"errors"
-	"sync"
-	"time"
+	"encoding/json"
+	"fmt"
+	"strings"
 
-	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/servicecontrol"
 )
 
-type ServiceActionOutcome int
-
-const (
-	ServiceActionUnconfirmed ServiceActionOutcome = iota
-	ServiceActionNotStarted
-	ServiceActionCompleted
-)
-
-type ServiceActionResult struct {
-	Outcome ServiceActionOutcome
-	Err     error
+// ServiceActionParams are the parameters of a validated service request.
+func ServiceActionParams(request servicecontrol.Request) api.ServiceActionParams {
+	return api.ServiceActionParams{Unit: request.Service(), Action: request.Action()}
 }
 
-// ServiceControls owns bounded helper observation for one terminal session.
-// Close cancels and joins local work, not root mutations already accepted.
-type ServiceControls struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	mu      sync.Mutex
-	workers sync.WaitGroup
-	call    func(context.Context, string, any, any) error
-}
-
-func NewServiceControls() *ServiceControls {
-	ctx, cancel := context.WithCancel(context.Background())
-	return &ServiceControls{ctx: ctx, cancel: cancel, call: callServiceHelper}
-}
-
-func callServiceHelper(ctx context.Context, verb string, params, result any) error {
-	session, err := helper.StartContext(ctx, verb, params)
-	if err != nil {
-		return err
+// VerifyServiceAction turns a completed service job into its outcome: it is
+// completed only when systemd's completion matches the request.
+func VerifyServiceAction(request servicecontrol.Request, u JobUpdate) JobUpdate {
+	if u.Outcome != JobCompleted {
+		return u
 	}
-	return session.Wait(result)
-}
-
-func (s *ServiceControls) request(ctx context.Context, request servicecontrol.Request) error {
 	var completion servicecontrol.Completion
-	if err := s.call(ctx, helper.VerbServiceAction,
-		helper.ServiceActionParams{Unit: request.Service(), Action: request.Action()}, &completion); err != nil {
-		return err
-	}
-	return request.Verify(completion)
-}
-
-func (s *ServiceControls) Close() {
-	s.mu.Lock()
-	s.cancel()
-	s.mu.Unlock()
-	s.workers.Wait()
-}
-
-func (s *ServiceControls) Control(request servicecontrol.Request) <-chan ServiceActionResult {
-	results := make(chan ServiceActionResult, 1)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	err := s.ctx.Err()
-	if request.Unit() == "" {
-		err = errors.New("service request was not validated")
+	err := json.Unmarshal(u.Job.Result, &completion)
+	if err == nil {
+		err = request.Verify(completion)
 	}
 	if err != nil {
-		results <- ServiceActionResult{Outcome: ServiceActionNotStarted, Err: err}
-		close(results)
-		return results
+		u.Outcome, u.Err = JobUnconfirmed, err
 	}
-	// Include queuing behind the longest helper job, Update Packages at 90
-	// minutes, then this verb's own 30. A timeout is not permission to retry.
-	// The previous request may still be running on the host.
-	ctx, cancel := context.WithTimeout(s.ctx, 125*time.Minute)
-	s.workers.Go(func() {
-		defer cancel()
-		defer close(results)
-		if err := ctx.Err(); err != nil {
-			results <- ServiceActionResult{Outcome: ServiceActionNotStarted, Err: err}
-			return
-		}
-		err := s.request(ctx, request)
-		outcome := ServiceActionCompleted
-		if err != nil {
-			outcome = ServiceActionUnconfirmed
-		}
-		results <- ServiceActionResult{Outcome: outcome, Err: err}
-	})
-	return results
+	return u
+}
+
+// ServiceRequestOf rebuilds a service job's request from its title, such as
+// "Restart lnd", for a job this TUI did not start.
+func ServiceRequestOf(job api.Job) (servicecontrol.Request, error) {
+	action, service, ok := strings.Cut(job.Title, " ")
+	if !ok || job.Kind != api.KindServiceAction {
+		return servicecontrol.Request{}, fmt.Errorf("not a service job: %q", job.Title)
+	}
+	return servicecontrol.New(service, strings.ToLower(action))
 }

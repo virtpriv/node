@@ -1,8 +1,6 @@
-// internal/helperd/peercred_other.go
-
 //go:build !linux
 
-package helperd
+package vpnd
 
 import (
 	"errors"
@@ -18,7 +16,7 @@ type peerCredentials struct {
 }
 
 // peerCred exists on non-Linux only so the tree compiles for
-// development. The helper runs exclusively on the node's
+// development. vpnd runs only on the node's
 // Debian target, where the Linux implementation applies; here
 // it refuses every connection.
 func peerCred(c *net.UnixConn) (*peerCredentials, error) {

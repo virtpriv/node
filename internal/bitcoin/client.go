@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/board"
 	"github.com/virtpriv/node/internal/paths"
 )
 
@@ -93,7 +93,7 @@ func rpcCall(rpcPort int, method string,
 }
 
 func rpcCallContext(ctx context.Context, rpcPort int, method string, params []any, result any) error {
-	pass, err := helper.ReadBoardString(paths.StateBitcoindRPCPass)
+	pass, err := board.ReadString(paths.StateBitcoindRPCPass)
 	if err != nil {
 		return err
 	}

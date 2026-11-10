@@ -14,13 +14,14 @@ import (
 	"strings"
 
 	"github.com/virtpriv/node/internal/config"
-	"github.com/virtpriv/node/internal/helperd"
 	"github.com/virtpriv/node/internal/host"
 	"github.com/virtpriv/node/internal/installer"
+	"github.com/virtpriv/node/internal/jobs"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/tui"
 	installui "github.com/virtpriv/node/internal/tui/install"
 	"github.com/virtpriv/node/internal/update"
+	"github.com/virtpriv/node/internal/vpnd"
 )
 
 var version = "dev"
@@ -57,13 +58,19 @@ func main() {
 			installer.PrintStop(err)
 			os.Exit(1)
 		}
-	case cmdHelperd:
-		// The root helper. Started by systemd when traffic
-		// arrives on its socket, never by hand. It verifies
-		// both conditions itself and explains if they don't
-		// hold.
-		if err := helperd.Serve(version); err != nil {
-			fmt.Fprintf(os.Stderr, "vpn helperd: %v\n", err)
+	case cmdVPND:
+		// vpnd, the node's root service serving the vpn API. Started by
+		// systemd when traffic arrives on its socket, never by hand. It
+		// checks both conditions itself and explains if they do not hold.
+		if err := vpnd.Serve(version); err != nil {
+			fmt.Fprintf(os.Stderr, "vpn vpnd: %v\n", err)
+			os.Exit(1)
+		}
+	case cmdRunJob:
+		// One job of the vpn API, in the systemd service vpnd started for
+		// it. parseArgs checked the job ID.
+		if err := jobs.Run(os.Args[2], version); err != nil {
+			fmt.Fprintf(os.Stderr, "vpn run-job: %v\n", err)
 			os.Exit(1)
 		}
 	case cmdStageLNDCert:
@@ -73,9 +80,9 @@ func main() {
 		// refreshes the TUI's staged copy to match. Its
 		// output lands in this oneshot unit's own journal
 		// (journalctl -u vpn-lnd-cert-stage.service), which is
-		// where watcher-driven restages are audited. The
-		// helper's journal only records operations that went
-		// through the helper's socket.
+		// where watcher-driven restages are audited. vpnd's
+		// journal only records requests that went through its
+		// socket and the jobs it started.
 		if os.Geteuid() != 0 {
 			fmt.Fprintln(os.Stderr,
 				"vpn stage-lnd-cert runs as root via its "+
@@ -207,7 +214,8 @@ type command int
 const (
 	cmdConsole command = iota
 	cmdInstall
-	cmdHelperd
+	cmdVPND
+	cmdRunJob
 	cmdStageLNDCert
 	cmdRebootCheck
 	cmdPublishLNDBackup
@@ -237,12 +245,18 @@ func parseArgs(
 		return cmdUpdateWorker, opts, nil
 	case "install":
 		return parseInstall(args[1:])
-	case "helperd":
+	case "vpnd":
 		if len(args) > 1 {
 			return 0, opts, fmt.Errorf(
-				"helperd takes no arguments")
+				"vpnd takes no arguments")
 		}
-		return cmdHelperd, opts, nil
+		return cmdVPND, opts, nil
+	case "run-job":
+		if len(args) != 2 || !jobs.ValidID(args[1]) {
+			return 0, opts, fmt.Errorf(
+				"run-job requires exactly one job ID")
+		}
+		return cmdRunJob, opts, nil
 	case "stage-lnd-cert":
 		if len(args) > 1 {
 			return 0, opts, fmt.Errorf(
@@ -317,7 +331,7 @@ func parseInstall(args []string) (command, installer.InstallOptions, error) {
 }
 
 // usage lists what an owner runs. The commands that systemd or apt start
-// (helperd, stage-lnd-cert, reboot-check, publish-lnd-backup,
+// (vpnd, run-job, stage-lnd-cert, reboot-check, publish-lnd-backup,
 // update-launch and update-worker) are left out.
 func usage() string {
 	return `Virtual Private Node

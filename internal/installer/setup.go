@@ -672,14 +672,14 @@ func buildInstallSteps(
 			Fn: func() error {
 				return installSSHHardening()
 			}},
-		// The unprivileged TUI uses fixed helper operations. The owner can
+		// The unprivileged TUI uses vpnd's fixed requests. The owner can
 		// separately authenticate with sudo for general host maintenance.
 		{Key: "journal.access",
 			Name: "Keeping system logs on disk for your " + paths.AdminUser + " user to read",
 			Fn:   host.SetupJournalAccess},
 		{Key: "helper.enable",
-			Name: "Starting the node's root helper",
-			Fn:   host.InstallHelperUnits},
+			Name: "Starting vpnd, the node's root service",
+			Fn:   host.InstallVPNDUnits},
 		{Key: "state.stage",
 			Name: "Staging files for the TUI",
 			Fn:   stageBoard},

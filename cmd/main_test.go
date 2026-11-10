@@ -77,13 +77,22 @@ func TestParseArgs(t *testing.T) {
 		}
 	}
 
-	cmd, _, err = parseArgs([]string{"helperd"})
-	if err != nil || cmd != cmdHelperd {
-		t.Errorf("helperd: got (%v,%v)", cmd, err)
+	cmd, _, err = parseArgs([]string{"vpnd"})
+	if err != nil || cmd != cmdVPND {
+		t.Errorf("vpnd: got (%v,%v)", cmd, err)
 	}
 	if _, _, err := parseArgs(
-		[]string{"helperd", "--flag"}); err == nil {
-		t.Error("helperd with arguments accepted")
+		[]string{"vpnd", "--flag"}); err == nil {
+		t.Error("vpnd with arguments accepted")
+	}
+	cmd, _, err = parseArgs([]string{"run-job", "20261109-183205-3f9a2c"})
+	if err != nil || cmd != cmdRunJob {
+		t.Errorf("run-job: got (%v,%v)", cmd, err)
+	}
+	for _, bad := range [][]string{{"run-job"}, {"run-job", "../etc"}, {"run-job", "20261109-183205-3f9a2c", "x"}} {
+		if _, _, err := parseArgs(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
 	}
 
 	cmd, _, err = parseArgs([]string{"stage-lnd-cert"})

@@ -56,7 +56,7 @@ func readPrepared(root, token string) (prepared, error) {
 
 func requireRoot() error {
 	if os.Geteuid() != 0 {
-		return errors.New("managed updates require the root helper")
+		return errors.New("managed updates require root")
 	}
 	return nil
 }
@@ -96,6 +96,8 @@ func requireUpdateHost() error {
 
 // Prepare authenticates the release before showing its plan. It never stops a
 // service or executes the candidate. The approval identifies the archive bytes.
+// It runs as a job of the vpn API and does not hold the operations lock: its
+// unfinished record keeps every other change out, Start included.
 func Prepare(current, version string) (protocol.Review, error) {
 	var none protocol.Review
 	if err := requireUpdateHost(); err != nil {
@@ -105,11 +107,6 @@ func Prepare(current, version string) (protocol.Review, error) {
 	if err != nil || !newer {
 		return none, errors.New("select a newer VPN release")
 	}
-	unlock, err := files.Lock(LockPath)
-	if err != nil {
-		return none, err
-	}
-	defer unlock()
 	previous, err := loadRecord(Root)
 	if err != nil {
 		return none, err
@@ -222,7 +219,9 @@ func Prepare(current, version string) (protocol.Review, error) {
 	return p.Review, nil
 }
 
-func Start(current, id string) (protocol.Status, error) {
+// Start accepts a reviewed update as the Node Update job jobID. busy is the
+// vpn API's busy rule for other jobs, checked under the operations lock.
+func Start(current, id, jobID string, busy func() error) (protocol.Status, error) {
 	if err := requireUpdateHost(); err != nil {
 		return protocol.Status{}, err
 	}
@@ -233,7 +232,10 @@ func Start(current, id string) (protocol.Status, error) {
 	if err != nil {
 		return protocol.Status{}, err
 	}
-	err = startLocked(current, id)
+	err = busy()
+	if err == nil {
+		err = startLocked(current, id, jobID)
+	}
 	unlock()
 	if err != nil {
 		return protocol.Status{}, err
@@ -242,6 +244,15 @@ func Start(current, id string) (protocol.Status, error) {
 		return protocol.Status{}, err
 	}
 	return Status()
+}
+
+// ReadReview reads a review Prepare saved, for the screen that shows it.
+func ReadReview(token string) (protocol.Review, error) {
+	if err := requireRoot(); err != nil {
+		return protocol.Review{}, err
+	}
+	p, err := readPrepared(Root, token)
+	return p.Review, err
 }
 
 type nodeObservation struct {
@@ -259,8 +270,8 @@ type admissionOps struct {
 	launcher func() error
 }
 
-func startLocked(current, token string) error {
-	return acceptUpdate(Root, token, admissionOps{
+func startLocked(current, token, jobID string) error {
+	return acceptUpdate(Root, token, jobID, admissionOps{
 		observe: func() (nodeObservation, error) {
 			cfg, err := config.Load()
 			if err != nil {
@@ -287,7 +298,7 @@ func startLocked(current, token string) error {
 	})
 }
 
-func acceptUpdate(root, token string, ops admissionOps) error {
+func acceptUpdate(root, token, jobID string, ops admissionOps) error {
 	p, err := readPrepared(root, token)
 	if err != nil {
 		return err
@@ -330,7 +341,7 @@ func acceptUpdate(root, token string, ops admissionOps) error {
 	if err := verifyHash(filepath.Join(root, id, "update.json"), p.PlanHash); err != nil {
 		return err
 	}
-	j := &job{Schema: 1, Review: p.Review, WorkerHash: p.WorkerHash, PlanHash: p.PlanHash, ConfigHash: configHash, Phase: "accepted", Step: "Update accepted", Started: map[protocol.Component]bool{}, MayHaveRun: map[protocol.Component]bool{}, Completed: map[string]bool{}, BinaryHashes: map[string]string{}, Affected: p.Review.Manifest.Affected(source)}
+	j := &job{Schema: 1, Review: p.Review, WorkerHash: p.WorkerHash, PlanHash: p.PlanHash, ConfigHash: configHash, Phase: "accepted", Step: "Update accepted", Started: map[protocol.Component]bool{}, MayHaveRun: map[protocol.Component]bool{}, Completed: map[string]bool{}, BinaryHashes: map[string]string{}, Affected: p.Review.Manifest.Affected(source), JobID: jobID, Accepted: time.Now().UTC()}
 	// The job record keeps the same fields as before: every later worker has
 	// to read it, and the notice has served its purpose once approved.
 	j.Review.KeyServerUnreachable = false
@@ -366,7 +377,9 @@ func installWorkerUnit() error {
 
 func startWorker() error { return system.RunRoot("systemctl", "start", "--no-block", Service) }
 
-func Resume(id string) (protocol.Status, error) {
+// Resume records consent to retry. busy is the vpn API's busy rule for other
+// jobs, checked under the operations lock.
+func Resume(id string, busy func() error) (protocol.Status, error) {
 	if err := requireRoot(); err != nil {
 		return protocol.Status{}, err
 	}
@@ -374,7 +387,10 @@ func Resume(id string) (protocol.Status, error) {
 	if err != nil {
 		return protocol.Status{}, err
 	}
-	err = retryUpdate(Root, id)
+	err = busy()
+	if err == nil {
+		err = retryUpdate(Root, id)
+	}
 	unlock()
 	if err != nil {
 		return protocol.Status{}, err
@@ -421,7 +437,7 @@ func Status() (protocol.Status, error) {
 
 // status is what the saved record tells the screen.
 func (r *record) status() protocol.Status {
-	s := protocol.Status{ID: r.Review.Digest, Version: r.Review.Manifest.Version, Phase: r.Phase, Step: r.Step, Error: r.Error, Active: r.active()}
+	s := protocol.Status{ID: r.Review.Digest, JobID: r.JobID, Version: r.Review.Manifest.Version, Phase: r.Phase, Step: r.Step, Error: r.Error, Active: r.active()}
 	// A list the screen cannot draw sensibly is left out, and the screen
 	// shows the step text instead. The screen scrolls, so a list may be of
 	// any length. Times are passed only in a shape the screen can show.
@@ -529,5 +545,5 @@ func cancelUpdate(root, id string) error {
 	if !j.active() || j.HostChanges {
 		return errors.New("host changes may have begun, complete or repair this update")
 	}
-	return amendRecord(root, map[string]any{"phase": "canceled", "step": "Update canceled before host changes", "error": nil, "failure": nil, "next": nil, "advice": nil})
+	return amendRecord(root, map[string]any{"phase": "canceled", "step": "Update canceled before host changes", "error": nil, "failure": nil, "next": nil, "advice": nil, "ended": time.Now().UTC()})
 }

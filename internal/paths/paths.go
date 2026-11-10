@@ -18,8 +18,8 @@ const (
 	// StateDir is the staging board: root-written files that
 	// carry privileged facts (staged credentials) to the
 	// unprivileged admin user. The directory is root:vpn
-	// 0750, each file root:vpn 0640. Root (the installer and
-	// the helper) writes, the admin user reads. Every file is
+	// 0750, each file root:vpn 0640. Root (the installer, vpnd
+	// and its jobs) writes, the admin user reads. Every file is
 	// re-written by whatever operation changes the fact it
 	// carries. A reader that finds a file missing or
 	// unreadable reports the feature unavailable and logs
@@ -32,13 +32,13 @@ const (
 	// addresses, the Syncthing device ID, the SSH
 	// password-auth answer) have no copy at all: a stale copy
 	// of those would render confidently wrong with no failure
-	// to catch it, so the TUI reads them live through the
-	// helper's read-only verbs instead. The Syncthing web password is the
+	// to catch it, so the TUI reads them live through
+	// vpnd's reads instead. The Syncthing web password is the
 	// one human-cadence exception: Syncthing retains only its hash, so the
 	// install operation stages the generated plaintext once for later display.
 	// Every board file
-	// declares how it stays fresh in the helper's freshness
-	// table (internal/helperd/matrix.go), and a unit test
+	// declares how it stays fresh in the freshness table
+	// (internal/jobs/matrix.go), and a unit test
 	// fails on any file without a declaration.
 	//
 	// The board lives under /var/lib/vpn rather than /etc/vpn so desired
@@ -60,6 +60,8 @@ const (
 	LayoutVersion         = PrivateDir + "/layout-version"
 	InstallStateFile      = PrivateDir + "/install-state.json"
 	PasswordPendingMarker = PrivateDir + "/password-pending"
+	// JobsDir holds one folder per job of the vpn API, root only.
+	JobsDir = PrivateDir + "/jobs"
 
 	// InstallBootstrap* are short-lived, root-owned indications that
 	// lifecycle authority is being published. The immutable initial install
@@ -79,6 +81,9 @@ const (
 	// atomically replaced durable ledger.
 	RuntimeDir  = "/run/vpn"
 	InstallLock = RuntimeDir + "/install.lock"
+	// OperationsLock makes a change's acceptance one step, and the update
+	// worker holds it for its run.
+	OperationsLock = RuntimeDir + "/operations.lock"
 
 	// Previous lifecycle paths are recognized only so v0.7.0
 	// can refuse unsupported or conflicting state. They are
@@ -231,15 +236,17 @@ const (
 	LNDCertWatchPathName    = "vpn-lnd-cert-watch.path"
 	LNDCertStageServiceName = "vpn-lnd-cert-stage.service"
 
-	// The root helper's socket-activated units. The socket
-	// node's ownership and mode (root:vpn 0660, created by
-	// systemd before the helper ever runs) ARE the
-	// authentication for privileged operations. The service
-	// is started by traffic and exits when idle.
-	HelperSocket         = "/run/vpn-helperd.sock"
-	HelperSocketUnit     = "/etc/systemd/system/vpn-helperd.socket"
-	HelperServiceUnit    = "/etc/systemd/system/vpn-helperd.service"
-	HelperSocketUnitName = "vpn-helperd.socket"
+	// vpnd's socket-activated units. The socket node's ownership
+	// and mode (root:vpn 0660, created by systemd before vpnd ever
+	// runs) ARE the authentication for the vpn API. The service is
+	// started by traffic and exits when idle.
+	VPNDSocket         = "/run/vpnd.sock"
+	VPNDSocketUnit     = "/etc/systemd/system/vpnd.socket"
+	VPNDServiceUnit    = "/etc/systemd/system/vpnd.service"
+	VPNDSocketUnitName = "vpnd.socket"
+	// VPNDRuntimeDir holds, root only, the auto-unlock password between
+	// vpnd and the job's credential copy, for well under a second.
+	VPNDRuntimeDir = "/run/vpnd"
 )
 
 // ── Logs ─────────────────────────────────────────────────
@@ -302,7 +309,7 @@ const (
 	AdminSudoers = "/etc/sudoers.d/" + AdminUser
 
 	// BinaryPath is where the installer places the running
-	// binary (and where self-update installs new ones).
+	// binary, and where a Node Update installs new ones.
 	BinaryPath      = "/usr/local/bin/vpn"
 	SyncthingBinary = "/usr/local/bin/syncthing"
 )

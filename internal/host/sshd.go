@@ -44,7 +44,7 @@ func (e notConfirmed) Unwrap() []error { return []error{e.err, ErrSSHSettingNotC
 // Both the installer and runtime use the same owner-scoped configuration.
 func ApplySSHHardening(passwordAuth string) error {
 	if os.Geteuid() != 0 {
-		return errors.New("SSH configuration requires the root helper")
+		return errors.New("SSH configuration requires root")
 	}
 	return applySSHHardening(passwordAuth, sshdOps{
 		read:  func() ([]byte, error) { return os.ReadFile(paths.SSHDDropIn) },
@@ -106,7 +106,7 @@ func applySSHHardening(passwordAuth string, ops sshdOps) error {
 // the same lock as application edits. This cannot prove successful key login.
 func RebuildSSHHardeningConfig(disabled bool) error {
 	if os.Geteuid() != 0 {
-		return errors.New("SSH configuration requires the root helper")
+		return errors.New("SSH configuration requires root")
 	}
 	store := sshkeys.Store{Path: paths.AuthorizedKeysFile}
 	return rebuildSSHConfig(disabled, store, ApplySSHHardening, EffectiveSSHPasswordAuth)
@@ -148,7 +148,7 @@ func rebuildSSHConfig(disabled bool, store sshkeys.Store, apply func(string) err
 // so this observation is not proof that a remote password login will succeed.
 func EffectiveSSHPasswordAuth() (bool, error) {
 	if os.Geteuid() != 0 {
-		return false, errors.New("SSH configuration requires the root helper")
+		return false, errors.New("SSH configuration requires root")
 	}
 	out, err := system.RunRootOutput("sshd", "-T", "-C", "user="+paths.AdminUser+",host=localhost,addr=127.0.0.1")
 	if err != nil {

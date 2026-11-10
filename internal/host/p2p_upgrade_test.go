@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/config"
-	"github.com/virtpriv/node/internal/helper"
 	"github.com/virtpriv/node/internal/p2p"
 )
 
@@ -145,7 +145,7 @@ func TestHybridTransitionRefusalAndCompletionBoundary(t *testing.T) {
 					t.Fatalf("crossed failure boundary: %v", changes)
 				}
 			}
-			if err == nil && len(events) != len(helper.UpgradeP2PToHybridStepNames()) {
+			if err == nil && len(events) != len(api.UpgradeP2PToHybridStepNames()) {
 				t.Fatal("helper progress protocol cannot reach its success terminator")
 			}
 		})

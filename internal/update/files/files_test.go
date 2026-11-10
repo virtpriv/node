@@ -5,7 +5,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestInterruptedReplacementRetainsPreviousRecord(t *testing.T) {
@@ -84,7 +86,7 @@ func TestStableLockExcludesAnotherProcessHandle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if release, err := Lock(path); err == nil {
+	if release, err := LockWithin(path, 0); err == nil {
 		release()
 		unlock()
 		t.Fatal("concurrent operation acquired lock")
@@ -99,4 +101,38 @@ func TestStableLockExcludesAnotherProcessHandle(t *testing.T) {
 		t.Fatal("lock inode changed; an existing waiter could lock a different file", err)
 	}
 	unlock()
+}
+
+// W1: vpnd takes the operations lock briefly for every change it accepts, so
+// the update worker and vpnd wait a few seconds for it instead of refusing at
+// once, and refuse only when it stays held.
+func TestLockWaitsForABriefHolderAndRefusesALongOne(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "operations.lock")
+	unlock, err := LockWithin(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		unlock()
+	}()
+	began := time.Now()
+	second, err := LockWithin(path, 3*time.Second)
+	if err != nil {
+		t.Fatalf("a brief holder made the second wait fail: %v", err)
+	}
+	if waited := time.Since(began); waited < 150*time.Millisecond {
+		t.Fatalf("got the lock after %v while it was held", waited)
+	}
+	if third, err := LockWithin(path, 300*time.Millisecond); err == nil {
+		third()
+		t.Fatal("acquired a lock that stayed held")
+	} else if !strings.Contains(err.Error(), "another node operation is running") {
+		t.Fatalf("refusal = %v", err)
+	}
+	second()
 }

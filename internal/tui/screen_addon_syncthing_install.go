@@ -4,6 +4,8 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/virtpriv/node/internal/api"
+	"github.com/virtpriv/node/internal/app"
 	"github.com/virtpriv/node/internal/theme"
 )
 
@@ -42,28 +44,34 @@ func NewSyncthingInstallScreen(
 
 // ── Screen interface ────────────────────────────────────
 
+// Init looks for a Syncthing install job already running, started from
+// another TUI or before this screen was closed, and shows it.
 func (s *SyncthingInstallScreen) Init() tea.Cmd {
-	return nil
+	return latestWorkflowCmd(s, s.ctx.Workflows, app.SyncthingInstall)
+}
+
+// latestWorkflowMsg is the newest job of a workflow kind, read when its
+// screen opens.
+type latestWorkflowMsg struct {
+	owner Screen
+	job   api.Job
+	found bool
+}
+
+func latestWorkflowCmd(owner Screen, workflows *app.Workflows, kind app.WorkflowKind) tea.Cmd {
+	if workflows == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		job, found, err := workflows.Latest(kind)
+		return latestWorkflowMsg{owner: owner, job: job, found: found && err == nil}
+	}
 }
 
 func (s *SyncthingInstallScreen) HandleKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
 	if s.step == syncInstallProgress && s.progress != nil {
-		if !s.progress.done {
-			// Block all keys during active install —
-			// no navigation, no quit.
-			return s, nil
-		}
-		// After done/failed, allow navigation
-		switch keyStr {
-		case "left":
-			return s, emitFocusSidebar
-		case "up":
-			if s.ctx.HasTabs {
-				return s, emitFocusTabBar
-			}
-		}
 		newScreen, cmd := s.progress.HandleKey(keyStr, msg)
 		s.progress = newScreen.(*InstallProgressScreen)
 		return s, cmd
@@ -94,7 +102,7 @@ func (s *SyncthingInstallScreen) HandleKey(
 			// Cancel
 			return s, emitCloseTab
 		}
-		// Proceed — build steps and transition
+		// Proceed: start the job and show its progress
 		return s.startInstall()
 	case "backspace":
 		return s, emitFocusParent
@@ -105,7 +113,7 @@ func (s *SyncthingInstallScreen) HandleKey(
 func (s *SyncthingInstallScreen) startInstall() (
 	Screen, tea.Cmd,
 ) {
-	operation := s.ctx.HelperWorkflows.InstallSyncthing()
+	operation := s.ctx.Workflows.InstallSyncthing()
 
 	s.progress = NewInstallProgressScreen(
 		s.ctx, operation, s.onInstallDone, s.onInstallFail)
@@ -129,6 +137,14 @@ func (s *SyncthingInstallScreen) onInstallFail() tea.Cmd {
 func (s *SyncthingInstallScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
+	if m, ok := msg.(latestWorkflowMsg); ok {
+		if m.owner != Screen(s) || !m.found || m.job.Finished() || s.step != syncInstallConfirm {
+			return s, nil
+		}
+		s.progress = NewInstallProgressScreen(s.ctx, s.ctx.Workflows.Attach(m.job, nil), s.onInstallDone, s.onInstallFail)
+		s.step = syncInstallProgress
+		return s, s.progress.Init()
+	}
 	if s.step == syncInstallProgress && s.progress != nil {
 		newScreen, cmd := s.progress.HandleMsg(msg)
 		s.progress = newScreen.(*InstallProgressScreen)

@@ -1,11 +1,13 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
-	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/sshkeys"
 )
@@ -24,18 +26,52 @@ type SSHAccess struct {
 }
 
 func NewSSHAccess() *SSHAccess {
-	return &SSHAccess{Keys: sshkeys.Store{Path: paths.AuthorizedKeysFile}, Auth: helperSSHAuth{}}
+	return &SSHAccess{Keys: sshkeys.Store{Path: paths.AuthorizedKeysFile}, Auth: vpndSSHAuth{}}
 }
 
-type helperSSHAuth struct{}
+// vpndSSHAuth reads the setting from vpnd and changes it with a job.
+type vpndSSHAuth struct{}
 
-func (helperSSHAuth) PasswordAuth() (bool, error) {
-	var result helper.SSHAuthResult
-	err := helper.Call(helper.VerbReadSSHAuth, nil, &result)
+// sshAuthReadTimeout bounds the live read of sshd's setting.
+const sshAuthReadTimeout = 15 * time.Second
+
+func (vpndSSHAuth) PasswordAuth() (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), sshAuthReadTimeout)
+	defer cancel()
+	var result api.SSHAuthResult
+	err := api.Call(ctx, api.VerbReadSSHAuth, nil, &result)
 	return result.PasswordAuthEnabled, err
 }
-func (helperSSHAuth) SetPasswordAuthDisabled(disabled bool) error {
-	return helper.Call(helper.VerbRebuildSSHConfig, helper.RebuildSSHConfigParams{PasswordAuthDisabled: disabled}, nil)
+
+// SetPasswordAuthDisabled starts the change as a job and waits for its
+// record. Only a completed job is success.
+func (vpndSSHAuth) SetPasswordAuthDisabled(disabled bool) error {
+	jobs := NewJobs()
+	defer jobs.Close()
+	var last JobUpdate
+	for u := range jobs.Start(api.KindSSHPasswordLogin, api.SSHPasswordLoginParams{PasswordAuthDisabled: disabled}) {
+		last = u
+	}
+	if last.Outcome == JobNotStarted {
+		return notStarted{last.Error()}
+	}
+	return last.Error()
+}
+
+// notStarted marks a change that was refused or failed before it changed
+// anything.
+type notStarted struct{ err error }
+
+func (e notStarted) Error() string { return e.err.Error() }
+func (e notStarted) Unwrap() error { return e.err }
+
+// ChangeNotStarted reports an error from a change that did not start, and
+// its reason.
+func ChangeNotStarted(err error) (string, bool) {
+	if e, ok := errors.AsType[notStarted](err); ok {
+		return e.err.Error(), true
+	}
+	return "", false
 }
 
 func ParseSSHKey(line string) (SSHKey, error) { return sshkeys.Parse(line) }
@@ -79,12 +115,12 @@ func (s *SSHAccess) RemoveKey(fingerprint string) error {
 			}
 		}
 		if !found {
-			return nil, errors.New("this SSH key is no longer present; refresh the key list")
+			return nil, errors.New("this SSH key is no longer present. Refresh the key list")
 		}
 		if len(keys) == 1 {
 			enabled, err := s.Auth.PasswordAuth()
 			if err != nil {
-				return nil, fmt.Errorf("cannot verify password authentication; keep the last SSH key: %w", err)
+				return nil, fmt.Errorf("cannot verify password authentication, so the last SSH key stays: %w", err)
 			}
 			if !enabled {
 				return nil, errors.New("cannot remove the last SSH key while password authentication is disabled")
@@ -105,7 +141,7 @@ func (s *SSHAccess) RemoveKey(fingerprint string) error {
 
 func keyWriteError(changed bool, err error) error {
 	if changed && err != nil {
-		return fmt.Errorf("key file changed, but durability could not be confirmed; refresh before retrying: %w", err)
+		return fmt.Errorf("key file changed, but durability could not be confirmed. Refresh before retrying: %w", err)
 	}
 	return err
 }
@@ -113,7 +149,10 @@ func keyWriteError(changed bool, err error) error {
 func (s *SSHAccess) PasswordAuth() (bool, error) { return s.Auth.PasswordAuth() }
 func (s *SSHAccess) SetPasswordAuthDisabled(disabled bool) error {
 	if err := s.Auth.SetPasswordAuthDisabled(disabled); err != nil {
-		return fmt.Errorf("SSH password authentication was not confirmed; keep this session open and check the current setting before retrying: %w", err)
+		if _, ok := ChangeNotStarted(err); ok {
+			return err
+		}
+		return fmt.Errorf("SSH password authentication was not confirmed. Keep this session open and check the current setting before retrying: %w", err)
 	}
 	return nil
 }

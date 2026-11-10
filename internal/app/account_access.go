@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/virtpriv/node/internal/accountaccess"
-	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/sshkeys"
 )
@@ -40,13 +40,7 @@ type AccountAccess struct {
 func NewAccountAccess(ssh *SSHAccess) *AccountAccess {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &AccountAccess{ctx: ctx, cancel: cancel, ssh: ssh,
-		call: func(ctx context.Context, verb string, params, result any) error {
-			session, err := helper.StartContext(ctx, verb, params)
-			if err != nil {
-				return err
-			}
-			return session.Wait(result)
-		},
+		call: api.Call,
 	}
 }
 
@@ -75,14 +69,14 @@ func (a *AccountAccess) List() (accountaccess.Inventory, error) {
 	}
 	defer done()
 	var reply accountaccess.Inventory
-	if err := a.call(ctx, helper.VerbReadAccounts, nil, &reply); err != nil {
+	if err := a.call(ctx, api.VerbReadAccounts, nil, &reply); err != nil {
 		return accountaccess.Inventory{}, err
 	}
 	if err := ctx.Err(); err != nil {
 		return accountaccess.Inventory{}, err
 	}
 	if reply.Accounts == nil {
-		return accountaccess.Inventory{}, errors.New("helper returned an incomplete account inventory")
+		return accountaccess.Inventory{}, errors.New("vpnd returned an incomplete account inventory")
 	}
 	return reply, nil
 }
@@ -92,14 +86,14 @@ func (a *AccountAccess) readDetail(ctx context.Context, ref accountaccess.Ref) (
 		return accountaccess.Detail{}, err
 	}
 	var reply accountaccess.Detail
-	if err := a.call(ctx, helper.VerbReadAccount, ref, &reply); err != nil {
+	if err := a.call(ctx, api.VerbReadAccount, ref, &reply); err != nil {
 		return reply, err
 	}
 	if err := ctx.Err(); err != nil {
 		return reply, err
 	}
 	if reply.Account.Ref() != ref || reply.Source.User != ref.Name {
-		return reply, errors.New("helper returned an incomplete or different account observation")
+		return reply, errors.New("vpnd returned an incomplete or different account observation")
 	}
 	return reply, nil
 }
@@ -144,7 +138,7 @@ func (a *AccountAccess) Import(review AccountKeyImport) error {
 		return fmt.Errorf("recheck public-key source: %w", err)
 	}
 	if detail.Account != review.Account || detail.Source.Problem != "" {
-		return errors.New("source account changed or could not be fully read; refresh and review again")
+		return errors.New("source account changed or could not be fully read. Refresh and review again")
 	}
 	found := false
 	for _, current := range detail.Source.Keys {
@@ -154,7 +148,7 @@ func (a *AccountAccess) Import(review AccountKeyImport) error {
 		}
 	}
 	if !found {
-		return errors.New("reviewed public key changed or disappeared; refresh and review again")
+		return errors.New("reviewed public key changed or disappeared. Refresh and review again")
 	}
 	if err := ctx.Err(); err != nil {
 		return err

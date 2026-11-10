@@ -20,6 +20,10 @@ import (
 
 type nodeUpdates interface {
 	Prepare(string) (protocol.Review, error)
+	// LastPrepare and AwaitPrepare find a Prepare job started earlier, from
+	// this screen before it closed, from Settings or from another TUI.
+	LastPrepare() (app.PrepareJob, bool, error)
+	AwaitPrepare(id string) (protocol.Review, error)
 	Start(string) (protocol.Status, error)
 	Status() (protocol.Status, error)
 	Resume(string) (protocol.Status, error)
@@ -40,7 +44,9 @@ type NodeUpdateScreen struct {
 	notice string
 	// lead is the next step button focused when its state appeared.
 	lead string
-	spin steplist.Spinner
+	// prepareID is the Prepare job this screen waits for after it opened.
+	prepareID string
+	spin      steplist.Spinner
 }
 
 type nodeUpdateMsg struct {
@@ -50,6 +56,9 @@ type nodeUpdateMsg struct {
 	review  protocol.Review
 	status  protocol.Status
 	err     error
+	// prepare is the newest Prepare job, read by "restore".
+	prepare app.PrepareJob
+	found   bool
 }
 type nodeUpdateTick struct{ owner *NodeUpdateScreen }
 
@@ -81,6 +90,7 @@ func (s *NodeUpdateScreen) prepared(answer protocol.Review) {
 	}
 	s.notice = ""
 	s.review = &answer
+	s.ctx.markShown("review:" + answer.Token)
 }
 
 // nodeUpdatesBusy reports a Node Updates screen waiting for the node's
@@ -96,11 +106,14 @@ func (s *NodeUpdateScreen) selectStable() {
 		s.target = s.ctx.LatestVersion
 	}
 }
+
+// Init reads the update's state and the newest Prepare job, so a review
+// prepared while the screen was closed, or still being prepared, shows.
 func (s *NodeUpdateScreen) Init() tea.Cmd {
 	if s.review != nil {
 		return nil
 	}
-	return s.request("status")
+	return s.request("restore")
 }
 func (s *NodeUpdateScreen) request(kind string) tea.Cmd {
 	if s.busy != "" {
@@ -113,7 +126,7 @@ func (s *NodeUpdateScreen) request(kind string) tea.Cmd {
 	s.attempt++
 	attempt := s.attempt
 	client := s.ctx.NodeUpdates
-	target := s.target
+	target, prepareID := s.target, s.prepareID
 	digest := s.status.ID
 	if s.review != nil {
 		digest = s.review.Token
@@ -127,6 +140,12 @@ func (s *NodeUpdateScreen) request(kind string) tea.Cmd {
 		switch kind {
 		case "status":
 			msg.status, msg.err = client.Status()
+		case "restore":
+			msg.status, msg.err = client.Status()
+			msg.prepare, msg.found, _ = client.LastPrepare()
+		case "await":
+			msg.kind = "prepare"
+			msg.review, msg.err = client.AwaitPrepare(prepareID)
 		case "prepare":
 			msg.review, msg.err = client.Prepare(target)
 		case "start":
@@ -139,6 +158,33 @@ func (s *NodeUpdateScreen) request(kind string) tea.Cmd {
 		return msg
 	}
 }
+
+// restorePrepare shows the newest Prepare job when the screen opens: one
+// still running is waited for, a review not shown yet in this TUI is shown
+// for 24 hours, and a failure until a newer Prepare (decision 3).
+func (s *NodeUpdateScreen) restorePrepare(p app.PrepareJob, status protocol.Status) (tea.Cmd, bool) {
+	switch {
+	case p.Running:
+		s.target, s.notice, s.prepareID = p.Version, "", p.ID
+		return s.request("await"), true
+	case p.Review != nil:
+		if s.ctx.shownJobs["review:"+p.Review.Token] || time.Since(p.Ended) >= 24*time.Hour ||
+			(p.Review.Digest != "" && p.Review.Digest == status.ID) {
+			return nil, false
+		}
+		s.target = p.Version
+		s.prepared(*p.Review)
+		if s.review != nil {
+			return nil, true
+		}
+		return s.poll(), true
+	case p.Err != nil && !s.ctx.shownJobs[p.ID]:
+		s.ctx.markShown(p.ID)
+		s.target, s.err = p.Version, p.Err
+	}
+	return nil, false
+}
+
 func (s *NodeUpdateScreen) poll() tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return nodeUpdateTick{owner: s} })
 }
@@ -157,7 +203,13 @@ func (s *NodeUpdateScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 			return s, nil
 		}
 		s.busy = ""
-		if m.kind == "status" {
+		if m.kind == "restore" && m.found {
+			if cmd, shown := s.restorePrepare(m.prepare, m.status); shown {
+				s.status, s.statusErr = m.status, m.err
+				return s, cmd
+			}
+		}
+		if m.kind == "status" || m.kind == "restore" {
 			s.statusErr = m.err
 		} else {
 			s.err = m.err
@@ -625,7 +677,7 @@ func (s *NodeUpdateScreen) messages(w int, fit nodeUpdateFit) []string {
 	}
 	if s.busy != "" && !fit.noBusy {
 		p.blank()
-		if s.busy == "prepare" {
+		if s.busy == "prepare" || s.busy == "await" {
 			p.line(" Downloading and verifying the release plan...")
 		} else {
 			p.line(" Checking update state...")

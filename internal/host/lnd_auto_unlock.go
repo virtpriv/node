@@ -1482,7 +1482,7 @@ func syncDir(path string) error {
 // SetupAutoUnlock runs the verified transition independently of the observing TUI.
 func SetupAutoUnlock(password autounlock.Password) (autounlock.Result, error) {
 	if os.Geteuid() != 0 {
-		return autounlock.Result{}, errors.New("auto-unlock changes require the root helper")
+		return autounlock.Result{}, errors.New("auto-unlock changes require root")
 	}
 	if password.Text() == "" {
 		return autounlock.Result{}, errors.New("wallet password was not validated")
@@ -1504,7 +1504,7 @@ func SetupAutoUnlock(password autounlock.Password) (autounlock.Result, error) {
 // DisableAutoUnlock proves a locked invocation before durably removing the secret.
 func DisableAutoUnlock() (autounlock.Result, error) {
 	if os.Geteuid() != 0 {
-		return autounlock.Result{}, errors.New("auto-unlock changes require the root helper")
+		return autounlock.Result{}, errors.New("auto-unlock changes require root")
 	}
 	ops, err := productionAutoUnlockOps()
 	if err != nil {

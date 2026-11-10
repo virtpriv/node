@@ -72,11 +72,17 @@ func newP2PConfirmInput() textinput.Model {
 
 // ── Screen interface ────────────────────────────────────
 
+// Init reads the address, and looks for a P2P switch already running,
+// started from another TUI or before this screen was closed, to show it.
 func (s *P2PUpgradeScreen) Init() tea.Cmd {
 	if s.step != p2pLoading {
 		return nil
 	}
-	return s.readAddress()
+	read := s.readAddress()
+	if read == nil {
+		return nil
+	}
+	return tea.Batch(read, latestWorkflowCmd(s, s.ctx.Workflows, app.P2PUpgrade))
 }
 
 func (s *P2PUpgradeScreen) HandleKey(
@@ -106,18 +112,6 @@ func (s *P2PUpgradeScreen) HandleKey(
 
 	// Progress state
 	if s.step == p2pProgress && s.progress != nil {
-		if !s.progress.done {
-			// Block all keys during active install
-			return s, nil
-		}
-		switch keyStr {
-		case "left":
-			return s, emitFocusSidebar
-		case "up":
-			if s.ctx.HasTabs {
-				return s, emitFocusTabBar
-			}
-		}
 		newScreen, cmd := s.progress.HandleKey(
 			keyStr, msg)
 		s.progress =
@@ -272,7 +266,7 @@ func (s *P2PUpgradeScreen) startInstall() (
 	if s.step != p2pConfirm2 || s.request.Address() == "" {
 		return s, nil
 	}
-	operation := s.ctx.HelperWorkflows.UpgradeP2P(s.request, client)
+	operation := s.ctx.Workflows.UpgradeP2P(s.request, client)
 
 	s.progress = NewInstallProgressScreen(
 		s.ctx, operation,
@@ -292,6 +286,19 @@ func (s *P2PUpgradeScreen) onInstallFail() tea.Cmd {
 func (s *P2PUpgradeScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
+	if m, ok := msg.(latestWorkflowMsg); ok {
+		if m.owner != Screen(s) || !m.found || m.job.Finished() || s.step == p2pProgress {
+			return s, nil
+		}
+		s.cancelAddressRead()
+		var client app.P2PConnection
+		if s.ctx.LndClient != nil {
+			client = s.ctx.LndClient
+		}
+		s.progress = NewInstallProgressScreen(s.ctx, s.ctx.Workflows.Attach(m.job, client), s.onInstallDone, s.onInstallFail)
+		s.step = p2pProgress
+		return s, s.progress.Init()
+	}
 	if s.step == p2pProgress && s.progress != nil {
 		newScreen, cmd := s.progress.HandleMsg(msg)
 		s.progress =
@@ -532,7 +539,7 @@ func (s *P2PUpgradeScreen) readAddress() tea.Cmd {
 	s.request = p2p.UpgradeRequest{}
 	s.error = ""
 	s.step = p2pLoading
-	workflows := s.ctx.HelperWorkflows
+	workflows := s.ctx.Workflows
 	return func() tea.Msg {
 		request, err := workflows.ReadP2PAddress(ctx)
 		return p2pAddressResultMsg{read: read, request: request, err: err}

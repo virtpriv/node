@@ -4,17 +4,18 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/virtpriv/node/internal/app"
 	"github.com/virtpriv/node/internal/theme"
 )
 
 // ── SSHPasswordAuthScreen ──────────────────────────────
 // Toggle SSH password authentication on/off. Opened as
 // its own tab from SSHKeysScreen. Mirrors the
-// detail-+-confirm pattern used by other destructive-
+// detail and confirm pattern used by other destructive
 // action screens.
 //
 // Disabling is destructive (potential lockout) and refused
-// by the root helper if no supported SSH keys are configured.
+// by its job if no supported SSH keys are configured.
 // Enabling is always allowed.
 
 type sshPwAuthStep int
@@ -88,8 +89,18 @@ func (s *SSHPasswordAuthScreen) HandleKey(
 	case sshPwAuthStepConfirm:
 		return s.handleConfirmKey(keyStr)
 	case sshPwAuthStepWorking:
-		if keyStr == "ctrl+c" {
+		// The change is a job of its own. The owner may leave meanwhile.
+		switch keyStr {
+		case "ctrl+c":
 			return s, tea.Quit
+		case "left":
+			return s, emitFocusSidebar
+		case "up", "shift+tab":
+			if s.ctx.HasTabs {
+				return s, emitFocusTabBar
+			}
+		case "backspace":
+			return s, emitFocusParent
 		}
 	case sshPwAuthStepResult:
 		return s.handleResultKey(keyStr)
@@ -115,6 +126,9 @@ func (s *SSHPasswordAuthScreen) HandleMsg(
 		s.step = sshPwAuthStepResult
 		if msg.err != nil {
 			s.resultErr = msg.err.Error()
+			if reason, ok := app.ChangeNotStarted(msg.err); ok {
+				s.resultErr = "The change was not started. " + reason
+			}
 			s.resultMsg = ""
 			return s, nil
 		}
@@ -161,7 +175,11 @@ func (s *SSHPasswordAuthScreen) HelpBindings() []key.Binding {
 			kQuit,
 		}
 	case sshPwAuthStepWorking:
-		return []key.Binding{kQuit}
+		bindings := []key.Binding{kSidebar}
+		if s.ctx.HasTabs {
+			bindings = append(bindings, kShiftTabBar)
+		}
+		return append(bindings, kBack, kQuit)
 	case sshPwAuthStepResult:
 		return resultBindings(s.ctx.HasTabs)
 	}
@@ -220,7 +238,7 @@ func (s *SSHPasswordAuthScreen) viewState(
 
 	if !s.ctx.State.SSHPasswordAuthKnown {
 		p.warn("Cannot read effective SSH password authentication.")
-		p.dim("Check: journalctl -u vpn-helperd")
+		p.dim("Check: journalctl -t vpnd")
 		return p.renderWithBottomButtons(
 			[]string{"Cancel", "Unavailable"}, 0,
 			s.ctx.ContentFocused, h)
@@ -248,7 +266,7 @@ func (s *SSHPasswordAuthScreen) viewState(
 		p.blank()
 		p.dim("Disable password auth to require SSH keys")
 		p.dim("for all logins. Add a key first if you")
-		p.dim("haven't yet — the system refuses to")
+		p.dim("haven't yet. The system refuses to")
 		p.dim("disable when no keys are configured.")
 		p.blank()
 		p.warn("Before disabling: open a new SSH session")

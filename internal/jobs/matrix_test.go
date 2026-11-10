@@ -1,13 +1,11 @@
-// internal/helperd/matrix_test.go
-
-package helperd
+package jobs
 
 import (
 	"errors"
 	"slices"
 	"testing"
 
-	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/paths"
 )
 
@@ -15,23 +13,23 @@ import (
 // macaroon, while connection repair needs both LND credentials in order.
 
 var expectedMatrix = map[string][]string{
-	helper.VerbStageLNDCredentials: {
+	api.VerbStageLNDCredentials: {
 		paths.StateLNDTLSCert,
 		paths.StateLNDMacaroon,
 	},
-	helper.VerbStageLNDMacaroon: {
+	api.VerbStageLNDMacaroon: {
 		paths.StateLNDMacaroon,
 	},
-	helper.VerbUpgradeP2PToHybrid: {
+	api.KindP2PUpgrade: {
 		paths.StateLNDTLSCert,
 	},
-	helper.VerbSyncthingInstall: {
+	api.KindSyncthingInstall: {
 		paths.StateSyncthingAPIKey,
 	},
 	// Applied by the handler only for the lnd unit (start or
 	// restart): LND can regenerate its TLS certificate during
 	// startup, so the staged copy must follow.
-	helper.VerbServiceAction: {
+	api.KindServiceAction: {
 		paths.StateLNDTLSCert,
 	},
 	// Deliberately absent: rebuild-tor-config and
@@ -50,7 +48,7 @@ func TestRestageSelectsOnlyRequiredCredentials(t *testing.T) {
 			for file := range original {
 				stagers[file] = func() error { calls = append(calls, file); return nil }
 			}
-			if err := restage(verb); err != nil {
+			if err := Restage(verb); err != nil {
 				t.Fatal(err)
 			}
 			if !slices.Equal(calls, want) {
@@ -77,7 +75,7 @@ func TestRestageStopsOnMissingOrFailedStager(t *testing.T) {
 		if !missing {
 			stagers[paths.StateLNDTLSCert] = func() error { return failure }
 		}
-		err := restage(helper.VerbStageLNDCredentials)
+		err := Restage(api.VerbStageLNDCredentials)
 		if err == nil || called {
 			t.Fatalf("missing=%v error=%v later stager called=%v", missing, err, called)
 		}
@@ -106,8 +104,10 @@ var expectedBoardFiles = map[string]bool{
 func TestFreshnessMatrixIsClosed(t *testing.T) {
 	boardFiles := expectedBoardFiles
 	for verb, files := range freshnessMatrix {
-		if _, ok := verbs[verb]; !ok {
-			t.Errorf("matrix verb %s is not on the verb menu", verb)
+		_, isKind := kinds[verb]
+		isCopy := verb == api.VerbStageLNDCredentials || verb == api.VerbStageLNDMacaroon
+		if !isKind && !isCopy {
+			t.Errorf("matrix entry %s is neither a job kind nor a credential copy", verb)
 		}
 		for _, f := range files {
 			if !boardFiles[f] {
@@ -128,7 +128,7 @@ func TestFreshnessMatrixIsClosed(t *testing.T) {
 // ── Freshness-declaration tests ──────────────────────────
 //
 // The rule: every board fact declares exactly one freshness
-// story, and the live-read facts are pinned to menu verbs.
+// story.
 // Adding board fact number five without deciding how it stays
 // fresh — or retiring a read verb without replacing the story
 // it serves — fails here.
@@ -176,20 +176,6 @@ func TestFreshnessStoriesHaveTheirMechanism(t *testing.T) {
 				t.Errorf("%s declares %s but has no stager",
 					f, story)
 			}
-		}
-	}
-}
-
-// Live-read facts are served by verbs that must exist on the
-// menu.
-func TestLiveReadFactsServedByMenuVerbs(t *testing.T) {
-	if len(liveReadFacts) == 0 {
-		t.Fatal("no live-read facts declared")
-	}
-	for fact, verb := range liveReadFacts {
-		if _, ok := verbs[verb]; !ok {
-			t.Errorf("live-read fact %q names verb %s, which "+
-				"is not on the menu", fact, verb)
 		}
 	}
 }

@@ -17,7 +17,7 @@ import (
 // systemctl observation cannot roll back a job already accepted by systemd.
 func ControlService(request servicecontrol.Request) (servicecontrol.Completion, error) {
 	if os.Geteuid() != 0 {
-		return servicecontrol.Completion{}, errors.New("service control requires the root helper")
+		return servicecontrol.Completion{}, errors.New("service control requires root")
 	}
 	return controlService(request, 26*time.Minute, exec.CommandContext, system.ReadServiceState)
 }

@@ -12,18 +12,6 @@ import (
 	"github.com/virtpriv/node/internal/system"
 )
 
-type packageUpdatesStub struct {
-	calls   int
-	results chan app.PackageUpdateResult
-}
-
-func (s *packageUpdatesStub) Update() <-chan app.PackageUpdateResult {
-	s.calls++
-	s.results = make(chan app.PackageUpdateResult, 1)
-	return s.results
-}
-func (*packageUpdatesStub) Close() {}
-
 // openUpdates opens the Updates tab from the System screen's Updates button
 // and returns it with its Update Packages button selected.
 func openUpdates(t *testing.T, m *Model, home *SystemHomeScreen) *UpdatesScreen {
@@ -57,8 +45,8 @@ func openUpdates(t *testing.T, m *Model, home *SystemHomeScreen) *UpdatesScreen 
 
 func TestPackageUpdateHiddenCompletionAndRetryIdentity(t *testing.T) {
 	m, _ := statusModelFixture(t)
-	fake := &packageUpdatesStub{}
-	m.screenCtx.PackageUpdates = fake
+	fake := &fakeJobs{}
+	m.screenCtx.Jobs = fake
 	m.nav.ActiveItem, m.nav.Cursor = secSystem, secSystem
 	s := NewSystemHomeScreen(m.screenCtx)
 	m.sectionScreens[secSystem] = s
@@ -111,7 +99,7 @@ func TestPackageUpdateHiddenCompletionAndRetryIdentity(t *testing.T) {
 	if m.nav.ActiveSection() == secSystem {
 		t.Fatal("System did not hide")
 	}
-	fake.results <- app.PackageUpdateResult{Outcome: app.PackageUpdateUnconfirmed, Err: errors.New("injected dpkg failure")}
+	fake.results <- done(app.JobUnconfirmed, errors.New("injected dpkg failure"))
 	oldResult := resultCmd()
 	statusUpdate(&m, oldResult)
 	if s.pkgPending != nil {
@@ -141,7 +129,7 @@ func TestPackageUpdateHiddenCompletionAndRetryIdentity(t *testing.T) {
 	if s.pkgPending == nil || fake.calls != 2 {
 		t.Fatal("old completion cleared new attempt")
 	}
-	fake.results <- app.PackageUpdateResult{Outcome: app.PackageUpdateCompleted}
+	fake.results <- done(app.JobCompleted, nil)
 	statusUpdate(&m, newResult())
 	view = ansi.Strip(m.viewMain())
 	if s.pkgPending != nil || !strings.Contains(view, "Package update completed.") || strings.Contains(view, "unconfirmed") {
@@ -151,8 +139,8 @@ func TestPackageUpdateHiddenCompletionAndRetryIdentity(t *testing.T) {
 
 func TestPackageUpdateRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 	m, reader := statusModelFixture(t)
-	fake := &packageUpdatesStub{}
-	m.screenCtx.PackageUpdates = fake
+	fake := &fakeJobs{}
+	m.screenCtx.Jobs = fake
 	m.nav.ActiveItem = secSystem
 	s := NewSystemHomeScreen(m.screenCtx)
 	m.sectionScreens[secSystem] = s
@@ -174,7 +162,7 @@ func TestPackageUpdateRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 	if m.screenCtx.Status.Reboot.Fresh() {
 		t.Fatal("pre-update read published")
 	}
-	fake.results <- app.PackageUpdateResult{Outcome: app.PackageUpdateCompleted}
+	fake.results <- done(app.JobCompleted, nil)
 	if statusUpdate(&m, resultCmd()) != nil {
 		t.Fatal("completion started overlapping status collector")
 	}

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/paths"
 )
 
@@ -75,8 +75,8 @@ func (i ConnectionInfo) String() string   { return "connection information (cred
 func (i ConnectionInfo) GoString() string { return i.String() }
 
 // ConnectionInfoReader owns read cancellation and joining for one terminal.
-// Helper reads have a 30-second local deadline including queue time. This does
-// not interrupt root work. Ordinary staged-file reads finish before Close returns.
+// vpnd reads have a 30-second local deadline. vpnd answers them at once, also
+// while a job runs. Ordinary staged-file reads finish before Close returns.
 type ConnectionInfoReader struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -89,13 +89,7 @@ type ConnectionInfoReader struct {
 func NewConnectionInfoReader() *ConnectionInfoReader {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ConnectionInfoReader{ctx: ctx, cancel: cancel, readFile: os.ReadFile,
-		call: func(ctx context.Context, verb string, params, result any) error {
-			session, err := helper.StartContext(ctx, verb, params)
-			if err != nil {
-				return err
-			}
-			return session.Wait(result)
-		},
+		call: api.Call,
 	}
 }
 
@@ -126,8 +120,8 @@ func (r *ConnectionInfoReader) Read(target ConnectionTarget) ConnectionInfo {
 	}
 	ctx, cancel := context.WithTimeout(r.ctx, 30*time.Second)
 	defer cancel()
-	var addresses helper.NodeAddressesResult
-	result.AddressErr = r.call(ctx, helper.VerbReadNodeAddresses, nil, &addresses)
+	var addresses api.NodeAddressesResult
+	result.AddressErr = r.call(ctx, api.VerbReadNodeAddresses, nil, &addresses)
 	if err := ctx.Err(); err != nil {
 		return fail(err)
 	}

@@ -59,9 +59,7 @@ any leftover directory before removing it and retrying.
 
 v0.7.0 requires a fresh installation. This protocol does not provide an
 upgrade from v0.6.x or an unmarked installation.
-The first test baseline must itself contain the managed updater. Once running
-this implementation, the legacy binary-only helper request is refused so it
-cannot bypass component and host changes.
+The first test baseline must itself contain the managed updater.
 
 The plan has these fields:
 
@@ -152,17 +150,23 @@ is a downgrade and remains refused.
 
 ## Runtime and recovery
 
-The root helper verifies the vpn archive before the TUI shows its plan. Approval
-binds the archive, observed component versions, network, configuration hash, and
-any previous failed update. Each review has its own token, so a second terminal
-cannot silently change what the first terminal approves.
+Prepare Update is a job of the vpn API (ADR-0016): `vpnd` starts it in its own
+service, which verifies the vpn archive before the TUI shows its plan. Leaving
+the screen does not stop it, and the review comes back from its record.
+Approval binds the archive, observed component versions, network,
+configuration hash, and any previous failed update. Each review has its own
+token, so a second terminal cannot silently change what the first terminal
+approves.
 
-On acceptance, vpn saves the job under `/var/lib/vpn/private/updates`, retains
-the working launcher, and starts `vpn-update.service`. The verified target binary
-implements the worker. The TUI can close and reconnect to the same saved job.
-All helper mutations share a lock with the worker, and read-only status remains
-available. An unfinished record continues to block conflicting helper mutations
-even if its worker has exited. Root's independent maintenance authority remains.
+On acceptance, vpn saves the update's record under
+`/var/lib/vpn/private/updates` with its job ID, retains the working launcher,
+and starts `vpn-update.service`. The verified target binary implements the
+worker. The TUI can close and reconnect to the same saved job. The worker holds
+the operations lock for its run, and `vpnd` takes it briefly to accept each
+change, both waiting a few seconds for it before refusing. Reads remain
+available. An unfinished record keeps every other change out even if its
+worker has exited, and Start and Retry are refused while another job runs.
+Root's independent maintenance authority remains.
 
 The worker stages and verifies all affected artifacts before downtime. It stops
 LND before Core, atomically replaces each selected executable, then starts and
@@ -199,7 +203,7 @@ When an update starts, and at a Retry before any change, the worker requires
 each affected service to be running its installed program, and records the
 wallet and device identity. A stopped service refuses the update while it can
 still be canceled. A download resumed after a reboot does not ask again. This
-rule belongs to the worker of each release, not to the installed helper, so a
+rule belongs to the worker of each release, not to the installed `vpnd`, so a
 release that repairs a service which cannot start can leave it out. A repair of
 a failed update uses the identity recorded before that update changed the node,
 and reads the node itself when that update changed nothing.
@@ -221,20 +225,22 @@ shows it as a stop of normal use, without an error, and asks for Continue.
 Continue sends the same request as Retry, on which LND counts as stopped and
 the update continues.
 
-## Installed helper and later releases
+## Installed vpnd and later releases
 
-The helper and launcher on a node are older than the worker of every update
+`vpnd` and the launcher on a node are older than the worker of every update
 they start. They read only these fields of the job record: `schema`,
-`review.digest`, `review.manifest.version`, `review.network`, `worker_hash`,
-`config_hash`, `phase`, `step`, `error` and `host_changes_begun`. They act on
+`review.digest`, `review.manifest.version`, `review.network`, `job_id`,
+`worker_hash`, `config_hash`, `phase`, `step`, `error` and
+`host_changes_begun`. The installed side writes `job_id` and `accepted` at
+Start, and the worker writes `ended` when the update completes. They act on
 four phase words, `failed`, `complete`, `canceled` and `waiting-unlock`, and
 treat any other as work in progress. Retry only sets `phase` to `retry`, and the
 worker decides where to resume. Retry and Cancel remove `error`, `failure`,
 `next` and `advice` and keep every other field as the worker wrote it. A worker
 may add fields, phases and components, but must keep these meanings for as
-long as its plan admits a source with this helper.
+long as its plan admits a source with this `vpnd`.
 
-For Node Updates only, the helper also passes `steps`, `step_number`,
+For Node Updates only, `vpnd` also passes `steps`, `step_number`,
 `step_starts`, `step_ends`, `failure`, `next` and `advice`, each only in a
 shape it can read, and the last three only with an error. `step_starts` and
 `step_ends` hold when each listed step began and ended, no more entries than
@@ -244,7 +250,7 @@ characters of printable text and line breaks, its last part, after an empty
 line, the sentence that names the button. A worker sends `next` and `advice` together. `next` is `continue`,
 `retry` or `cancel`, the button the advice names, and `cancel` only before
 host changes began. Each value keeps its meaning in every release. A later
-worker may add failure codes and `next` values: the helper passes them, and a
+worker may add failure codes and `next` values: `vpnd` passes them, and a
 screen that does not know the value, or did not get both, uses its own
 release's next step and words for the failure. The screen scrolls the list,
 so a worker may list as many steps as it needs.
@@ -254,14 +260,14 @@ version or read the node configuration. They hand the job to the worker, which
 makes its own checks. A later worker can therefore change either part way
 through an update and still be resumed.
 
-The helper likewise ignores plan fields it does not know, and network and
+`vpnd` likewise ignores plan fields it does not know, and network and
 service names it does not know, and still enforces the exact source, its own
 network, newer-version and recovery checks. It also accepts a component version
 written in a format it does not know, as long as the text is short and safe to
 show, and it reads such a version from an installed program. It still refuses a
 component downgrade when it knows the format of both versions. The worker reads
 the approved plan bytes in full and refuses a plan it does not completely
-understand. A plan with a `protocol` number the helper does not know is refused,
+understand. A plan with a `protocol` number `vpnd` does not know is refused,
 unless it names a `bridge` the node can install first. A corrective worker reads
 the failed update's retained record for the services it affected, what may have
 run, and the wallet and device identity.

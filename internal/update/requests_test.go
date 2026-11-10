@@ -79,7 +79,7 @@ func TestStartRechecksNodeAndWorkerBeforeAcceptingReview(t *testing.T) {
 					return nil
 				},
 			}
-			err := acceptUpdate(root, token, ops)
+			err := acceptUpdate(root, token, "20261109-100000-aaaaaa", ops)
 			if wantError != "" {
 				if err == nil || !strings.Contains(err.Error(), wantError) {
 					t.Fatalf("wrong refusal: %v", err)
@@ -96,7 +96,7 @@ func TestStartRechecksNodeAndWorkerBeforeAcceptingReview(t *testing.T) {
 			if err != nil || accepted == nil || accepted.Review.Token != token || accepted.Phase != "accepted" {
 				t.Fatal("accepted the wrong review", err)
 			}
-			if err := acceptUpdate(root, token, ops); err == nil || !strings.Contains(err.Error(), "already accepted") || launches != 1 {
+			if err := acceptUpdate(root, token, "20261109-100000-aaaaaa", ops); err == nil || !strings.Contains(err.Error(), "already accepted") || launches != 1 {
 				t.Fatal("replayed approval launched another job", err)
 			}
 		})
@@ -114,7 +114,7 @@ func TestHelperAcceptsReviewOfPlanWithLaterNames(t *testing.T) {
 	token := saveReview(t, root, p)
 	cfg := config.Default()
 	cfg.Network = j.Review.Network
-	err := acceptUpdate(root, token, admissionOps{
+	err := acceptUpdate(root, token, "20261109-100000-aaaaaa", admissionOps{
 		observe: func() (nodeObservation, error) {
 			return nodeObservation{source: j.Review.Source, config: cfg, configHash: j.ConfigHash}, nil
 		},
@@ -130,7 +130,7 @@ func TestHelperAcceptsReviewOfPlanWithLaterNames(t *testing.T) {
 	if err := cancelUpdate(root, j.Review.Digest); err != nil {
 		t.Fatal(err)
 	}
-	if acceptUpdate(root, saveReview(t, root, p), admissionOps{
+	if acceptUpdate(root, saveReview(t, root, p), "20261109-100000-aaaaaa", admissionOps{
 		observe: func() (nodeObservation, error) {
 			return nodeObservation{source: j.Review.Source, config: cfg, configHash: j.ConfigHash}, nil
 		},
@@ -188,7 +188,7 @@ func TestCorrectiveAdmissionPreservesFailedUpdateObligations(t *testing.T) {
 			cfg := config.Default()
 			cfg.Network = p.Review.Network
 			launches := 0
-			err = acceptUpdate(root, token, admissionOps{
+			err = acceptUpdate(root, token, "20261109-100000-aaaaaa", admissionOps{
 				observe: func() (nodeObservation, error) {
 					return nodeObservation{source: p.Review.Source, config: cfg, configHash: p.ConfigHash}, nil
 				},
@@ -326,7 +326,7 @@ func TestKeyServerNoticeIsApprovedButNotKeptInTheJob(t *testing.T) {
 	token := saveReview(t, root, prepared{Review: review, WorkerHash: j.WorkerHash, PlanHash: j.PlanHash, ConfigHash: j.ConfigHash})
 	cfg := config.Default()
 	cfg.Network = j.Review.Network
-	err := acceptUpdate(root, token, admissionOps{
+	err := acceptUpdate(root, token, "20261109-100000-aaaaaa", admissionOps{
 		observe: func() (nodeObservation, error) {
 			return nodeObservation{source: j.Review.Source, config: cfg, configHash: j.ConfigHash}, nil
 		},

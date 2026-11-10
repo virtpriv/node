@@ -31,11 +31,11 @@ type syncthingInstallOps struct {
 }
 
 // InstallSyncthing owns fresh add-on provisioning and final desired publication.
-// The helper supplies its fixed freshness action. Accepted work continues if the
+// Its job supplies the fixed freshness action. Accepted work continues if the
 // terminal disconnects. Neither a failed step nor disconnect implies rollback.
 func InstallSyncthing(stage func() error, progress func(int)) error {
 	if os.Geteuid() != 0 {
-		return nothingChanged(errors.New("syncthing installation requires the root helper"))
+		return nothingChanged(errors.New("syncthing installation requires root"))
 	}
 	return installSyncthing(syncthingInstallOps{
 		load: config.Load, residue: syncthingResiduePresent,
@@ -113,8 +113,8 @@ func syncthingInstallSteps(
 				return downloadSyncthing(
 					component.SyncthingVersion, syncWork)
 			},
-			// The work folder is in the helper's private /tmp
-			// (PrivateTmp=yes), not on the node.
+			// The work folder is in the job service's private
+			// /tmp (PrivateTmp=yes), not on the node.
 			noChange: true},
 		{name: "Verifying Syncthing",
 			run: func() error {

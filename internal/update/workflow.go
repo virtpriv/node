@@ -310,6 +310,7 @@ func runJob(j *job, ops workflowOps) error {
 		fmt.Fprintln(os.Stderr, "LND backup copy failed after the update:", err)
 	}
 	j.Error, j.Failure, j.Next, j.Advice = "", nil, "", ""
+	j.Ended = time.Now().UTC()
 	end()
 	if err := publish("complete", "Update complete", stepFinish); err != nil {
 		return err

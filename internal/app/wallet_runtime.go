@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/lndrpc"
 )
 
@@ -23,7 +23,7 @@ type WalletClientResult struct {
 // WalletRuntime owns local presence reads and unpublished clients for one TUI.
 // Claim transfers a client to the caller. Close cancels and joins local work,
 // and closes any client whose completion was never claimed by the event loop.
-// Cancellation cannot undo credential staging already accepted by the helper.
+// Cancellation cannot undo credential staging vpnd already accepted.
 type WalletRuntime struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -39,11 +39,7 @@ func NewWalletRuntime() *WalletRuntime {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &WalletRuntime{ctx: ctx, cancel: cancel, clients: make(map[*lndrpc.Client]struct{}),
 		read: func(ctx context.Context, result any) error {
-			session, err := helper.StartContext(ctx, helper.VerbReadWalletState, nil)
-			if err != nil {
-				return err
-			}
-			return session.Wait(result)
+			return api.Call(ctx, api.VerbReadWalletState, nil, result)
 		},
 		open: func(ctx context.Context, stagedOnly bool) (*lndrpc.Client, error) {
 			if stagedOnly {
@@ -97,7 +93,7 @@ func (r *WalletRuntime) Read(caller context.Context) WalletObservation {
 }
 
 // Open keeps ordinary startup's probe/repair separate from the staged-only
-// post-creation path. The deadline includes any helper queue and retry waits.
+// post-creation path. The deadline includes the credential copy and retry waits.
 // Ordinary file reads must finish before cancellation can join the worker.
 func (r *WalletRuntime) Open(caller context.Context, stagedOnly bool) WalletClientResult {
 	ctx, done, err := r.begin(caller, 75*time.Second)

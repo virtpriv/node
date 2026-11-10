@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/virtpriv/node/internal/app"
 	"github.com/virtpriv/node/internal/release"
 	"github.com/virtpriv/node/internal/theme"
 	"github.com/virtpriv/node/internal/update/protocol"
@@ -62,6 +63,20 @@ func (s *SettingsScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 			return s, nil
 		}
 		s.release.SetValue(value)
+	case settingsPrepareMsg:
+		if m.owner != s || m.attempt != s.attempt || s.release == nil || s.checking {
+			return s, nil
+		}
+		s.release.SetValue("v" + m.job.Version)
+		s.release.Blur()
+		s.checking, s.err = true, ""
+		s.attempt++
+		msg := settingsReviewMsg{owner: s, attempt: s.attempt, version: m.job.Version}
+		client := s.ctx.NodeUpdates
+		return s, func() tea.Msg {
+			msg.review, msg.err = client.AwaitPrepare(m.job.ID)
+			return msg
+		}
 	case settingsReviewMsg:
 		if m.owner != s || m.attempt != s.attempt || s.release == nil {
 			return s, nil
@@ -85,6 +100,30 @@ func (s *SettingsScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 		}
 	}
 	return s, nil
+}
+
+// settingsPrepareMsg is a Prepare job found running when the Test release
+// form opens, started before this screen was closed or by another TUI.
+type settingsPrepareMsg struct {
+	owner   *SettingsScreen
+	attempt uint64
+	job     app.PrepareJob
+}
+
+// awaitRunningPrepare looks for a running Prepare job, so the form shows it
+// and its review instead of starting a second one.
+func (s *SettingsScreen) awaitRunningPrepare() tea.Cmd {
+	client, attempt := s.ctx.NodeUpdates, s.attempt
+	if client == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		job, found, err := client.LastPrepare()
+		if err != nil || !found || !job.Running {
+			return nil
+		}
+		return settingsPrepareMsg{owner: s, attempt: attempt, job: job}
+	}
 }
 
 func (s *SettingsScreen) closeForm() {
@@ -115,7 +154,7 @@ func (s *SettingsScreen) HandleKey(k string, msg tea.KeyPressMsg) (Screen, tea.C
 		input.Prompt = "  "
 		applyInputStyles(&input)
 		s.release, s.err = &input, ""
-		return s, input.Focus()
+		return s, tea.Batch(input.Focus(), s.awaitRunningPrepare())
 	}
 	return s, nil
 }

@@ -13,7 +13,7 @@ import (
 // Success confirms acceptance, not shutdown or a subsequent successful boot.
 func RequestReboot() error {
 	if os.Geteuid() != 0 {
-		return errors.New("reboot requires the root helper")
+		return errors.New("reboot requires root")
 	}
 	return requestReboot(15*time.Second, exec.CommandContext)
 }

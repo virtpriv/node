@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/virtpriv/node/internal/helper"
+	"github.com/virtpriv/node/internal/board"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/syncthing"
 	"github.com/virtpriv/node/internal/system"
@@ -60,7 +60,7 @@ type Syncthing struct {
 func NewSyncthing() *Syncthing {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Syncthing{ctx: ctx, cancel: cancel, lock: syncthing.WithMutationLock, backupCopy: readBackupCopy, client: func() (SyncthingClient, error) {
-		key, err := helper.ReadBoardString(paths.StateSyncthingAPIKey)
+		key, err := board.ReadString(paths.StateSyncthingAPIKey)
 		if err != nil {
 			return nil, errors.New("Syncthing credentials unavailable, maintenance inspection is required")
 		}

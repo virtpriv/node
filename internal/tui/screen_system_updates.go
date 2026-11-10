@@ -11,9 +11,8 @@ import (
 
 // UpdatesScreen opens from the System tab's Updates button. It offers Node
 // Updates for vpn and the node software, and Update Packages for Debian's
-// packages. The System
-// screen keeps owning a package update, so closing this tab loses neither a
-// running update nor its result, and a second one cannot start meanwhile.
+// packages. The System screen keeps watching an Update Packages job, so
+// closing this tab loses neither a running job's step nor its outcome.
 type UpdatesScreen struct {
 	ctx     *ScreenContext
 	home    *SystemHomeScreen
@@ -103,6 +102,12 @@ func (s *UpdatesScreen) View(w, _ int) string {
 	if s.confirm {
 		p.blank()
 		p.line(" " + theme.Warning.Render("Update packages? [y/n]"))
+	}
+	if pending := s.home.pkgPending; pending != nil {
+		if line := jobStepLine(pending.job); line != "" {
+			p.blank()
+			p.valueWrap(line)
+		}
 	}
 	if s.home.pkgResult != "" {
 		p.blank()

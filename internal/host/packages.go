@@ -87,7 +87,7 @@ func logRebootCheck(log func(string, ...any)) {
 // refused until it ends, so one an update asks for waits for the next night.
 func UpdatePackages(progress func(int)) error {
 	if os.Geteuid() != 0 {
-		return errors.New("package updates require the root helper")
+		return errors.New("package updates require root")
 	}
 	inhibitor, err := system.InhibitShutdown("updating Debian's packages")
 	if err != nil {

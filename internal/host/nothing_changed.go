@@ -3,7 +3,7 @@ package host
 import "errors"
 
 // ErrNothingChanged marks a failure that came before an operation changed
-// anything on the node. The helper passes it on, so the screen can say that
+// anything on the node. The job records it, so the screen can say that
 // nothing changed instead of warning that changes may have been applied.
 var ErrNothingChanged = errors.New("nothing was changed")
 

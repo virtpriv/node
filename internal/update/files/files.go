@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -156,26 +157,49 @@ func Hash(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// Lock never removes its inode. Every helper mutation and worker shares it.
-func Lock(path string) (func(), error) {
+// LockWait is how long Lock waits for another holder.
+const LockWait = 10 * time.Second
+
+// Lock never removes its inode. vpnd's acceptance of a change and the update
+// worker share it.
+func Lock(path string) (func(), error) { return LockWithin(path, LockWait) }
+
+// LockWithin waits up to wait for the lock, then refuses.
+func LockWithin(path string, wait time.Duration) (func(), error) {
+	deadline := time.Now().Add(wait)
+	for {
+		unlock, held, err := TryLock(path)
+		if err != nil || !held {
+			return unlock, err
+		}
+		if !time.Now().Before(deadline) {
+			return nil, errors.New("another node operation is running")
+		}
+		time.Sleep(min(100*time.Millisecond, time.Until(deadline)))
+	}
+}
+
+// TryLock takes the lock if it is free. held reports that another holder has
+// it. Readers use it so they never wait.
+func TryLock(path string) (unlock func(), held bool, err error) {
 	if err := Directory(filepath.Dir(path), 0700); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	fd, err := unix.Open(path, unix.O_CREAT|unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	f := os.NewFile(uintptr(fd), path)
 	if err := Check(path, false); err != nil {
 		f.Close()
-		return nil, err
+		return nil, false, err
 	}
 	if err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		f.Close()
 		if errors.Is(err, unix.EWOULDBLOCK) {
-			return nil, errors.New("another node operation is running")
+			return nil, true, nil
 		}
-		return nil, err
+		return nil, false, err
 	}
-	return func() { _ = unix.Flock(fd, unix.LOCK_UN); _ = f.Close() }, nil
+	return func() { _ = unix.Flock(fd, unix.LOCK_UN); _ = f.Close() }, false, nil
 }
