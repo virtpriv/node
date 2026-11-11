@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,13 +27,18 @@ const (
 	ledgerComplete   = "complete"
 )
 
-var baseInstallStepKeys = []string{
+// The install runs the host steps, then the Bitcoin and Lightning steps, then
+// the last host steps. The install record names the programs of the middle
+// group, Bitcoin Core and LND in this release, which installs them every
+// time. They run before root's SSH login goes off, so an unattended install,
+// which shows its password only at the end, stays reachable as root through
+// the long downloads.
+var hostSetupStepKeys = []string{
 	"binary.install",
 	"apt.base",
 	"firewall",
 	"host.prep",
 	"identity.access",
-	"service-identities.v1",
 	"ipv6.disable",
 	"mptcp.disable",
 	"tor.configure",
@@ -41,6 +47,10 @@ var baseInstallStepKeys = []string{
 	"base.upgrade",
 	"security",
 	"swap.zram",
+}
+
+var bitcoinLightningStepKeys = []string{
+	"service-identities.v1",
 	"btc.download",
 	"btc.verify",
 	"btc.install",
@@ -51,12 +61,18 @@ var baseInstallStepKeys = []string{
 	"lnd.start",
 	"lnd.tls-san",
 	"lnd.certwatch",
+	"lnd.tls-stage",
+}
+
+var hostFinishStepKeys = []string{
 	"ssh.harden",
 	"journal.access",
 	"helper.enable",
-	"state.stage",
 	"shellenv",
 }
+
+var baseInstallStepKeys = slices.Concat(
+	hostSetupStepKeys, bitcoinLightningStepKeys, hostFinishStepKeys)
 
 type ledgerEntry struct {
 	CompletedAt string `json:"completed_at"`
@@ -66,7 +82,18 @@ type ledgerEntry struct {
 type installContext struct {
 	Network        string `json:"network"`
 	InitialP2PMode string `json:"initial_p2p_mode"`
+	Bitcoin        string `json:"bitcoin"`
+	Lightning      string `json:"lightning"`
 	DbCacheMB      *int   `json:"db_cache_mb,omitempty"`
+}
+
+// newInstallContext is the context every install of this release starts
+// with: Tor only, Bitcoin Core and LND.
+func newInstallContext(network string) installContext {
+	return installContext{
+		Network: network, InitialP2PMode: "tor",
+		Bitcoin: config.BitcoinCore, Lightning: config.LightningLND,
+	}
 }
 
 type installLedger struct {
@@ -139,6 +166,12 @@ func validateLedger(l *installLedger) error {
 	if l.Context.InitialP2PMode != "tor" {
 		return fmt.Errorf("invalid initial P2P mode %q",
 			l.Context.InitialP2PMode)
+	}
+	if err := config.ValidateBitcoin(l.Context.Bitcoin); err != nil {
+		return fmt.Errorf("invalid Bitcoin part %q", l.Context.Bitcoin)
+	}
+	if err := config.ValidateLightning(l.Context.Lightning); err != nil {
+		return fmt.Errorf("invalid Lightning part %q", l.Context.Lightning)
 	}
 	if l.Context.DbCacheMB != nil && !validDbCache(*l.Context.DbCacheMB) {
 		return fmt.Errorf("invalid db cache %d", *l.Context.DbCacheMB)

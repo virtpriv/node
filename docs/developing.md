@@ -222,3 +222,7 @@ changes made in Syncthing's external web UI.
 | /var/lib/lnd/data/watchtower/bitcoin/{mainnet,testnet4,signet}/ | Profile-specific `watchtower.sqlite`. LND creates it even when the watchtower server is disabled |
 | /var/lib/syncthing/ | Syncthing's private data |
 | /var/log/vpn.log | Application log (install, verification, status) |
+
+`/etc/vpn/config.json` names the node's Bitcoin and Lightning programs in `bitcoin`
+and `lightning`. v0.7.0 installs Bitcoin Core and LND every time, as one group of
+install steps.

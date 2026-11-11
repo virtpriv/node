@@ -25,12 +25,23 @@ const (
 	SystemSchema = 1
 )
 
+// The programs of the Bitcoin and Lightning steps. This release installs
+// Bitcoin Core and LND every time, so they are the only values it accepts. A
+// later release that makes them optional or adds another program adds
+// values, which this release refuses.
+const (
+	BitcoinCore  = "core"
+	LightningLND = "lnd"
+)
+
 // AppConfig is the root-owned, non-secret desired system configuration.
 // It deliberately contains no live daemon observations, credentials,
 // installer lifecycle state, security-workflow markers, or TUI preferences.
 type AppConfig struct {
 	Schema           int    `json:"schema"`
 	Network          string `json:"network"`
+	Bitcoin          string `json:"bitcoin"`
+	Lightning        string `json:"lightning"`
 	PruneSize        int    `json:"prune_size_gb"`
 	DbCache          int    `json:"db_cache_mb"`
 	P2PMode          string `json:"p2p_mode"`
@@ -65,6 +76,8 @@ func Default() *AppConfig {
 	return &AppConfig{
 		Schema:    SystemSchema,
 		Network:   "mainnet",
+		Bitcoin:   BitcoinCore,
+		Lightning: LightningLND,
 		PruneSize: 25,
 		DbCache:   512,
 		P2PMode:   "tor",
@@ -130,6 +143,8 @@ func validateObject(path string, wantDir bool, mode os.FileMode, uid, gid int) e
 var systemFields = map[string]bool{
 	"schema":              true,
 	"network":             true,
+	"bitcoin":             true,
+	"lightning":           true,
 	"prune_size_gb":       true,
 	"db_cache_mb":         true,
 	"p2p_mode":            true,
@@ -223,6 +238,12 @@ func (c *AppConfig) Validate() error {
 		return fmt.Errorf("unsupported schema %d", c.Schema)
 	}
 	if err := ValidateNetwork(c.Network); err != nil {
+		return err
+	}
+	if err := ValidateBitcoin(c.Bitcoin); err != nil {
+		return err
+	}
+	if err := ValidateLightning(c.Lightning); err != nil {
 		return err
 	}
 	if c.PruneSize < 1 || c.PruneSize > 10_000 {
@@ -379,8 +400,24 @@ func (s *Store) Save(cfg *AppConfig) error {
 func Load() (*AppConfig, error) { return DefaultStore().Load() }
 func Save(cfg *AppConfig) error { return DefaultStore().Save(cfg) }
 
-// LND is mandatory in the v0.7.0 base installation.
-func (c *AppConfig) HasLND() bool { return true }
+// ValidateBitcoin checks the Bitcoin program the node is set up with.
+func ValidateBitcoin(v string) error {
+	if v != BitcoinCore {
+		return fmt.Errorf("unknown Bitcoin part %q", v)
+	}
+	return nil
+}
+
+// ValidateLightning checks the Lightning program the node is set up with.
+func ValidateLightning(v string) error {
+	if v != LightningLND {
+		return fmt.Errorf("unknown Lightning part %q", v)
+	}
+	return nil
+}
+
+// HasLND reports whether the node is set up with LND.
+func (c *AppConfig) HasLND() bool { return c.Lightning == LightningLND }
 
 func (c *AppConfig) DbCacheMB() int { return c.DbCache }
 

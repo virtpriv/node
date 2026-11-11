@@ -39,22 +39,16 @@ func newLifecycleFixture(t *testing.T) *lifecycleFixture {
 		bootstrapPrefix: filepath.Join(root, "bootstrap-"),
 		bootstraps: []lifecycleBootstrapState{
 			{
-				path: filepath.Join(root, "bootstrap-mainnet-tor"),
-				context: installContext{
-					Network: "mainnet", InitialP2PMode: "tor",
-				},
+				path:    filepath.Join(root, "bootstrap-mainnet-tor"),
+				context: newInstallContext("mainnet"),
 			},
 			{
-				path: filepath.Join(root, "bootstrap-testnet4-tor"),
-				context: installContext{
-					Network: "testnet4", InitialP2PMode: "tor",
-				},
+				path:    filepath.Join(root, "bootstrap-testnet4-tor"),
+				context: newInstallContext("testnet4"),
 			},
 			{
-				path: filepath.Join(root, "bootstrap-public-signet-tor"),
-				context: installContext{
-					Network: "public-signet", InitialP2PMode: "tor",
-				},
+				path:    filepath.Join(root, "bootstrap-public-signet-tor"),
+				context: newInstallContext("public-signet"),
 			},
 		},
 		ancestors: []lifecycleDir{{path: root, mode: rootInfo.Mode().Perm()}},
@@ -91,9 +85,7 @@ func (f *lifecycleFixture) classify() (lifecycleState, error) {
 
 func (f *lifecycleFixture) initialize(t *testing.T) *installLedger {
 	t.Helper()
-	l, err := initializeLifecycle(f.fs, f.lookup, installContext{
-		Network: "testnet4", InitialP2PMode: "tor",
-	})
+	l, err := initializeLifecycle(f.fs, f.lookup, newInstallContext("testnet4"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,9 +161,7 @@ func TestRootLifecyclePristineInitializeAndResume(t *testing.T) {
 			interrupted := errors.New("simulated process death")
 			reached := false
 			_, err := initializeLifecycleWithHook(
-				f.fs, f.lookup, installContext{
-					Network: "testnet4", InitialP2PMode: "tor",
-				}, func(got lifecycleInitBoundary) error {
+				f.fs, f.lookup, newInstallContext("testnet4"), func(got lifecycleInitBoundary) error {
 					if got != boundary {
 						return nil
 					}
@@ -536,9 +526,7 @@ func TestRootLifecycleUnsafeAndMalformedStateRefuses(t *testing.T) {
 			if err := os.Mkdir(f.fs.privateDir, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			ledger, err := newLedger(installContext{
-				Network: "mainnet", InitialP2PMode: "tor",
-			})
+			ledger, err := newLedger(newInstallContext("mainnet"))
 			if err != nil {
 				t.Fatal(err)
 			}

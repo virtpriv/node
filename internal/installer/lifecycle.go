@@ -77,22 +77,16 @@ func productionLifecycleFS() lifecycleFS {
 		bootstrapPrefix: paths.InstallBootstrapPrefix,
 		bootstraps: []lifecycleBootstrapState{
 			{
-				path: paths.InstallBootstrapMainnet,
-				context: installContext{
-					Network: "mainnet", InitialP2PMode: "tor",
-				},
+				path:    paths.InstallBootstrapMainnet,
+				context: newInstallContext("mainnet"),
 			},
 			{
-				path: paths.InstallBootstrapTestnet4,
-				context: installContext{
-					Network: "testnet4", InitialP2PMode: "tor",
-				},
+				path:    paths.InstallBootstrapTestnet4,
+				context: newInstallContext("testnet4"),
 			},
 			{
-				path: paths.InstallBootstrapPublicSignet,
-				context: installContext{
-					Network: "public-signet", InitialP2PMode: "tor",
-				},
+				path:    paths.InstallBootstrapPublicSignet,
+				context: newInstallContext("public-signet"),
 			},
 		},
 		ancestors: []lifecycleDir{
@@ -648,9 +642,7 @@ func lifecyclePathExists(path string) (bool, error) {
 
 func initialLedgerMatchesContext(l *installLedger, ctx installContext) bool {
 	return l.Schema == ledgerSchema && l.Status == ledgerInProgress &&
-		l.Context.Network == ctx.Network &&
-		l.Context.InitialP2PMode == ctx.InitialP2PMode &&
-		l.Context.DbCacheMB == nil && len(l.Steps) == 0
+		sameInitialContext(l.Context, ctx) && len(l.Steps) == 0
 }
 
 type lifecycleInitBoundary string
@@ -875,6 +867,7 @@ func bootstrapForContext(
 func sameInitialContext(a, b installContext) bool {
 	return a.Network == b.Network &&
 		a.InitialP2PMode == b.InitialP2PMode &&
+		a.Bitcoin == b.Bitcoin && a.Lightning == b.Lightning &&
 		a.DbCacheMB == nil && b.DbCacheMB == nil
 }
 

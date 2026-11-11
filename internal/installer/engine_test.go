@@ -32,18 +32,18 @@ func testSteps(calls map[string]int) []InstallStep {
 			Fn: fn("host.prep")},
 		{Key: "identity.access", Group: "pipeline", Name: "Verifying",
 			Fn: fn("identity.access")},
-		{Key: "service-identities.v1", Group: "pipeline", Name: "Installing",
-			Fn: fn("service-identities.v1")},
-		{Key: "ipv6.disable", Name: "Disabling IPv6",
+		{Key: "ipv6.disable", Group: "pipeline", Name: "Installing",
 			Fn: fn("ipv6.disable")},
+		{Key: "mptcp.disable", Name: "Disabling MPTCP",
+			Fn: fn("mptcp.disable")},
 	}
 }
 
 func testLedger() *installLedger {
 	db := 512
-	l, err := newLedger(installContext{
-		Network: "mainnet", InitialP2PMode: "tor", DbCacheMB: &db,
-	})
+	ctx := newInstallContext("mainnet")
+	ctx.DbCacheMB = &db
+	l, err := newLedger(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -102,8 +102,8 @@ func TestValidateSteps(t *testing.T) {
 
 func TestPlanScenarios(t *testing.T) {
 	all := []string{"binary.install", "apt.base", "firewall",
-		"host.prep", "identity.access", "service-identities.v1",
-		"ipv6.disable"}
+		"host.prep", "identity.access", "ipv6.disable",
+		"mptcp.disable"}
 
 	cases := []struct {
 		name    string
@@ -124,17 +124,17 @@ func TestPlanScenarios(t *testing.T) {
 			name: "resume after step 2: gate re-runs, rest forward",
 			done: []string{"binary.install", "apt.base"},
 			wantRun: []string{"firewall", "host.prep",
-				"identity.access", "service-identities.v1", "ipv6.disable"},
+				"identity.access", "ipv6.disable", "mptcp.disable"},
 		},
 		{
 			// THE group test: download+verify recorded but the
-			// terminal (service-identities.v1) is not, so the whole
+			// terminal (ipv6.disable) is not, so the whole
 			// group re-runs (the workdir died with the old process).
 			name: "incomplete group re-runs whole",
 			done: []string{"binary.install", "apt.base",
 				"firewall", "host.prep", "identity.access"},
 			wantRun: []string{"firewall", "host.prep",
-				"identity.access", "service-identities.v1", "ipv6.disable"},
+				"identity.access", "ipv6.disable", "mptcp.disable"},
 		},
 		{
 			// Terminal recorded: the group is complete even if
@@ -142,16 +142,16 @@ func TestPlanScenarios(t *testing.T) {
 			// consulted for group members).
 			name: "group judged by terminal only",
 			done: []string{"binary.install", "apt.base",
-				"firewall", "service-identities.v1"},
-			wantRun: []string{"firewall", "ipv6.disable"},
+				"firewall", "ipv6.disable"},
+			wantRun: []string{"firewall", "mptcp.disable"},
 		},
 		{
 			name: "unknown ledger keys ignored",
 			done: []string{"binary.install", "no.such.step",
 				"another.ghost"},
 			wantRun: []string{"apt.base", "firewall",
-				"host.prep", "identity.access", "service-identities.v1",
-				"ipv6.disable"},
+				"host.prep", "identity.access", "ipv6.disable",
+				"mptcp.disable"},
 		},
 	}
 
@@ -359,7 +359,7 @@ func TestRunInstallUnattendedFailureStops(t *testing.T) {
 	}
 	// Nothing after the failure ran.
 	for _, k := range []string{"host.prep", "identity.access",
-		"service-identities.v1", "ipv6.disable"} {
+		"ipv6.disable", "mptcp.disable"} {
 		if calls[k] != 0 {
 			t.Errorf("%s ran after the failure", k)
 		}

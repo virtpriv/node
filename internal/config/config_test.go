@@ -61,7 +61,7 @@ func TestSystemConfigContainsOnlyDesiredNonSecretFields(t *testing.T) {
 }
 
 func TestDecodeSystemStrict(t *testing.T) {
-	valid := `{"schema":1,"network":"testnet4","prune_size_gb":25,"db_cache_mb":1024,"p2p_mode":"hybrid","p2p_address":"203.0.113.7","auto_unlock_enabled":true,"syncthing_enabled":false}`
+	valid := `{"schema":1,"network":"testnet4","bitcoin":"core","lightning":"lnd","prune_size_gb":25,"db_cache_mb":1024,"p2p_mode":"hybrid","p2p_address":"203.0.113.7","auto_unlock_enabled":true,"syncthing_enabled":false}`
 	cfg, err := decodeSystem([]byte(valid))
 	if err != nil {
 		t.Fatalf("valid config: %v", err)
@@ -107,6 +107,12 @@ func TestDecodeSystemStrict(t *testing.T) {
 		"null address":            strings.Replace(tor, `"p2p_address":""`, `"p2p_address":null`, 1),
 		"null boolean":            strings.Replace(valid, `"syncthing_enabled":false`, `"syncthing_enabled":null`, 1),
 		"null network":            strings.Replace(valid, `"network":"testnet4"`, `"network":null`, 1),
+		"missing bitcoin":         strings.Replace(valid, `"bitcoin":"core",`, ``, 1),
+		"missing lightning":       strings.Replace(valid, `"lightning":"lnd",`, ``, 1),
+		"other bitcoin":           strings.Replace(valid, `"bitcoin":"core"`, `"bitcoin":"knots"`, 1),
+		"other lightning":         strings.Replace(valid, `"lightning":"lnd"`, `"lightning":"ldk"`, 1),
+		"no bitcoin lightning":    strings.Replace(strings.Replace(valid, `"bitcoin":"core"`, `"bitcoin":"none"`, 1), `"lightning":"lnd"`, `"lightning":"none"`, 1),
+		"null lightning":          strings.Replace(valid, `"lightning":"lnd"`, `"lightning":null`, 1),
 	}
 	for name, input := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -120,7 +126,7 @@ func TestDecodeSystemStrict(t *testing.T) {
 // A later release may add fields this one does not know. An older vpn still
 // running during an update must read that file, and validate what it knows.
 func TestDecodeSystemReadsALaterFile(t *testing.T) {
-	later := `{"schema":1,"network":"public-signet","prune_size_gb":25,"db_cache_mb":512,"p2p_mode":"hybrid","p2p_address":"203.0.113.7","auto_unlock_enabled":true,"syncthing_enabled":true,"lnd_alias":"node","later_settings":{"list":[1,2],"on":true},"later_unset":null}`
+	later := `{"schema":1,"network":"public-signet","bitcoin":"core","lightning":"lnd","prune_size_gb":25,"db_cache_mb":512,"p2p_mode":"hybrid","p2p_address":"203.0.113.7","auto_unlock_enabled":true,"syncthing_enabled":true,"lnd_alias":"node","later_settings":{"list":[1,2],"on":true},"later_unset":null}`
 	cfg, err := decodeSystem([]byte(later))
 	if err != nil {
 		t.Fatalf("later file refused: %v", err)
@@ -179,7 +185,7 @@ func TestStoreKeepsTheReviewedHybridAddress(t *testing.T) {
 }
 
 func TestDecodeSystemAcceptsPublicSignetProfile(t *testing.T) {
-	data := []byte(`{"schema":1,"network":"public-signet","prune_size_gb":25,"db_cache_mb":512,"p2p_mode":"tor","p2p_address":"","auto_unlock_enabled":false,"syncthing_enabled":false}`)
+	data := []byte(`{"schema":1,"network":"public-signet","bitcoin":"core","lightning":"lnd","prune_size_gb":25,"db_cache_mb":512,"p2p_mode":"tor","p2p_address":"","auto_unlock_enabled":false,"syncthing_enabled":false}`)
 	cfg, err := decodeSystem(data)
 	if err != nil {
 		t.Fatal(err)
