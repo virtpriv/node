@@ -79,17 +79,17 @@ func packageResultText(u app.JobUpdate) string {
 	case app.JobCompleted:
 		return "Package update completed."
 	case app.JobNotStarted:
-		return "Package update was not started. " + jobReason(u)
+		return withReason("Package update was not started", jobReason(u))
 	case app.JobUnconfirmed:
 		if observationLost(u) {
-			return "Package update outcome unconfirmed. The host may still be working. " +
-				"Ask your administrator to check package state and logs before retrying."
+			return "Package update outcome unconfirmed. The node may still be working. " +
+				"Check the node before trying again."
 		}
 		return "Package update outcome unconfirmed. It ended without a result. " +
-			"Ask your administrator to check package state and logs before retrying."
+			"Check the node before trying again."
 	}
-	return "Package update outcome unconfirmed. " + sentence(jobReason(u)) +
-		" Ask your administrator to check package state and logs before retrying."
+	return withReason("Package update outcome unconfirmed", jobReason(u)) +
+		" Check the node before trying again."
 }
 
 func (m *Model) invalidatePackageStatus() {

@@ -86,9 +86,9 @@ func serviceResultText(request servicecontrol.Request, u app.JobUpdate) string {
 	case app.JobCompleted:
 		return label + " completed."
 	case app.JobNotStarted:
-		return label + " was not started. " + jobReason(u)
+		return withReason(label+" was not started", jobReason(u))
 	}
-	return label + " outcome unconfirmed. " + sentence(jobReason(u)) + " Check status and logs before retrying."
+	return withReason(label+" outcome unconfirmed", jobReason(u)) + " Check status and logs before retrying."
 }
 
 func servicePendingText(request servicecontrol.Request) string {

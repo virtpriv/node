@@ -261,7 +261,7 @@ func TestNodeUpdateMessagesReachOnlyTheirLiveOwner(t *testing.T) {
 	// Deliver the tick directly. The timer's duration is not this contract.
 	updated, request := m.Update(nodeUpdateTick{owner: owner})
 	m = updated.(Model)
-	if request == nil || owner.busy != "status" || other.busy != "" {
+	if request == nil || !owner.checking || other.checking {
 		t.Fatal("poll was not delivered to its hidden owner")
 	}
 	pending := request()
@@ -274,7 +274,7 @@ func TestNodeUpdateMessagesReachOnlyTheirLiveOwner(t *testing.T) {
 			for _, msg := range []tea.Msg{pending, nodeUpdateTick{owner: owner}} {
 				updated, cmd := m.Update(msg)
 				m = updated.(Model)
-				if cmd != nil || owner.busy != "status" || other.status.ID != "" {
+				if cmd != nil || !owner.checking || other.status.ID != "" {
 					t.Fatal("closed owner handled a response or restarted polling")
 				}
 			}
@@ -607,5 +607,33 @@ func TestNextWithoutItsAdviceIsNotFollowed(t *testing.T) {
 	s.HandleMsg(s.Init()())
 	if slices.Contains(s.buttons(), "Continue") {
 		t.Fatal("a next step without its advice was followed")
+	}
+}
+
+// The screen asks for the update's state every 2 seconds. A key pressed
+// while that question is out still acts: Continue is drawn and sends the
+// request, and the late answer to the old question changes nothing.
+func TestContinueDuringAStatusCheckResumes(t *testing.T) {
+	f := protocol.Failure{Code: protocol.FailureStopFailed, Service: protocol.LND}
+	client := &nodeUpdateClientStub{status: protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "failed", Active: true, Error: "stopped", Failure: &f}}
+	s := NewNodeUpdateScreen(&ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0"})
+	s.HandleMsg(s.Init()())
+	_, check := s.HandleMsg(nodeUpdateTick{owner: s})
+	if check == nil {
+		t.Fatal("the tick asked nothing")
+	}
+	view, _ := drawNodeUpdates(t, s.ctx, s)
+	if strings.Contains(view, "Checking update state") {
+		t.Fatal("the status check drew a line")
+	}
+	cmd := pressNodeUpdateAction(t, s, "Continue")
+	late := check()
+	s.HandleMsg(cmd())
+	if client.resumed != client.status.ID {
+		t.Fatal("Continue pressed during a status check was not sent")
+	}
+	s.HandleMsg(late)
+	if s.busy != "" {
+		t.Fatal("the late answer left the screen busy")
 	}
 }

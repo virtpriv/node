@@ -75,7 +75,7 @@ func TestRebootHiddenCompletionRetryAndDuplicateAdmission(t *testing.T) {
 		t.Fatal("did not return to System")
 	}
 	view := ansi.Strip(m.viewMain())
-	if !strings.Contains(view, "Reboot outcome unconfirmed") || !strings.Contains(view, "administrator") {
+	if !strings.Contains(view, "Reboot outcome unconfirmed") || !strings.Contains(view, "before trying again") {
 		t.Fatalf("retained outcome missing: %s", view)
 	}
 	if strings.Contains(view, "Reboot completed") {

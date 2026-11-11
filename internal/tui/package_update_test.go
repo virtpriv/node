@@ -113,7 +113,7 @@ func TestPackageUpdateHiddenCompletionAndRetryIdentity(t *testing.T) {
 	}
 	updates = openUpdates(t, &m, s)
 	view := ansi.Strip(m.viewMain())
-	if !strings.Contains(view, "Package update outcome unconfirmed") || !strings.Contains(view, "administrator") {
+	if !strings.Contains(view, "Package update outcome unconfirmed") || !strings.Contains(view, "before trying again") {
 		t.Fatalf("retained outcome missing: %s", view)
 	}
 	if strings.Contains(view, "Package update completed") {

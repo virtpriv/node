@@ -56,6 +56,21 @@ func jobReason(u app.JobUpdate) string {
 	}, err.Error())
 }
 
+// withReason joins a screen's own words and a reason. A reason that is a
+// sentence already, such as vpnd's busy refusal, follows a full stop. Any
+// other, such as a Go error that starts lowercase, follows a colon, the join
+// before a cause. Its first letter is never changed: it can be a program's
+// name such as systemd-run.
+func withReason(lead, reason string) string {
+	if reason == "" {
+		return lead + "."
+	}
+	if r := []rune(reason)[0]; unicode.IsUpper(r) {
+		return lead + ". " + sentence(reason)
+	}
+	return lead + ": " + sentence(reason)
+}
+
 // sentence ends text with a full stop unless it ends a sentence already.
 func sentence(text string) string {
 	if text == "" || strings.HasSuffix(text, ".") || strings.HasSuffix(text, "!") || strings.HasSuffix(text, "?") {

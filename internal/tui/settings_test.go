@@ -215,3 +215,22 @@ func TestCancelWhilePreparingDropsTheAnswer(t *testing.T) {
 		t.Fatal("an answer after Cancel reached the form opened again")
 	}
 }
+
+// Node Updates asks for the update's state every 2 seconds. A Test release
+// review that arrives while that question is out still replaces the tab.
+func TestReviewDuringAStatusCheckReplacesNodeUpdates(t *testing.T) {
+	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: &nodeUpdateClientStub{}, Version: "0.7.0"}
+	open := NewNodeUpdateScreen(ctx)
+	open.HandleMsg(open.Init()())
+	if _, check := open.HandleMsg(nodeUpdateTick{owner: open}); check == nil {
+		t.Fatal("the tick asked nothing")
+	}
+	m := Model{nav: NewNavSidebar(), screenCtx: ctx, cfg: ctx.Cfg, state: &RuntimeState{},
+		tabs: []openTab{{Kind: tabNodeUpdates, Section: secSystem, Screen: open}}}
+	m.nav.ActiveItem = secSystem
+	review := newReviewedRelease(ctx, "0.7.1-rc.1", protocol.Review{Token: "t", Manifest: protocol.Manifest{Version: "0.7.1-rc.1"}})
+	next, _ := m.Update(openTabMsg{Kind: tabNodeUpdates, Label: "Node Updates", Screen: review, Parent: tabUpdates, Replace: true})
+	if next.(Model).tabs[0].Screen != review {
+		t.Fatal("a status check dropped the review")
+	}
+}
