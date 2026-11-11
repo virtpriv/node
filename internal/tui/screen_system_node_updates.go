@@ -37,9 +37,13 @@ type NodeUpdateScreen struct {
 	status    protocol.Status
 	err       error
 	statusErr error
-	busy      string
-	button    int
-	attempt   uint64
+	// busy names the request the operator made, or the first read when the
+	// screen opens. checking is the 2 s status check, which never hides a
+	// button, draws a line or holds back a new screen.
+	busy     string
+	checking bool
+	button   int
+	attempt  uint64
 	// notice explains why target is not the release the operator selected.
 	notice string
 	// lead is the next step button focused when its state appeared.
@@ -93,8 +97,38 @@ func (s *NodeUpdateScreen) prepared(answer protocol.Review) {
 	s.ctx.markShown("review:" + answer.Token)
 }
 
+// restartLine names the services this release's rule says the update
+// restarts. A later release's update program may restart more, never fewer,
+// so with none named the screen says nothing about restarts.
+func restartLine(affected []protocol.Component) string {
+	names := make([]string, 0, len(affected))
+	for _, c := range affected {
+		names = append(names, componentName(c))
+	}
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0] + " restarts during the update."
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1] + " restart during the update."
+}
+
+func componentName(c protocol.Component) string {
+	switch c {
+	case protocol.Bitcoin:
+		return "Bitcoin Core"
+	case protocol.LND:
+		return "LND"
+	case protocol.Syncthing:
+		return "Syncthing"
+	}
+	return string(c)
+}
+
 // nodeUpdatesBusy reports a Node Updates screen waiting for the node's
-// answer, which a new screen in its tab would lose.
+// answer to a request, which a new screen in its tab would lose. The 2 s
+// status check is not such a wait.
 func nodeUpdatesBusy(screen Screen) bool {
 	s, ok := screen.(*NodeUpdateScreen)
 	return ok && s.busy != ""
@@ -116,12 +150,15 @@ func (s *NodeUpdateScreen) Init() tea.Cmd {
 	return s.request("restore")
 }
 func (s *NodeUpdateScreen) request(kind string) tea.Cmd {
-	if s.busy != "" {
+	if s.busy != "" || (kind == "status" && s.checking) {
 		return nil
 	}
-	s.busy = kind
-	if kind != "status" {
-		s.err = nil
+	// A request takes over from a status check still out: the check's late
+	// answer belongs to an older attempt and is dropped.
+	if kind == "status" {
+		s.checking = true
+	} else {
+		s.busy, s.err = kind, nil
 	}
 	s.attempt++
 	attempt := s.attempt
@@ -168,8 +205,7 @@ func (s *NodeUpdateScreen) restorePrepare(p app.PrepareJob, status protocol.Stat
 		s.target, s.notice, s.prepareID = p.Version, "", p.ID
 		return s.request("await"), true
 	case p.Review != nil:
-		if s.ctx.shownJobs["review:"+p.Review.Token] || time.Since(p.Ended) >= 24*time.Hour ||
-			(p.Review.Digest != "" && p.Review.Digest == status.ID) {
+		if !s.ctx.reviewWaiting(p, status) {
 			return nil, false
 		}
 		s.target = p.Version
@@ -183,6 +219,15 @@ func (s *NodeUpdateScreen) restorePrepare(p app.PrepareJob, status protocol.Stat
 		s.target, s.err = p.Version, p.Err
 	}
 	return nil, false
+}
+
+// reviewWaiting reports a finished Prepare's review that this TUI has not
+// shown, from the last 24 hours, for a release other than the update on
+// record. Node Updates shows it when it opens, and Test release opens Node
+// Updates for it.
+func (c *ScreenContext) reviewWaiting(p app.PrepareJob, current protocol.Status) bool {
+	return p.Review != nil && !c.shownJobs["review:"+p.Review.Token] && time.Since(p.Ended) < 24*time.Hour &&
+		(p.Review.Digest == "" || p.Review.Digest != current.ID)
 }
 
 func (s *NodeUpdateScreen) poll() tea.Cmd {
@@ -202,7 +247,7 @@ func (s *NodeUpdateScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 		if m.owner != s || m.attempt != s.attempt {
 			return s, nil
 		}
-		s.busy = ""
+		s.busy, s.checking = "", false
 		if m.kind == "restore" && m.found {
 			if cmd, shown := s.restorePrepare(m.prepare, m.status); shown {
 				s.status, s.statusErr = m.status, m.err
@@ -540,6 +585,11 @@ func (s *NodeUpdateScreen) stepRows(w int) (rows []string, from, to int) {
 			step.State, step.Err = steplist.Failed, strings.TrimSpace(st.Error)
 		case st.Running:
 			step.State = steplist.Running
+			if st.Phase == "retry" {
+				// The worker clears this step's times when it takes the
+				// Retry. Until then the old start would count on.
+				step.Started = time.Time{}
+			}
 		default:
 			step.State = steplist.Stopped
 		}
@@ -574,7 +624,7 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 		p.field("VPN: ", r.Source.VPN+" → "+m.Version)
 		for _, c := range protocol.Components {
 			if from := r.Source.Get(c); from != "" {
-				p.field(string(c)+": ", from+" → "+m.Artifact(c).Version)
+				p.field(componentName(c)+": ", from+" → "+m.Artifact(c).Version)
 			}
 		}
 		p.blank()
@@ -587,9 +637,14 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 			p.blank()
 			p.fitText(theme.Warning, "Key server not reached. A new key revocation would be missed.", 0)
 		}
+		if restarts := restartLine(m.Affected(r.Source)); restarts != "" {
+			p.blank()
+			p.line(" " + restarts)
+		}
 		p.blank()
-		p.line(" Affected services will restart. Downloads use Tor.")
-		p.line(" Databases are preserved. A failed update may need repair.")
+		p.line(" Downloads go through Tor.")
+		p.blank()
+		p.line(" The node's data is kept.")
 	} else if s.status.ID != "" && !s.status.Active && !s.olderThanUpdate() {
 		// A finished or canceled update is history, shown in one line.
 		outcome := "complete"
@@ -673,7 +728,9 @@ func (s *NodeUpdateScreen) messages(w int, fit nodeUpdateFit) []string {
 	if s.hasTarget() && s.review == nil && !fit.noAvailable {
 		p.blank()
 		p.fitText(plain, s.notice, 0)
-		p.field("Available: ", "v"+s.target)
+		// Green, as on System's header, so an update stands out.
+		p.lines = append(p.lines, " "+theme.Label.Render("Available: ")+
+			lipgloss.NewStyle().Foreground(theme.ColorUpdate).Render("v"+s.target))
 	}
 	if s.busy != "" && !fit.noBusy {
 		p.blank()

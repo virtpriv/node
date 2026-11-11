@@ -781,7 +781,7 @@ func (s *AutoUnlockScreen) viewError(
 	case app.AutoUnlockNotStarted:
 		p.title(theme.Header, "Auto-Unlock Change Not Started")
 		p.blank()
-		p.warnWrap("The change was not started. " + s.errMsg)
+		p.warnWrap(withReason("The change was not started", s.errMsg))
 	default:
 		p.title(theme.Header, "Repair Required")
 		p.blank()

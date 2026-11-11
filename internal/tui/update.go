@@ -142,6 +142,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.routeNodeUpdate(msg.owner, msg)
 	case nodeUpdateTick:
 		return m.routeNodeUpdate(msg.owner, msg)
+	case settingsReviewWaitingMsg:
+		for _, tab := range m.tabs {
+			if tab.Screen == msg.owner {
+				_, cmd := msg.owner.HandleMsg(msg)
+				return m, cmd
+			}
+		}
+		return m, nil
 	case settingsPrepareMsg:
 		for _, tab := range m.tabs {
 			if tab.Screen == msg.owner {

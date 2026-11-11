@@ -77,6 +77,16 @@ func (s *SettingsScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 			msg.review, msg.err = client.AwaitPrepare(m.job.ID)
 			return msg
 		}
+	case settingsReviewWaitingMsg:
+		if m.owner != s || m.attempt != s.attempt || s.release == nil || s.checking ||
+			!s.ctx.reviewWaiting(m.job, m.status) {
+			return s, nil
+		}
+		s.closeForm()
+		screen := NewNodeUpdateScreen(s.ctx)
+		return s, func() tea.Msg {
+			return openTabMsg{Kind: tabNodeUpdates, Label: "Node Updates", Screen: screen, Parent: tabUpdates, Replace: true}
+		}
 	case settingsReviewMsg:
 		if m.owner != s || m.attempt != s.attempt || s.release == nil {
 			return s, nil
@@ -110,8 +120,19 @@ type settingsPrepareMsg struct {
 	job     app.PrepareJob
 }
 
-// awaitRunningPrepare looks for a running Prepare job, so the form shows it
-// and its review instead of starting a second one.
+// settingsReviewWaitingMsg is a review a Prepare job finished after the form
+// was left, not yet shown in this TUI.
+type settingsReviewWaitingMsg struct {
+	owner   *SettingsScreen
+	attempt uint64
+	job     app.PrepareJob
+	status  protocol.Status
+}
+
+// awaitRunningPrepare looks for the newest Prepare job when the form opens.
+// One still running is shown on the form with its review to come, so a
+// second one is not started. A review it finished since is opened on Node
+// Updates, by the rule Node Updates uses when it opens.
 func (s *SettingsScreen) awaitRunningPrepare() tea.Cmd {
 	client, attempt := s.ctx.NodeUpdates, s.attempt
 	if client == nil {
@@ -119,10 +140,17 @@ func (s *SettingsScreen) awaitRunningPrepare() tea.Cmd {
 	}
 	return func() tea.Msg {
 		job, found, err := client.LastPrepare()
-		if err != nil || !found || !job.Running {
+		if err != nil || !found {
 			return nil
 		}
-		return settingsPrepareMsg{owner: s, attempt: attempt, job: job}
+		if job.Running {
+			return settingsPrepareMsg{owner: s, attempt: attempt, job: job}
+		}
+		status, err := client.Status()
+		if err != nil {
+			return nil
+		}
+		return settingsReviewWaitingMsg{owner: s, attempt: attempt, job: job, status: status}
 	}
 }
 

@@ -321,8 +321,12 @@ func (s *SystemHomeScreen) View(
 	var headerLines []string
 	headerLines = append(headerLines, "")
 
-	verText := "Virtual Private Node v" +
-		s.ctx.Version
+	// A development build's version is not a release number, so it gets no
+	// "v" in front.
+	verText := "Virtual Private Node " + s.ctx.Version
+	if release.ValidVersion(s.ctx.Version) {
+		verText = "Virtual Private Node v" + s.ctx.Version
+	}
 	headerLines = append(headerLines,
 		centerPad(theme.Action.Render(verText), w))
 

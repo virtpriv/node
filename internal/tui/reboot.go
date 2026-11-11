@@ -72,9 +72,9 @@ func (s *SystemHomeScreen) applyRebootResult(u app.JobUpdate) {
 	case app.JobRestarted:
 		s.rebootResult = "The node restarted."
 	case app.JobNotStarted:
-		s.rebootResult = "Reboot was not requested. " + jobReason(u)
+		s.rebootResult = withReason("Reboot was not requested", jobReason(u))
 	default:
-		s.rebootResult = "Reboot outcome unconfirmed. The host may be restarting. " +
-			"Ask your administrator to check host state before retrying."
+		s.rebootResult = "Reboot outcome unconfirmed. The node may be restarting. " +
+			"Check the node before trying again."
 	}
 }

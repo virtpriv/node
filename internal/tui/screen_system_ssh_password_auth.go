@@ -127,7 +127,7 @@ func (s *SSHPasswordAuthScreen) HandleMsg(
 		if msg.err != nil {
 			s.resultErr = msg.err.Error()
 			if reason, ok := app.ChangeNotStarted(msg.err); ok {
-				s.resultErr = "The change was not started. " + reason
+				s.resultErr = withReason("The change was not started", reason)
 			}
 			s.resultMsg = ""
 			return s, nil
