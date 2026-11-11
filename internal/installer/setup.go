@@ -157,9 +157,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 		if network == "" {
 			network = "mainnet"
 		}
-		ledger, err = deps.initializeLifecycle(fs, lookup, installContext{
-			Network: network, InitialP2PMode: "tor",
-		})
+		ledger, err = deps.initializeLifecycle(fs, lookup, newInstallContext(network))
 		if err != nil {
 			return err
 		}
@@ -185,6 +183,8 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	cfg := config.Default()
 	cfg.Network = ledger.Context.Network
 	cfg.P2PMode = ledger.Context.InitialP2PMode
+	cfg.Bitcoin = ledger.Context.Bitcoin
+	cfg.Lightning = ledger.Context.Lightning
 	dec := &InstallDecisions{}
 	if ledger.Context.DbCacheMB != nil {
 		dec.DbCacheMB = *ledger.Context.DbCacheMB
@@ -530,11 +530,6 @@ func buildInstallSteps(
 			Fn: func() error {
 				return applyIdentityAccess(dec)
 			}},
-		{Key: "service-identities.v1",
-			Name: "Creating separate users for Bitcoin Core and LND",
-			Fn: func() error {
-				return createBaseServiceIdentities()
-			}},
 		{Key: "ipv6.disable", Name: "Turning off IPv6",
 			Fn: host.DisableIPv6},
 		// Before any program listens. LND and Syncthing are Go programs,
@@ -587,6 +582,16 @@ func buildInstallSteps(
 		// Bitcoin Core's first sync, when memory is shortest.
 		{Key: "swap.zram", Name: "Setting up compressed swap",
 			Fn: host.SetUpCompressedSwap},
+
+		// ── Bitcoin Core and LND ─────────────────
+		// The programs the install record's bitcoin and lightning fields
+		// name. Tor's configuration above already lists LND's onion
+		// services, since the record names LND.
+		{Key: "service-identities.v1",
+			Name: "Creating separate users for Bitcoin Core and LND",
+			Fn: func() error {
+				return createBaseServiceIdentities()
+			}},
 		{Key: "btc.download", Group: "btc",
 			Name: "Downloading Bitcoin Core " + component.BitcoinCoreVersion + " through Tor",
 			Fn: func() error {
@@ -621,8 +626,6 @@ func buildInstallSteps(
 			}},
 		{Key: "btc.start", Name: "Starting Bitcoin Core",
 			Fn: func() error { return host.EnableAndRestartBitcoind(cfg) }},
-
-		// ── LND (Tor-only, non-interactive) ─────────
 		{Key: "lnd.download", Group: "lnd",
 			Name: "Downloading LND " + strings.TrimSuffix(component.LNDVersion, "-beta") + " through Tor",
 			Fn: func() error {
@@ -664,6 +667,11 @@ func buildInstallSteps(
 		{Key: "lnd.certwatch",
 			Name: "Watching LND's certificate for changes",
 			Fn:   host.InstallLNDCertWatch},
+		{Key: "lnd.tls-stage",
+			Name: "Copying LND's certificate for the TUI",
+			Fn:   stageBoard},
+
+		// ── The last host steps ──────────────────
 		// Checks the owner's sudo first, then turns root's SSH login off and
 		// the owner's password login on. The root session running the
 		// install stays open, so the later steps run in it.
@@ -680,9 +688,6 @@ func buildInstallSteps(
 		{Key: "helper.enable",
 			Name: "Starting vpnd, the node's root service",
 			Fn:   host.InstallVPNDUnits},
-		{Key: "state.stage",
-			Name: "Staging files for the TUI",
-			Fn:   stageBoard},
 		// Once a special case after the TUI that warned but completed
 		// anyway. As a real step it gets the ledger, the completion gate,
 		// failure logging and resume, and the special case is gone.
