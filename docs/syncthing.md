@@ -28,6 +28,9 @@ at home and on a VPS.
 
 ### Step 1. Install Syncthing on Your Node
 
+Create the LND wallet first. Add-On offers Syncthing only once the wallet
+exists.
+
 1. SSH into your Node as `vpn`
 2. Open the **Add-On** section in the sidebar
 3. Select **Syncthing** and press Enter to install
@@ -106,10 +109,14 @@ After the devices connect, your local Syncthing will prompt you
 to accept a shared folder called `lnd-backup`.
 
 1. Click **Accept** (or **Add**)
-2. Choose a local folder path, for example:
+2. Choose a new, empty local folder, for example:
     - macOS: `~/lnd-backup`
     - Windows: `C:\Users\YourName\lnd-backup`
     - Linux: `~/lnd-backup`
+
+   A folder from an earlier node keeps that node's old backup, which
+   Syncthing then keeps as a `sync-conflict` file. That file is an older
+   copy.
 3. Set the folder to **Receive Only**. Your device then never changes the
    backup, and the Node's copy stays the newest one.
 4. Click **Save**
@@ -134,6 +141,10 @@ about every five seconds and after pairing or removal.
 **Backup copy** is the Node's own copy in the shared folder. Whenever LND
 writes a new backup, and every minute, the Node compares the copy with LND's
 backup and replaces it when they differ.
+
+On a new node LND writes its first backup only after Bitcoin Core's first
+sync, hours on Signet and days on mainnet. Until then the copy shows up to
+date with no file in it.
 
 - **up to date, checked 14:05:00:** the copy matched LND's backup at that time
 - **checking now** or **not checked since boot:** wait a minute
@@ -168,7 +179,8 @@ successful refresh.
 
 ### Verify It's Working
 
-Check that `channel.backup` appears in your local folder:
+Check that `channel.backup` appears in your local folder. On a new node the
+file appears after Bitcoin Core's first sync.
 
 - **macOS/Linux:** `ls ~/lnd-backup/`
 - **Windows:** Open the folder in Explorer

@@ -5,11 +5,11 @@ The steps below install vpn on a fresh Debian 13 server and download the
 release and its signing key through Tor.
 
 After installation, the node checks every later release itself, with the same
-key and checksum rules, before it offers the update. Managed release archives
-also contain `update.json`. Its integrity is covered by the same signed archive
-checksum. The TUI verifies that plan before review and checks each selected
-component against its pinned upstream signature and the plan's exact archive
-hash. See [Updating Your Node](updating.md).
+key and checksum rules, when you select Review, before you can install it.
+Managed release archives also contain `update.json`. Its integrity is covered
+by the same signed archive checksum. The TUI verifies that plan before review
+and checks each selected component against its pinned upstream signature and
+the plan's exact archive hash. See [Updating Your Node](updating.md).
 
 Releases published before v0.7.0 were made under the project's previous name
 and ship a program called rlvpn. They are not installed with these steps.
@@ -34,7 +34,7 @@ as listed in the README under
 ### 2. Check that Tor works
 
 ```bash
-torsocks wget -qO- https://check.torproject.org/api/ip
+torsocks wget -qO- https://check.torproject.org/api/ip && echo
 ```
 
 The answer must contain `"IsTor":true`. If Tor is still starting, wait a minute
@@ -77,8 +77,9 @@ The line `using ... key` may show a different, shorter-lived signing subkey.
 That is expected. The primary key fingerprint is the one to compare.
 
 Do not install the release if gpg prints
-`WARNING: This key has been revoked by its owner!`. gpg still reports
-"Good signature" in that case, so read the whole output. A warning that the
+`WARNING: This key has been revoked by its owner!` or
+`WARNING: This subkey has been revoked by its owner!`. gpg still reports
+"Good signature" in both cases, so read the whole output. A warning that the
 key is not certified with a trusted signature is normal for a key you imported
 yourself.
 
@@ -108,9 +109,17 @@ For the test networks, use `./vpn install --testnet4` or
 `./vpn install --signet` instead. The network cannot be changed later. See the
 [README](../README.md#bitcoin-network-profiles).
 
+If the install stops, or you close it, it shows the step it reached. To
+continue:
+
+```bash
+sudo vpn install
+```
+
 ### Verify on your own computer instead
 
-You can run steps 3 to 5 and the `tar` line of step 6 on your own computer,
-then copy `vpn` to the server (for example with `scp`) and run `./vpn install`
-there as root. On your own computer the downloads go through Tor only if you
-use `torsocks` or another Tor client.
+You can run steps 3 to 5 and the `tar` line of step 6 on your own computer.
+Leave out `cd /root` and use an empty folder of your own. Then copy `vpn` to
+the server (for example with `scp`) and run `./vpn install` there as root. On
+your own computer the downloads go through Tor only if you use `torsocks` or
+another Tor client.

@@ -6,8 +6,7 @@ installation or an older unmarked `vpn` layout.
 The service-identity design changes Linux accounts, directory ownership,
 credentials, service units, helper authority, and project state boundaries.
 An automatic conversion of a live Lightning node has not been designed or
-validated across those changes. The v0.7.0 installer therefore refuses
-recognized pre-existing project state before modifying it.
+validated across those changes.
 
 Do not copy the old `/etc/rlvpn/config.json` into `/etc/vpn`, do not run the
 v0.7.0 installer over the old node, and do not manually change ownership below
@@ -17,7 +16,7 @@ continue.
 ## Supported path for an existing node
 
 Plan a move to a clean Debian 13 amd64 installation. This can be a newly
-provisioned machine or an existing machine that has been fully reimaged; it
+provisioned machine or an existing machine that has been fully reimaged. It
 must not contain the old project installation.
 
 1. Keep the existing node healthy and online while planning the move.
@@ -32,7 +31,7 @@ must not contain the old project installation.
 
 Do not use a static channel backup as the normal way to move a healthy node.
 Static channel backup recovery is an emergency procedure that force-closes
-channels; it is not a substitute for cooperative closes. Never operate two LND
+channels. It is not a substitute for cooperative closes. Never operate two LND
 instances from the same seed.
 
 If the old node cannot be operated safely enough to close channels, stop and
@@ -47,7 +46,7 @@ current supported layout and valid base-install progress state.
 
 It is not an in-place migration, a general reinstall facility, or a repair tool
 for pre-existing node state. A completed base installation reports that it is
-already installed and stops; optional add-ons and later settings are managed
+already installed and stops. Optional add-ons and later settings are managed
 through their dedicated interfaces.
 
 ## Future migration support
