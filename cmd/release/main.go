@@ -36,7 +36,7 @@ func run(args []string) error {
 	usage := errors.New("usage: GOTOOLCHAIN=local go run ./cmd/release [-sign] VERSION [tested-update-plan.json]")
 	flags := flag.NewFlagSet("release", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	signFlag := flags.Bool("sign", false, "sign SHA256SUMS with the release key")
+	signFlag := flags.Bool("sign", false, "sign the release manifest with the release key")
 	if err := flags.Parse(args); err != nil {
 		return usage
 	}
@@ -49,10 +49,11 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	archive, err := release.ArchiveName(version)
+	assets, err := release.AssetsFor(version)
 	if err != nil {
 		return err
 	}
+	archive := assets.Archive
 	var plan []byte
 	if len(args) == 2 {
 		info, err := os.Stat(args[1])
@@ -118,13 +119,13 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("package VPN: %w", err)
 	}
-	sums := filepath.Join(out, "SHA256SUMS")
+	sums := filepath.Join(out, assets.Manifest)
 	line := fmt.Sprintf("%x  %s\n", sum, archive)
 	if err := os.WriteFile(sums, []byte(line), 0644); err != nil {
 		return err
 	}
 	if sign {
-		if err := signChecksums(sums, work); err != nil {
+		if err := signChecksums(sums, filepath.Join(out, assets.Signature), work); err != nil {
 			return err
 		}
 	}
@@ -133,12 +134,12 @@ func run(args []string) error {
 	}
 	complete = true
 	if !sign {
-		fmt.Printf("Release files ready in %s, not signed:\n  %s\n  SHA256SUMS\n", out, archive)
+		fmt.Printf("Release files ready in %s, not signed:\n  %s\n  %s\n", out, archive, assets.Manifest)
 		fmt.Printf("Built from commit %s.\n%s", commit, line)
-		fmt.Printf("To compare with a published release, check its SHA256SUMS inside %s, for example with sha256sum --check.\n", out)
+		fmt.Printf("To compare with a published release, run sha256sum --check on its manifest inside %s.\n", out)
 		return nil
 	}
-	fmt.Printf("Release files ready in %s:\n  %s\n  SHA256SUMS\n  SHA256SUMS.asc\n", out, archive)
+	fmt.Printf("Release files ready in %s:\n  %s\n  %s\n  %s\n", out, archive, assets.Manifest, assets.Signature)
 	fmt.Printf("Built from commit %s.\n%s", commit, line)
 	fmt.Printf("Make the signed tag v%s on commit %s, then upload these three files to a draft GitHub release.\n", version, commit)
 	if release.IsCandidate(version) {
@@ -267,8 +268,7 @@ func writeArchive(path, binary string, plan []byte) (sum []byte, err error) {
 	return nil, nil
 }
 
-func signChecksums(sums, work string) error {
-	sig := sums + ".asc"
+func signChecksums(sums, sig, work string) error {
 	cmd := exec.Command("gpg", "--local-user", release.SigningFingerprint, "--armor", "--detach-sign", "--output", sig, sums)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {

@@ -131,17 +131,18 @@ func Prepare(current, version string) (protocol.Review, error) {
 		return none, err
 	}
 	defer os.RemoveAll(work)
-	archive, err := release.ArchiveName(version)
+	assets, err := release.AssetsFor(version)
 	if err != nil {
 		return none, err
 	}
+	archive := assets.Archive
 	base := "https://github.com/virtpriv/node/releases/download/v" + version + "/"
-	for _, name := range []string{archive, "SHA256SUMS", "SHA256SUMS.asc"} {
+	for _, name := range []string{archive, assets.Manifest, assets.Signature} {
 		if err := system.DownloadRequireTor(base+name, filepath.Join(work, name)); err != nil {
 			return none, err
 		}
 	}
-	keyCheck, err := release.VerifySignature(work)
+	keyCheck, err := release.VerifySignature(version, work)
 	if err != nil {
 		return none, err
 	}

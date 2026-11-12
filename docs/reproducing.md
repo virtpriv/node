@@ -105,9 +105,9 @@ Download the released binary from
 [GitHub Releases](https://github.com/virtpriv/node/releases):
 
 ```bash
-wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-amd64.tar.gz"
-wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/SHA256SUMS"
-wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/SHA256SUMS.asc"
+wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-x86_64.tar.gz"
+wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-manifest.txt"
+wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-manifest.txt.asc"
 ```
 
 Import the release signing key from the OpenPGP keyserver:
@@ -120,7 +120,7 @@ gpg --import release-key.asc
 Verify the signature:
 
 ```bash
-gpg --verify SHA256SUMS.asc SHA256SUMS
+gpg --verify "vpn-${VERSION}-manifest.txt.asc" "vpn-${VERSION}-manifest.txt"
 ```
 
 Compare the primary key fingerprint in the output, and stop if gpg warns that
@@ -129,14 +129,14 @@ the key has been revoked. See [Release Verification](verifying.md).
 Verify the checksum:
 
 ```bash
-sha256sum --check --ignore-missing SHA256SUMS
+sha256sum --check --ignore-missing "vpn-${VERSION}-manifest.txt"
 ```
 
 Extract the released program and compare:
 
 ```bash
 mkdir published
-tar -xzf "vpn-${VERSION}-amd64.tar.gz" -C published vpn
+tar -xzf "vpn-${VERSION}-x86_64.tar.gz" -C published vpn
 
 sha256sum published/vpn vpn
 ```

@@ -10,11 +10,11 @@ and explicitly implemented host changes on Debian 13 amd64.
 
 ## Release authoring
 
-The release archive contains `vpn` and `update.json`. The existing vpn signature
-over `SHA256SUMS` authenticates both through the archive checksum. Component
-archives are downloaded through Tor, checked against upstream signing pins, and
-also checked against the exact archive hashes in the vpn plan. Discovery of a
-GitHub release alone never authorizes installation.
+The release archive contains `vpn` and `update.json`. The vpn signature over
+the release manifest authenticates both through the archive checksum.
+Component archives are downloaded through Tor, checked against upstream
+signing pins, and also checked against the exact archive hashes in the vpn
+plan. Discovery of a GitHub release alone never authorizes installation.
 
 Every signature check, for vpn and for each component, follows one rule. A
 pinned signer counts only when gpg reports its signature as good. A signature
@@ -49,10 +49,11 @@ It ignores Go settings saved with `go env -w`, so set any you need, such as
 build without a plan, as for v0.7.0, produces a bootstrap archive without a
 managed plan.
 
-With `-sign` the command signs `SHA256SUMS` with the release key in your local
+With `-sign` the command signs the manifest with the release key in your local
 GPG keyring, which can prompt through your normal GPG setup, then checks the
 signature with an isolated keyring and the updater's pinned signer policy. It
-writes the archive, `SHA256SUMS` and, with `-sign`, `SHA256SUMS.asc` to
+writes `vpn-VERSION-x86_64.tar.gz`, its manifest `vpn-VERSION-manifest.txt`
+and, with `-sign`, the signature `vpn-VERSION-manifest.txt.asc` to
 `release/VERSION/`, refusing an existing version directory. An ordinary failure
 removes only the new incomplete directory. After a forced termination, inspect
 any leftover directory before removing it and retrying.
@@ -138,8 +139,8 @@ If a candidate fails after a component may have started, the same database
 preservation and corrective-release requirements apply as for stable updates.
 
 After RC qualification, build and sign the final stable version and its exact
-plan from the approved source. Its version and manifest make this a different
-artifact. Publish it initially with GitHub's prerelease flag still set and use
+plan from the approved source. Its version and plan make this a different
+archive. Publish it initially with GitHub's prerelease flag still set and use
 Test release to validate that exact stable tag on the test node. Keep it out
 of normal discovery until its required checks pass, then clear the prerelease
 flag and mark it latest without replacing its assets. A failed final artifact

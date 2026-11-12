@@ -42,16 +42,26 @@ func TestReleaseAssetsMatchUpdater(t *testing.T) {
 			if err := release.VerifyChecksum(version, out); err != nil {
 				t.Fatal("checksum consumer rejected release:", err)
 			}
-			archive, err := release.ArchiveName(version)
+			assets, err := release.AssetsFor(version)
 			if err != nil {
 				t.Fatal(err)
 			}
 			entries, err := os.ReadDir(out)
-			if err != nil || len(entries) != 3 {
-				t.Fatalf("expected exactly three release assets: %v, %v", entries, err)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Every installed node downloads exactly these names, so they can
+			// never change once a release is out.
+			var names []string
+			for _, entry := range entries {
+				names = append(names, entry.Name())
+			}
+			want := []string{"vpn-" + version + "-manifest.txt", "vpn-" + version + "-manifest.txt.asc", "vpn-" + version + "-x86_64.tar.gz"}
+			if !slices.Equal(names, want) {
+				t.Fatalf("release files = %v, want %v", names, want)
 			}
 			extracted := filepath.Join(dir, "extracted")
-			if err := host.ExtractUpdateArchive(filepath.Join(out, archive), extracted, members); err != nil {
+			if err := host.ExtractUpdateArchive(filepath.Join(out, assets.Archive), extracted, members); err != nil {
 				t.Fatal("updater rejected archive:", err)
 			}
 			if got := readFile(t, filepath.Join(extracted, "vpn")); string(got) != "release binary fixture\n" {
@@ -62,7 +72,7 @@ func TestReleaseAssetsMatchUpdater(t *testing.T) {
 			}
 			// Bootstrap installs also extract with tar, so the executable mode
 			// must survive without the updater supplying its own mode.
-			gz, err := gzip.NewReader(bytes.NewReader(readFile(t, filepath.Join(out, archive))))
+			gz, err := gzip.NewReader(bytes.NewReader(readFile(t, filepath.Join(out, assets.Archive))))
 			if err != nil {
 				t.Fatal(err)
 			}

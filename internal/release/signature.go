@@ -2,7 +2,7 @@
 //
 // VPN release packaging and verification share the signing key pinned here.
 // Component provisioning and signer policies belong to host.
-// artifact.VerifySignature owns isolated GPG verification; each caller
+// artifact.VerifySignature owns isolated GPG verification. Each caller
 // rejects bad signatures and insufficient trusted signers.
 
 package release
@@ -27,7 +27,7 @@ import (
 
 // SigningFingerprint is the primary fingerprint of the vpn
 // release signing key.
-// Source: generated locally; public key hosted at
+// Source: generated locally, the public key hosted at
 // keys.openpgp.org and kept in this repository as keys/ripsline.asc.
 // Cross-check: docs/verifying.md publishes the same fingerprint used
 // for manual release verification.
@@ -54,24 +54,28 @@ type KeyCheck struct {
 
 // VerifySignature requires the pinned VPN signer and rejects bad signatures.
 // The caller owns the private workspace containing the downloaded manifest.
-func VerifySignature(workDir string) (KeyCheck, error) {
-	return verifySignature(workDir, SigningFingerprint, system.DownloadRequireTor)
+func VerifySignature(version, workDir string) (KeyCheck, error) {
+	return verifySignature(version, workDir, SigningFingerprint, system.DownloadRequireTor)
 }
 
-func verifySignature(workDir, fingerprint string, download func(url, dest string) error) (KeyCheck, error) {
+func verifySignature(version, workDir, fingerprint string, download func(url, dest string) error) (KeyCheck, error) {
 	var check KeyCheck
+	assets, err := AssetsFor(version)
+	if err != nil {
+		return check, err
+	}
 	logger.Verify("--- VPN release signature verification ---")
 
-	sumsFile := filepath.Join(workDir, "SHA256SUMS")
-	sigFile := filepath.Join(workDir, "SHA256SUMS.asc")
+	sumsFile := filepath.Join(workDir, assets.Manifest)
+	sigFile := filepath.Join(workDir, assets.Signature)
 
 	if _, err := os.Stat(sumsFile); err != nil {
-		logger.Verify("FAIL: SHA256SUMS not found")
-		return check, fmt.Errorf("SHA256SUMS not found")
+		logger.Verify("FAIL: %s not found", assets.Manifest)
+		return check, fmt.Errorf("%s not found", assets.Manifest)
 	}
 	if _, err := os.Stat(sigFile); err != nil {
-		logger.Verify("FAIL: SHA256SUMS.asc not found")
-		return check, fmt.Errorf("SHA256SUMS.asc not found")
+		logger.Verify("FAIL: %s not found", assets.Signature)
+		return check, fmt.Errorf("%s not found", assets.Signature)
 	}
 
 	// Both copies are always fetched and used together, so a revocation or a
