@@ -25,14 +25,18 @@ where the node commands and sudo are available. The same account password
 authorizes unrestricted sudo for server maintenance. The shell and sudo stay available when
 the TUI or its helper does not work. Accounts your provider set up are kept.
 
+The TUI is designed in color. If your computer sets `NO_COLOR`, the screens
+lose their colors, the red warnings included, so leave it unset when you log
+in as `vpn`.
+
 If the TUI gets stuck when you log in, this command skips it:
 
 ```bash
 ssh -t vpn@YOUR_SERVER /bin/bash --noprofile --norc
 ```
 
-When you start the TUI from the `vpn` shell, Ctrl+Z pauses it and `fg` brings
-it back. Root SSH is switched off, but the root account stays. Keep your
+Ctrl+Z pauses the TUI, also the one that opens when you log in, and `fg`
+brings it back. Root SSH is switched off, but the root account stays. Keep your
 provider's console or rescue access available.
 
 ## SSH keys and password login
@@ -43,9 +47,7 @@ server, review one and import it into `vpn`. Or add a key directly from
 import.
 
 After you have logged in with your key in a new SSH connection, you can switch
-off password SSH for `vpn` from **System → Accounts → vpn**. The login banner
-confirms a `vpn` SSH login, which may still use a password. It does not check
-a particular key or sudo access.
+off password SSH for `vpn` from **System → Accounts → vpn**.
 
 To change the account password, use **System → Accounts → vpn → Change
 Password**. You type the current password, then the new one twice, in
@@ -62,10 +64,11 @@ On the first start of the TUI you go straight to wallet creation:
 4. Write down your 24-word seed on paper
 5. Type `I SAVED MY SEED` to confirm
 
-The confirmation phrase is required. There is no skip. Pressing Ctrl+C at the
-password prompt cancels safely, because no seed exists yet and nothing is
-written. Once you have seen your seed, Ctrl+C is blocked by design. The only
-way forward is typing the confirmation phrase.
+The confirmation phrase is required. There is no skip. Pressing Ctrl+C twice
+at the password prompt cancels safely, because no seed exists yet and nothing
+is written. The first press shows nothing. Once you have seen your seed,
+Ctrl+C is blocked by design. The only way forward is typing the confirmation
+phrase.
 
 After the seed, the TUI continues to auto-unlock, so you do not have to
 unlock the wallet by hand after every restart. vpn restarts LND once to check
@@ -78,7 +81,8 @@ Auto-unlock is strongly encouraged. The node checks for Debian security updates
 every day, installs them by itself and restarts right after when an update
 needs it. Without auto-unlock, LND stays locked after such a restart. Lightning
 then stops, and the node cannot protect your channels until you log in and
-unlock the wallet. Nothing tells you that this happened.
+unlock the wallet. Only the TUI shows it, with a red dot before System in the
+sidebar and "locked" on the lnd row.
 
 To switch auto-unlock on or off later, open **System**, select lnd and press
 `u`. The password is kept in a file only LND can read and never leaves the
@@ -129,6 +133,9 @@ LND can stop by itself, for example when Bitcoin Core or Tor stops answering
 for several minutes. systemd does not start it again after such a clean stop.
 If System shows LND stopped, select lnd and press `a`.
 
+If Tor restarts during Bitcoin Core's first sync, LND restarts once when the
+sync ends. Without auto-unlock, unlock the wallet again then.
+
 If an action says its outcome is unconfirmed, the server may still have done
 the work. Check the service status and log before you try again. Leaving the
 TUI does not undo an action the server accepted.
@@ -148,6 +155,12 @@ TUI does not undo an action the server accepted.
   no restart is needed. Closing the TUI does not stop a package update the
   server already started. If the outcome is unconfirmed, check the package
   state and log before you try again.
+
+System shows a Security updates box only when something needs you, such as a
+restart that waits or is late, no successful nightly update for two days, or
+the nightly updates switched off. Its red lines, a stopped service and a
+locked LND put a red dot before System in the sidebar. After Update Packages,
+"No updates for N days" stays until the next nightly update succeeds.
 
 When a restart is needed, **System** shows a **Reboot** button. "Reboot
 requested" means systemd accepted the request, not that the server has

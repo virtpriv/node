@@ -25,7 +25,7 @@ projects that bundle a JVM or native installers.
 On Debian 13+:
 
 ```bash
-apt install -y git wget curl sudo
+apt install -y git wget curl sudo gnupg
 ```
 
 ### Install Go
@@ -47,6 +47,18 @@ Go is available for all supported platforms from
 ```bash
 GO_VERSION="1.26.10"  # check go.mod for exact version
 wget "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
+```
+
+Compare its SHA-256 with the one go.dev/dl lists for that file, and stop if
+they differ:
+
+```bash
+sha256sum "go${GO_VERSION}.linux-amd64.tar.gz"
+```
+
+Then install it:
+
+```bash
 sudo rm -rf /usr/local/go
 sudo tar -C /usr/local -xzf "go${GO_VERSION}.linux-amd64.tar.gz"
 export PATH=$PATH:/usr/local/go/bin
@@ -72,6 +84,7 @@ The project can then be cloned as follows:
 ```bash
 git clone --branch "${GIT_TAG}" --depth 1 \
     https://github.com/virtpriv/node.git
+cd node
 ```
 
 If you already have the repo cloned, fetch all new updates and
@@ -83,11 +96,9 @@ git fetch --all --tags
 git checkout "${GIT_TAG}"
 ```
 
-Change into the project folder and build with the same settings as the
-release tool:
+In the project folder, build with the same settings as the release tool:
 
 ```bash
-cd node
 VERSION="${GIT_TAG#v}"
 GOTOOLCHAIN=local GOENV=off GOWORK=off GOFLAGS= \
     GOEXPERIMENT= GOFIPS140=off GO_EXTLINK_ENABLED= CGO_ENABLED=0 \
@@ -124,7 +135,8 @@ gpg --verify "vpn-${VERSION}-manifest.txt.asc" "vpn-${VERSION}-manifest.txt"
 ```
 
 Compare the primary key fingerprint in the output, and stop if gpg warns that
-the key has been revoked. See [Release Verification](verifying.md).
+the key or its subkey has been revoked. See
+[Release Verification](verifying.md).
 
 Verify the checksum:
 
@@ -149,19 +161,8 @@ platform and Go version.
 
 ## Troubleshooting
 
-If the checksums do not match, check the following:
-
-| Cause | Fix |
-| --- | --- |
-| Different Go version | Check `go.mod` and use the exact version listed |
-| Missing `-trimpath` | Local filesystem paths get embedded in the binary |
-| Missing `-buildvcs=false` | Git tags and commit data get embedded in the binary |
-| CGO enabled | Set `CGO_ENABLED=0` explicitly |
-| Saved or experimental Go settings | Set `GOENV=off GOEXPERIMENT= GOFIPS140=off GO_EXTLINK_ENABLED=` as in the build command |
-| Different `ldflags` | Must include `-s -w -X main.version=VERSION` |
-| OS/arch mismatch | Must build with `GOOS=linux GOARCH=amd64 GOAMD64=v1` |
-| Go installed via apt/snap | Use the official tarball from go.dev/dl |
-| Missing `-X main.version` | Version string will differ in the binary |
+If the hashes differ, check that your Go is the version in `go.mod`, from
+go.dev/dl, and that you ran the build command exactly as shown.
 
 You can inspect the build metadata embedded in each binary:
 

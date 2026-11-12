@@ -98,8 +98,9 @@ network.
 Both need a fresh Debian 13 amd64 machine with 2 CPUs, 4 GB of RAM or more
 and 90 GB of SSD storage or more. The installer refuses a machine with less
 than 3.4 GB of memory or 80 GB of disk. Its software must come only from
-Debian. The installer checks this first and stops before changing anything
-if another source is set up. At home, use a machine dedicated to the Node. See [Release Verification](verifying.md) to install.
+Debian. The installer checks this first. It refuses before it changes
+anything but its own log, `/var/log/vpn.log`. At home, use a machine
+dedicated to the Node. See [Release Verification](verifying.md) to install.
 
 LND gets memory first. With less than 7.5 GB of memory, the installer gives
 Bitcoin Core a small cache, so its first sync takes longer. After the first

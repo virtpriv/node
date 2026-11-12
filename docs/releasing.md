@@ -122,8 +122,11 @@ required by the publishing process. Keep published tags and assets unchanged.
 Any revised candidate receives a new RC number.
 
 Normal discovery uses GitHub's latest stable release and rejects RC tags,
-drafts and prereleases. It caches stable discovery for up to 24 hours. To test
-an exact release, open System > Settings > Test release and enter its tag.
+drafts and prereleases. It caches stable discovery for up to 24 hours. Each
+check makes up to three tries of 10 s, each on its own Tor circuit. After a
+check that found nothing, the TUI asks again every 10 minutes while it stays
+open. To test an exact release, open System > Settings > Test release and
+enter its tag.
 This bypasses latest-release discovery, including that cache, but retains
 the normal Tor download, signature, source admission and explicit approval
 path. No alternate repository, signing key or persistent testing channel is

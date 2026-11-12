@@ -8,8 +8,9 @@ approval.
 ## Before you update
 
 - Create the LND wallet and unlock it, or switch on auto-unlock.
-- Bitcoin Core and LND should be running. An update refuses to start while a
-  service it changes is stopped, and says which one.
+- Bitcoin Core and LND should be running. If a service the update changes is
+  stopped, the update stops at its first check, before it changes anything,
+  and says which one to start.
 
 ## How to update
 
@@ -21,7 +22,10 @@ approval.
 3. Select **Install** to approve it. The services it changes restart.
    Downloads use Tor, and your databases are kept.
 4. You can close the screen while the update runs. It continues, and the
-   screen shows it again when you come back.
+   screen shows it again when you come back. While it runs, the node holds
+   off restarts. Debian's daily restart waits, and **Reboot** is refused. A
+   restart from your provider's panel may cut the power instead. Then select
+   **Continue** when the node is back.
 5. When the screen says "Update complete", select **Relaunch** to open the
    new version.
 
@@ -84,5 +88,8 @@ Normal updates keep offering stable releases only.
 An update does not install or remove Debian packages, restore databases,
 recover channels or restart the server. Debian's own security updates
 continue separately, see [Running Your Node](running.md#updates-and-restarts).
+
+Do not upgrade Debian to a new major version yourself. vpn will offer that
+move. Updates need Debian 13, so a node you upgraded takes no further update.
 
 How releases and updates work inside is in [Releasing](releasing.md).

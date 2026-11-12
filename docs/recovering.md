@@ -41,9 +41,9 @@ rlvpn generation.
 
 ## When the disk is nearly full
 
-LND checks the free disk space every 12 hours. When the filesystem is down to
-10% free, it checks twice and then stops itself cleanly. systemd does not
-start it again after such a stop. Free some space, then open **System**,
-select lnd and press `a` to start it.
+Once Bitcoin Core's first sync is done, LND checks the free disk space every
+12 hours. When the filesystem is down to 10% free, it checks twice and then
+stops itself cleanly. systemd does not start it again after such a stop. Free
+some space, then open **System**, select lnd and press `a` to start it.
 
 vpn never deletes, recreates or repairs a database by itself.
