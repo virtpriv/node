@@ -35,6 +35,10 @@ func (t *walletTerminal) SetStderr(w io.Writer) { t.stderr = w }
 
 func (t *walletTerminal) Run() (err error) {
 	defer func() { t.execution.Err = err }()
+	return keepTerminalMode(t.stdin, t.run)
+}
+
+func (t *walletTerminal) run() error {
 	if _, err := fmt.Fprint(t.stdout, walletCreationIntroduction); err != nil {
 		return fmt.Errorf("display wallet instructions: %w", err)
 	}
@@ -103,8 +107,10 @@ func (c *introducedCommand) SetStdout(w io.Writer) { c.cmd.Stdout = w }
 func (c *introducedCommand) SetStderr(w io.Writer) { c.cmd.Stderr = w }
 
 func (c *introducedCommand) Run() error {
-	if _, err := fmt.Fprint(c.cmd.Stdout, c.introduction); err != nil {
-		return err
-	}
-	return c.cmd.Run()
+	return keepTerminalMode(c.cmd.Stdin, func() error {
+		if _, err := fmt.Fprint(c.cmd.Stdout, c.introduction); err != nil {
+			return err
+		}
+		return c.cmd.Run()
+	})
 }

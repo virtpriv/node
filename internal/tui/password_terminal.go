@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-
-	"golang.org/x/term"
 )
 
 type passwordExecution struct {
@@ -14,7 +12,7 @@ type passwordExecution struct {
 	err              error
 }
 
-// Store the child outcome separately: a later terminal restoration failure
+// Store the child outcome separately. A later failure to restore the terminal
 // must not turn a confirmed password change into an unconfirmed one.
 type passwordTerminal struct {
 	cmd       *exec.Cmd
@@ -29,25 +27,14 @@ func (t *passwordTerminal) SetStdout(w io.Writer) { t.cmd.Stdout = w }
 func (t *passwordTerminal) SetStderr(w io.Writer) { t.cmd.Stderr = w }
 func (t *passwordTerminal) Run() (err error) {
 	defer func() { t.execution.err = err }()
-	if input, ok := t.cmd.Stdin.(interface{ Fd() uintptr }); ok {
-		fd := int(input.Fd())
-		state, stateErr := term.GetState(fd)
-		if stateErr != nil {
-			return fmt.Errorf("save password terminal state: %w", stateErr)
-		}
-		// passwd may exit without restoring echo. Restore before tea.Exec
-		// reacquires the terminal and saves its next restoration state.
-		defer func() {
-			if restoreErr := term.Restore(fd, state); restoreErr != nil {
-				err = errors.Join(err, fmt.Errorf("restore password terminal state: %w", restoreErr))
-			}
-		}()
-	}
+	return keepTerminalMode(t.cmd.Stdin, t.run)
+}
+func (t *passwordTerminal) run() error {
 	out := t.cmd.Stdout
 	if out == nil {
 		out = io.Discard
 	}
-	if _, err := fmt.Fprint(out, "To cancel at a password prompt: Ctrl+U, then Ctrl+D.\nCtrl+U clears your input; Ctrl+D ends input.\n\n"); err != nil {
+	if _, err := fmt.Fprint(out, "To cancel at a password prompt: Ctrl+U, then Ctrl+D.\nCtrl+U clears your input. Ctrl+D ends input.\n\n"); err != nil {
 		return fmt.Errorf("show password instructions: %w", err)
 	}
 	if err := t.cmd.Start(); err != nil {
