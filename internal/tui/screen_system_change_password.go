@@ -124,7 +124,7 @@ func (s *ChangePasswordScreen) View(w, h int) string {
 	p.dim("Lightning wallet password.")
 	p.blank()
 	p.dim("To cancel at a password prompt: Ctrl+U, then Ctrl+D.")
-	p.dim("Ctrl+U clears your input; Ctrl+D ends input.")
+	p.dim("Ctrl+U clears your input. Ctrl+D ends input.")
 	p.dim("The TUI resumes when the command finishes.")
 	return p.renderWithBottomButtons([]string{"Cancel", "Continue"}, s.btnIdx, s.ctx.ContentFocused, h)
 }
