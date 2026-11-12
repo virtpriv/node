@@ -11,22 +11,35 @@ import (
 	"path/filepath"
 )
 
-// ArchiveName identifies the fixed amd64 VPN artifact for a release version.
-func ArchiveName(version string) (string, error) {
+// Assets names the three files published with a release. Every installed node
+// downloads exactly these names, so they never change.
+type Assets struct {
+	// Archive holds vpn and, for a managed release, update.json.
+	Archive string
+	// Manifest lists the archive's SHA-256 in the sha256sum format.
+	Manifest string
+	// Signature is the release key's detached signature of the manifest.
+	Signature string
+}
+
+// AssetsFor returns the file names of a release version.
+func AssetsFor(version string) (Assets, error) {
 	if !ValidVersion(version) {
-		return "", fmt.Errorf("%q is not a valid release version", version)
+		return Assets{}, fmt.Errorf("%q is not a valid release version", version)
 	}
-	return "vpn-" + version + "-amd64.tar.gz", nil
+	manifest := "vpn-" + version + "-manifest.txt"
+	return Assets{Archive: "vpn-" + version + "-x86_64.tar.gz", Manifest: manifest, Signature: manifest + ".asc"}, nil
 }
 
 // VerifyChecksum requires exactly one entry for the requested archive in the
-// already authenticated SHA256SUMS. Checking other files cannot authorize it.
+// already authenticated manifest. Checking other files cannot authorize it.
 func VerifyChecksum(version, workDir string) error {
-	archive, err := ArchiveName(version)
+	assets, err := AssetsFor(version)
 	if err != nil {
 		return err
 	}
-	manifest, err := os.Open(filepath.Join(workDir, "SHA256SUMS"))
+	archive := assets.Archive
+	manifest, err := os.Open(filepath.Join(workDir, assets.Manifest))
 	if err != nil {
 		return fmt.Errorf("open checksum manifest: %w", err)
 	}
@@ -39,8 +52,8 @@ func VerifyChecksum(version, workDir string) error {
 		if line == "" {
 			continue
 		}
-		// GNU SHA256SUMS uses 64 hex digits, a space, a text/binary
-		// marker, then the exact filename. VPN artifact names need no escaping.
+		// The sha256sum format is 64 hex digits, a space, a text or binary
+		// marker, then the exact file name. VPN file names need no escaping.
 		if len(line) < 67 || line[64] != ' ' || (line[65] != ' ' && line[65] != '*') {
 			return fmt.Errorf("malformed checksum manifest entry")
 		}

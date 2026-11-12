@@ -45,9 +45,9 @@ and run it again.
 ```bash
 VERSION="0.7.0"
 cd /root
-torsocks wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-amd64.tar.gz"
-torsocks wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/SHA256SUMS"
-torsocks wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/SHA256SUMS.asc"
+torsocks wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-x86_64.tar.gz"
+torsocks wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-manifest.txt"
+torsocks wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-manifest.txt.asc"
 torsocks wget -qO release-key.asc "https://keys.openpgp.org/vks/v1/by-fingerprint/AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
 gpg --import release-key.asc
 ```
@@ -63,7 +63,7 @@ gpg --import release-key.asc
 ### 4. Verify the signature
 
 ```bash
-gpg --verify SHA256SUMS.asc SHA256SUMS
+gpg --verify "vpn-${VERSION}-manifest.txt.asc" "vpn-${VERSION}-manifest.txt"
 ```
 
 A good result names the project key as the primary key:
@@ -85,15 +85,15 @@ yourself.
 ### 5. Verify the checksum
 
 ```bash
-sha256sum --check --ignore-missing SHA256SUMS
+sha256sum --check --ignore-missing "vpn-${VERSION}-manifest.txt"
 ```
 
-It must print `vpn-0.7.0-amd64.tar.gz: OK`. Stop if it prints anything else.
+It must print `vpn-0.7.0-x86_64.tar.gz: OK`. Stop if it prints anything else.
 
 ### 6. Install
 
 ```bash
-tar -xzf "vpn-${VERSION}-amd64.tar.gz" vpn
+tar -xzf "vpn-${VERSION}-x86_64.tar.gz" vpn
 ./vpn version
 ```
 

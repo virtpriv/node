@@ -10,7 +10,7 @@ import (
 )
 
 func TestChecksumRequiresExactArchive(t *testing.T) {
-	const archive = "vpn-0.7.1-amd64.tar.gz"
+	const archive = "vpn-0.7.1-x86_64.tar.gz"
 	contents := []byte("requested release archive")
 	digest := fmt.Sprintf("%x", sha256.Sum256(contents))
 	entry := digest + "  " + archive + "\n"
@@ -22,9 +22,9 @@ func TestChecksumRequiresExactArchive(t *testing.T) {
 	}{
 		{name: "text marker", manifest: entry},
 		{name: "binary marker", manifest: digest + " *" + archive + "\n"},
-		{name: "other architectures may be absent", manifest: entry + digest + "  vpn-0.7.1-arm64.tar.gz\n"},
+		{name: "other architectures may be absent", manifest: entry + digest + "  vpn-0.7.1-aarch64.tar.gz\n"},
 		{name: "another present file is insufficient", manifest: digest + "  release-key.asc\n", wantErr: "does not contain"},
-		{name: "another version is insufficient", manifest: digest + "  vpn-0.7.0-amd64.tar.gz\n", wantErr: "does not contain"},
+		{name: "another version is insufficient", manifest: digest + "  vpn-0.7.0-x86_64.tar.gz\n", wantErr: "does not contain"},
 		{name: "empty manifest", wantErr: "does not contain"},
 		{name: "wrong digest", manifest: strings.Repeat("0", 64) + "  " + archive + "\n", wantErr: "checksum mismatch"},
 		{name: "invalid hex", manifest: strings.Repeat("z", 64) + "  " + archive + "\n", wantErr: "malformed checksum digest"},
@@ -47,7 +47,7 @@ func TestChecksumRequiresExactArchive(t *testing.T) {
 			// The old whole-manifest check succeeds for this unrelated file.
 			write("release-key.asc", contents)
 			if !tc.missingManifest {
-				write("SHA256SUMS", []byte(tc.manifest))
+				write("vpn-0.7.1-manifest.txt", []byte(tc.manifest))
 			}
 			err := VerifyChecksum("0.7.1", dir)
 			if tc.wantErr == "" {

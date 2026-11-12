@@ -15,7 +15,7 @@ import (
 // server. What either one knows must be used, and neither may be needed alone.
 func TestReleaseKeyIsReadFromBothSources(t *testing.T) {
 	h := gpgtest.NewHome(t)
-	sums := h.File("SHA256SUMS", "0000  vpn-0.7.1-amd64.tar.gz\n")
+	sums := h.File("vpn-0.7.1-manifest.txt", "0000  vpn-0.7.1-x86_64.tar.gz\n")
 
 	master := h.Master("release", "")
 	firstSub := h.Subkey("release", "never", "")
@@ -53,8 +53,8 @@ func TestReleaseKeyIsReadFromBothSources(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			work := t.TempDir()
-			copyFile(t, sums, filepath.Join(work, "SHA256SUMS"))
-			copyFile(t, c.sig, filepath.Join(work, "SHA256SUMS.asc"))
+			copyFile(t, sums, filepath.Join(work, "vpn-0.7.1-manifest.txt"))
+			copyFile(t, c.sig, filepath.Join(work, "vpn-0.7.1-manifest.txt.asc"))
 			download := func(url, dest string) error {
 				source := c.website
 				switch {
@@ -69,7 +69,7 @@ func TestReleaseKeyIsReadFromBothSources(t *testing.T) {
 				copyFile(t, source, dest)
 				return nil
 			}
-			check, err := verifySignature(work, master, download)
+			check, err := verifySignature("0.7.1", work, master, download)
 			if (err == nil) != c.accepted {
 				t.Fatalf("accepted = %v, want %v (error: %v)", err == nil, c.accepted, err)
 			}
