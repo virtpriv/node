@@ -392,6 +392,7 @@ func (m Model) Init() tea.Cmd {
 		requestStatusCmd,
 		fetchWalletStateCmd(m.screenCtx),
 		fetchLatestVersionCmd(),
+		clearReleasesFolderCmd(m.screenCtx.NodeUpdates, m.screenCtx.Version),
 		restoreSystemJobsCmd(m.screenCtx),
 		tickEveryCmd(m.pollInterval()))
 }

@@ -695,5 +695,8 @@ func buildInstallSteps(
 			Fn: func() error {
 				return host.SetupNodeCLI(cfg)
 			}},
+		// Last, beside the shortcuts, which also set up the owner's home.
+		{Key: "releases.folder", Name: "Creating the releases folder",
+			Fn: host.CreateReleasesFolder},
 	}
 }

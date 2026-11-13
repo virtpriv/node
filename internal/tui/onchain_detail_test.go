@@ -84,6 +84,7 @@ func TestOpenDetailsFollowAutomaticListObservations(t *testing.T) {
 						t.Fatal("timer did not admit list collection")
 					}
 					statusUpdate(&m, read())
+				case releasesFolderMsg:
 				case tickMsg:
 					tick = msg
 				case refreshStatusMsg:

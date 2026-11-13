@@ -13,6 +13,8 @@ import (
 
 // The release key comes from a file in the repository and from the key
 // server. What either one knows must be used, and neither may be needed alone.
+// The owner's copy in the releases folder counts only when neither source
+// gives the pinned key, and the review then carries the key server notice.
 func TestReleaseKeyIsReadFromBothSources(t *testing.T) {
 	h := gpgtest.NewHome(t)
 	sums := h.File("vpn-0.7.1-manifest.txt", "0000  vpn-0.7.1-x86_64.tar.gz\n")
@@ -32,6 +34,7 @@ func TestReleaseKeyIsReadFromBothSources(t *testing.T) {
 	cases := []struct {
 		name          string
 		file, website string
+		folder        string
 		sig           string
 		accepted      bool
 		noticed       bool
@@ -49,6 +52,12 @@ func TestReleaseKeyIsReadFromBothSources(t *testing.T) {
 		{name: "repository file unreachable", file: down, website: current, sig: secondSig, accepted: true},
 		{name: "repository file is not a key", file: rubbish, website: current, sig: secondSig, accepted: true},
 		{name: "both unreachable", file: down, website: down, sig: secondSig, refusal: "could not be downloaded"},
+		{name: "both unreachable, the folder holds the key", file: down, website: down, folder: current, sig: secondSig, accepted: true, noticed: true},
+		{name: "neither source holds a key, the folder does", file: rubbish, website: rubbish, folder: current, sig: secondSig, accepted: true, noticed: true},
+		{name: "both unreachable, an old folder copy misses a revocation", file: down, website: down, folder: early, sig: firstSig, accepted: true, noticed: true},
+		{name: "both unreachable, the folder copy carries the revocation", file: down, website: down, folder: current, sig: firstSig, refusal: "revoked"},
+		{name: "both unreachable, the folder copy is not a key", file: down, website: down, folder: rubbish, sig: secondSig, refusal: "ripsline.asc in the releases folder does not hold it"},
+		{name: "one source works, the folder copy is not used", file: early, website: down, folder: current, sig: secondSig, refusal: "not from the release signing key"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -69,7 +78,12 @@ func TestReleaseKeyIsReadFromBothSources(t *testing.T) {
 				copyFile(t, source, dest)
 				return nil
 			}
-			check, err := verifySignature("0.7.1", work, master, download)
+			folderKey := ""
+			if c.folder != "" {
+				folderKey = filepath.Join(work, "release-key-folder.asc")
+				copyFile(t, c.folder, folderKey)
+			}
+			check, err := verifySignature("0.7.1", work, folderKey, master, download)
 			if (err == nil) != c.accepted {
 				t.Fatalf("accepted = %v, want %v (error: %v)", err == nil, c.accepted, err)
 			}

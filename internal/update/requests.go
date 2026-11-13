@@ -136,21 +136,36 @@ func Prepare(current, version string) (protocol.Review, error) {
 		return none, err
 	}
 	archive := assets.Archive
-	base := "https://github.com/virtpriv/node/releases/download/v" + version + "/"
-	for _, name := range []string{archive, assets.Manifest, assets.Signature} {
-		if err := system.DownloadRequireTor(base+name, filepath.Join(work, name)); err != nil {
-			return none, err
-		}
-	}
-	keyCheck, err := release.VerifySignature(version, work)
+	// The owner's files for this version are used in place of a download,
+	// and get every check a download gets.
+	fromFolder, folderKey, err := copyFromReleasesFolder(version, work)
 	if err != nil {
 		return none, err
 	}
+	if !fromFolder {
+		base := "https://github.com/virtpriv/node/releases/download/v" + version + "/"
+		for _, name := range []string{archive, assets.Manifest, assets.Signature} {
+			if err := system.DownloadRequireTor(base+name, filepath.Join(work, name)); err != nil {
+				return none, err
+			}
+		}
+	}
+	// A file the owner is still copying fails a check, and the refusal says so.
+	stillCopying := func(err error) error {
+		if (fromFolder && !errors.Is(err, release.ErrKeyUnavailable)) || errors.Is(err, release.ErrFolderKeyUnavailable) {
+			return fmt.Errorf("%w. If a file is still copying, try again when it ends.", err)
+		}
+		return err
+	}
+	keyCheck, err := release.VerifySignature(version, work, folderKey)
+	if err != nil {
+		return none, stillCopying(err)
+	}
 	if err := release.VerifyChecksum(version, work); err != nil {
-		return none, err
+		return none, stillCopying(err)
 	}
 	if err := host.ExtractUpdateArchive(filepath.Join(work, archive), work, map[string]string{"vpn": "vpn", "update.json": "update.json"}); err != nil {
-		return none, fmt.Errorf("release needs a managed update plan: %w", err)
+		return none, stillCopying(fmt.Errorf("release needs a managed update plan: %w", err))
 	}
 	data, err := os.ReadFile(filepath.Join(work, "update.json"))
 	if err != nil {
@@ -179,7 +194,7 @@ func Prepare(current, version string) (protocol.Review, error) {
 	if err != nil {
 		return none, err
 	}
-	p := prepared{Review: protocol.Review{Digest: id, Manifest: m, Source: source, Network: cfg.Network, KeyServerUnreachable: keyCheck.WebsiteUnreachable}, WorkerHash: workerHash, PlanHash: planHash, ConfigHash: configHash, Previous: failed}
+	p := prepared{Review: protocol.Review{Digest: id, Manifest: m, Source: source, Network: cfg.Network, KeyServerUnreachable: keyCheck.WebsiteUnreachable, FromFolder: fromFolder}, WorkerHash: workerHash, PlanHash: planHash, ConfigHash: configHash, Previous: failed}
 	p.Review.Token, err = approvalToken(p)
 	if err != nil {
 		return none, err

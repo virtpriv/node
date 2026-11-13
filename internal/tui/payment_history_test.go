@@ -121,6 +121,7 @@ func TestHistoryTimerUpdatesMountedDetailAndCaption(t *testing.T) {
 				case refreshPaymentHistoryMsg:
 					read := statusUpdate(&m, msg)
 					statusUpdate(&m, read())
+				case releasesFolderMsg:
 				case tickMsg:
 					tick = msg
 				case refreshStatusMsg:

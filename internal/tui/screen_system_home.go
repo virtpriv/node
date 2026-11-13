@@ -332,7 +332,7 @@ func (s *SystemHomeScreen) View(
 
 	if s.hasUpdate() {
 		updateText := "Update available: v" +
-			s.ctx.LatestVersion
+			s.ctx.offeredRelease()
 		headerLines = append(headerLines,
 			centerPad(
 				lipgloss.NewStyle().
@@ -729,9 +729,10 @@ func (s *SystemHomeScreen) serviceBindings() []key.Binding {
 
 // ── Helpers ─────────────────────────────────────────────
 
+// hasUpdate counts a release in the releases folder too, so the owner sees
+// it where updates are announced.
 func (s *SystemHomeScreen) hasUpdate() bool {
-	newer, err := release.Newer(s.ctx.Version, s.ctx.LatestVersion)
-	return release.IsStable(s.ctx.LatestVersion) && err == nil && newer
+	return s.ctx.offeredRelease() != ""
 }
 
 func (s *SystemHomeScreen) buttonActions() []sysBtn {

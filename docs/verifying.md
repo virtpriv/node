@@ -48,16 +48,16 @@ cd /root
 torsocks wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-x86_64.tar.gz"
 torsocks wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-manifest.txt"
 torsocks wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-manifest.txt.asc"
-torsocks wget -qO release-key.asc "https://keys.openpgp.org/vks/v1/by-fingerprint/AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
-gpg --import release-key.asc
+torsocks wget -qO ripsline.asc "https://keys.openpgp.org/vks/v1/by-fingerprint/AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
+gpg --import ripsline.asc
 ```
 
 If the keyserver cannot be reached, the same public key is kept in this
 repository as [`keys/ripsline.asc`](../keys/ripsline.asc):
 
 ```bash
-torsocks wget -qO release-key.asc "https://raw.githubusercontent.com/virtpriv/node/main/keys/ripsline.asc"
-gpg --import release-key.asc
+torsocks wget -qO ripsline.asc "https://raw.githubusercontent.com/virtpriv/node/main/keys/ripsline.asc"
+gpg --import ripsline.asc
 ```
 
 ### 4. Verify the signature

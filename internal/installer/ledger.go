@@ -69,6 +69,7 @@ var hostFinishStepKeys = []string{
 	"journal.access",
 	"helper.enable",
 	"shellenv",
+	"releases.folder",
 }
 
 var baseInstallStepKeys = slices.Concat(

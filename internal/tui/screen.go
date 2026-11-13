@@ -84,6 +84,11 @@ type ScreenContext struct {
 	Version             string // set once at construction
 	LatestVersion       string // updated by latestVersionMsg handler
 	LatestChecked       bool   // the release check has answered, found or not
+	// FolderReleases lists the versions whose files are all in the releases
+	// folder, newest first. FolderNotFolder reports a releases folder that is
+	// a link or a file, so it is not read.
+	FolderReleases  []string
+	FolderNotFolder bool
 }
 
 // jobRunner starts and watches vpnd's jobs. Closing it stops watching, never

@@ -33,6 +33,53 @@ If your wallet is locked when LND starts again, the screen says "Unlock the
 LND wallet to finish." Select **Unlock wallet** and type your wallet
 password. The keys you type are not shown.
 
+## Updating from files
+
+You can bring a release's files to the node yourself, so it downloads
+nothing from GitHub for vpn. Use this to check each release on your own
+computer first, or when GitHub does not answer over Tor. The node checks the
+files exactly as it checks a download.
+
+Put the release's three files in `/home/vpn/releases`, the releases folder
+the install made. Either download them on the node, logged in as `vpn`:
+
+```bash
+VERSION="0.7.1"
+cd ~/releases
+torsocks wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-x86_64.tar.gz"
+torsocks wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-manifest.txt"
+torsocks wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-manifest.txt.asc"
+```
+
+Or copy them from your own computer, after checking them there as in
+[Verify on your own computer instead](verifying.md#verify-on-your-own-computer-instead):
+
+```bash
+scp vpn-0.7.1-x86_64.tar.gz vpn-0.7.1-manifest.txt vpn-0.7.1-manifest.txt.asc vpn@YOUR_SERVER:releases/
+```
+
+Node Updates then shows the release as "Available" with "In your releases
+folder.", and the review says the release comes from that folder. Bitcoin
+Core, LND and Syncthing still download through Tor when the release changes
+them. All three vpn files must be there. With one or two the review is
+refused and names the file that is missing. If a check fails while a copy is
+still running, review again when it ends.
+
+The node reads the release key from this repository and from
+keys.openpgp.org. If neither gives the key, it uses `ripsline.asc` in the
+releases folder, if you put a copy there. Save it under that name as in
+[Release Verification](verifying.md). The review then says the key server was
+not reached.
+
+After an update is complete and you relaunch, vpn removes its own release
+files that are not newer than the version now running. Other files stay,
+`ripsline.asc` too. If the folder is missing, make it again, logged in as
+`vpn`:
+
+```bash
+mkdir -m 700 ~/releases
+```
+
 ## If an update stops
 
 A failed step shows its error under the step, and for the cases vpn knows,
@@ -71,9 +118,9 @@ stopped until it continues.
 - **Bitcoin Core, LND and Syncthing:** checked against their own pinned
   signing keys, as at install, and against the exact archive hashes in the
   signed release plan.
-- **Which release:** the node offers only GitHub's latest stable release and
-  remembers the answer for up to a day. Release candidates are never offered by
-  themselves.
+- **Which release:** the node offers the newest stable release, from GitHub's
+  latest release or your releases folder, and remembers GitHub's answer for
+  up to a day. Release candidates are never offered by themselves.
 - **Older nodes:** a node that is several releases behind is guided through
   them one at a time, each one its own reviewed update.
 
@@ -81,7 +128,8 @@ stopped until it continues.
 
 On a node without funds only, open **System → Settings → Test release** and
 enter the exact release tag, such as `v0.7.0-rc.1`. This selects one update.
-Normal updates keep offering stable releases only.
+If that release's files are in your releases folder, they are used. Normal
+updates keep offering stable releases only.
 
 ## What an update does not do
 

@@ -135,6 +135,7 @@ func TestMountedChannelViewsFollowTimersFailureAndRecovery(t *testing.T) {
 					statusUpdate(&m, read())
 				case refreshStatusMsg:
 					statusUpdate(&m, msg)
+				case releasesFolderMsg:
 				case tickMsg:
 					tick = msg
 				default:

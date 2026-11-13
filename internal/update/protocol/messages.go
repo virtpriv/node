@@ -25,6 +25,9 @@ type Review struct {
 	// checked without the key server, so a revocation published only there
 	// was not seen. It belongs to the review and is not kept in a job.
 	KeyServerUnreachable bool `json:"key_server_unreachable,omitempty"`
+	// FromFolder tells the operator that the release files came from the
+	// releases folder, not a download.
+	FromFolder bool `json:"from_folder,omitempty"`
 }
 
 // Status deliberately excludes local paths, credentials and raw command output.
