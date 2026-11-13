@@ -161,6 +161,11 @@ platform and Go version.
 
 ## Checking the pinned programs
 
+This is the maintainer's check at each version bump. You do not need it to
+install, run or update a node. Run it yourself only if you want to see that
+the hashes vpn pins are the ones upstream signed, on your own computer, not
+on your node. Its downloads go directly over HTTPS, not through Tor.
+
 vpn pins the exact SHA-256 hash of each Bitcoin Core, LND and Syncthing
 archive it installs, and nodes check these programs by that hash alone.
 Before a hash is pinned, the maintainer checks upstream's signatures with
@@ -176,7 +181,7 @@ signatures, signer keys and archive, then prints the signers it counted, the
 hash, and whether the hash matches the pin. Bitcoin Core needs 3 of its 5
 listed builders, LND 3 of its 11 listed developers, Syncthing its release
 key. A revoked key never counts, an expired one does. Any failure prints
-`FAIL` and no hash. The downloads go directly over HTTPS, not through Tor.
+`FAIL` and no hash.
 
 To check a version before it is pinned:
 
