@@ -159,6 +159,33 @@ If there is output showing different hashes, please open an issue
 with detailed instructions to reproduce, including build system
 platform and Go version.
 
+## Checking the pinned programs
+
+vpn pins the exact SHA-256 hash of each Bitcoin Core, LND and Syncthing
+archive it installs, and nodes check these programs by that hash alone.
+Before a hash is pinned, the maintainer checks upstream's signatures with
+this tool. Anyone can repeat the check from a clone of this repository, on a
+computer with Go and gpg:
+
+```bash
+go run ./cmd/pincheck
+```
+
+For each program it downloads the pinned version's checksum list,
+signatures, signer keys and archive, then prints the signers it counted, the
+hash, and whether the hash matches the pin. Bitcoin Core needs 3 of its 5
+listed builders, LND 3 of its 11 listed developers, Syncthing its release
+key. A revoked key never counts, an expired one does. Any failure prints
+`FAIL` and no hash. The downloads go directly over HTTPS, not through Tor.
+
+To check a version before it is pinned:
+
+```bash
+go run ./cmd/pincheck -lnd 0.21.8-beta
+```
+
+`-bitcoin` and `-syncthing` work the same way.
+
 ## Troubleshooting
 
 If the hashes differ, check that your Go is the version in `go.mod`, from

@@ -8,8 +8,8 @@ After installation, the node checks every later release itself, with the same
 key and checksum rules, when you select Review, before you can install it.
 Managed release archives also contain `update.json`. Its integrity is covered
 by the same signed archive checksum. The TUI verifies that plan before review
-and checks each selected component against its pinned upstream signature and
-the plan's exact archive hash. See [Updating Your Node](updating.md).
+and checks each selected component against the exact archive hash pinned in
+the release. See [Updating Your Node](updating.md).
 
 Releases published before v0.7.0 were made under the project's previous name
 and ship a program called rlvpn. They are not installed with these steps.
@@ -123,3 +123,29 @@ Leave out `cd /root` and use an empty folder of your own. Then copy `vpn` to
 the server (for example with `scp`) and run `./vpn install` there as root. On
 your own computer the downloads go through Tor only if you use `torsocks` or
 another Tor client.
+
+### Bring your own Bitcoin Core and LND
+
+The install downloads Bitcoin Core and LND through Tor. You can bring them
+instead, after checking them with each project's own steps: Bitcoin Core's
+[download page](https://bitcoincore.org/en/download/) and LND's
+[releases](https://github.com/lightningnetwork/lnd/releases). The node then
+checks each against the exact hash this vpn release pins, as it checks a
+download.
+
+Before you run the install, as root, make the folder and put the archives
+there:
+
+```bash
+mkdir -m 700 /root/releases
+```
+
+For this release the names are `bitcoin-31.2-x86_64-linux-gnu.tar.gz` and
+`lnd-linux-amd64-v0.21.6-beta.tar.gz`. You can bring one of them, the
+other is downloaded. The install step then says, for example, `Taking
+Bitcoin Core 31.2 from /root/releases`.
+
+A file that does not match the pinned hash stops the install, and the error
+names it. Replace it, or remove it to download instead, and run
+`sudo vpn install` again. Once the install is complete, vpn removes the
+archives it used from `/root/releases`.

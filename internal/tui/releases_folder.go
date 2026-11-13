@@ -1,16 +1,16 @@
 package tui
 
 import (
-	"errors"
-	"io/fs"
-	"os"
 	"slices"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/virtpriv/node/internal/component"
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/release"
+	"github.com/virtpriv/node/internal/update/files"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 // releasesFolderMsg is what the releases folder holds, read as the owner,
@@ -27,52 +27,55 @@ func readReleasesFolderCmd() tea.Msg {
 	return releasesFolderMsg{versions: versions, notFolder: notFolder}
 }
 
-// clearReleasesFolderCmd runs at TUI start. After a complete update it
-// removes vpn's release files not newer than this program, then reads the
-// folder. Relaunch starts a new TUI, so the files go right after an update,
-// and a removal that failed is tried again at the next start.
-func clearReleasesFolderCmd(updates nodeUpdates, running string) tea.Cmd {
+// clearReleasesFolderCmd runs at TUI start, then reads the folder. Relaunch
+// starts a new TUI, so used files go right after an update, and a removal
+// that failed is tried again at the next start.
+func clearReleasesFolderCmd(updates nodeUpdates, running string, syncthing bool) tea.Cmd {
 	return func() tea.Msg {
-		if updates != nil {
-			if st, err := updates.Status(); err == nil && st.Phase == "complete" {
-				if newer, err := release.Newer(running, st.Version); err == nil && !newer {
-					clearReleasesFolder(paths.ReleasesFolder, running)
-				}
-			}
-		}
+		clearUsedReleaseFiles(paths.ReleasesFolder, updates, running, syncthing)
 		return readReleasesFolderCmd()
 	}
 }
 
-// clearReleasesFolder removes only the exact names of vpn's release files.
-// The owner's other files and ripsline.asc stay.
-func clearReleasesFolder(dir, running string) {
-	if info, err := os.Lstat(dir); err != nil || !info.IsDir() {
+// clearUsedReleaseFiles removes the files in dir the node has used, by their
+// exact names, and only after a recorded finish. After a complete update not
+// newer than this program: vpn's release files not newer than it, and the
+// Bitcoin Core and LND archives this release pins or older. Once Syncthing
+// is enabled: its archives this release pins or older. Newer
+// versions stay for a coming update, the owner's other files and
+// ripsline.asc stay.
+func clearUsedReleaseFiles(dir string, updates nodeUpdates, running string, syncthing bool) {
+	complete := false
+	if updates != nil {
+		if st, err := updates.Status(); err == nil && st.Phase == "complete" {
+			newer, err := release.Newer(running, st.Version)
+			complete = err == nil && !newer
+		}
+	}
+	if !complete && !syncthing {
 		return
 	}
-	root, err := os.OpenRoot(dir)
-	if err != nil {
+	folder, _, err := files.OpenFolder(dir)
+	if folder == nil || err != nil {
 		return
 	}
-	defer root.Close()
-	entries, err := fs.ReadDir(root.FS(), ".")
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		version, ok := release.FileVersion(e.Name())
-		if !ok {
-			continue
+	defer folder.Close()
+	folder.RemoveMatching(func(name string) bool {
+		// The last update stays "complete" until the next one, so Syncthing's
+		// archive goes only once Syncthing is enabled, never by an update.
+		if c, used := component.UsedArchive(name); used {
+			if c == protocol.Syncthing {
+				return syncthing
+			}
+			return complete
 		}
-		if newer, err := release.Newer(running, version); err != nil || newer {
-			continue
+		version, ok := release.FileVersion(name)
+		if !ok || !complete {
+			return false
 		}
-		if err := root.Remove(e.Name()); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			logger.TUI("could not remove %s from the releases folder: %v", e.Name(), err)
-			continue
-		}
-		logger.TUI("removed %s from the releases folder", e.Name())
-	}
+		newer, err := release.Newer(running, version)
+		return err == nil && !newer
+	}, logger.TUI)
 }
 
 // applyReleasesFolder keeps what the folder holds, and logs a folder that is

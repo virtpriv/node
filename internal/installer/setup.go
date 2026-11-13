@@ -16,6 +16,7 @@ import (
 	"github.com/virtpriv/node/internal/loginpassword"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/system"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 const (
@@ -339,6 +340,10 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 		}
 	}
 
+	// The archives the install used, and older ones, leave /root/releases
+	// only now that the install is complete. A failure is logged.
+	host.RemoveUsedArchives(paths.InstallReleasesFolder, protocol.Bitcoin, protocol.LND)
+
 	// Both paths leave the connect command in the shell. The install terminal
 	// never opens the node TUI. The owner reaches it by logging in over SSH.
 	printConnectInstructions()
@@ -511,7 +516,8 @@ func buildInstallSteps(
 	// btc and lnd triplets are Groups that resume as a whole. The workdir
 	// path lives only in this process, so a resumed process can never enter
 	// a pipeline midway.
-	var btcWork, lndWork string
+	var btcWork, lndWork, btcFrom, lndFrom string
+	lndVersion := strings.TrimSuffix(component.LNDVersion, "-beta")
 
 	return []InstallStep{
 		{Key: "binary.install",
@@ -592,20 +598,23 @@ func buildInstallSteps(
 			Fn: func() error {
 				return createBaseServiceIdentities()
 			}},
+		// The owner may bring the exact archive in /root/releases. Its name
+		// is decided now, the file is taken or downloaded when the step runs.
 		{Key: "btc.download", Group: "btc",
-			Name: "Downloading Bitcoin Core " + component.BitcoinCoreVersion + " through Tor",
+			Name: takeOrDownload(protocol.Bitcoin, component.BitcoinCoreVersion, component.BitcoinCoreVersion),
 			Fn: func() error {
 				var err error
 				btcWork, err = os.MkdirTemp(work, "btc-")
 				if err != nil {
 					return fmt.Errorf("create work dir: %w", err)
 				}
-				return host.DownloadBitcoinCore(component.BitcoinCoreVersion, btcWork)
+				btcFrom, err = host.TakeArchive(protocol.Bitcoin, component.BitcoinCoreVersion, paths.InstallReleasesFolder, btcWork)
+				return err
 			}},
 		{Key: "btc.verify", Group: "btc",
-			Name: "Verifying Bitcoin Core software and signatures",
+			Name: "Checking Bitcoin Core against the pinned hash",
 			Fn: func() error {
-				return host.VerifyBitcoinCore(btcWork)
+				return host.CheckPinnedArchive(protocol.Bitcoin, btcWork, btcFrom)
 			}},
 		// Also writes lnd.conf. LND's Bitcoin Core password is created here
 		// with bitcoin.conf and lnd.conf is where it is kept. The onion
@@ -614,8 +623,7 @@ func buildInstallSteps(
 		{Key: "btc.install", Group: "btc",
 			Name: "Installing and configuring Bitcoin Core",
 			Fn: func() error {
-				if err := host.InstallBitcoinCoreBinaries(
-					component.BitcoinCoreVersion, btcWork); err != nil {
+				if err := host.InstallPinnedPrograms(protocol.Bitcoin, btcWork); err != nil {
 					return err
 				}
 				os.RemoveAll(btcWork)
@@ -627,25 +635,25 @@ func buildInstallSteps(
 		{Key: "btc.start", Name: "Starting Bitcoin Core",
 			Fn: func() error { return host.EnableAndRestartBitcoind(cfg) }},
 		{Key: "lnd.download", Group: "lnd",
-			Name: "Downloading LND " + strings.TrimSuffix(component.LNDVersion, "-beta") + " through Tor",
+			Name: takeOrDownload(protocol.LND, component.LNDVersion, lndVersion),
 			Fn: func() error {
 				var err error
 				lndWork, err = os.MkdirTemp(work, "lnd-")
 				if err != nil {
 					return fmt.Errorf("create work dir: %w", err)
 				}
-				return host.DownloadLND(component.LNDVersion, lndWork)
+				lndFrom, err = host.TakeArchive(protocol.LND, component.LNDVersion, paths.InstallReleasesFolder, lndWork)
+				return err
 			}},
 		{Key: "lnd.verify", Group: "lnd",
-			Name: "Verifying LND software and signatures",
+			Name: "Checking LND against the pinned hash",
 			Fn: func() error {
-				return host.VerifyLND(component.LNDVersion, lndWork)
+				return host.CheckPinnedArchive(protocol.LND, lndWork, lndFrom)
 			}},
 		{Key: "lnd.install", Group: "lnd",
 			Name: "Installing LND",
 			Fn: func() error {
-				if err := host.InstallLNDBinaries(
-					component.LNDVersion, lndWork); err != nil {
+				if err := host.InstallPinnedPrograms(protocol.LND, lndWork); err != nil {
 					return err
 				}
 				os.RemoveAll(lndWork)
@@ -699,4 +707,15 @@ func buildInstallSteps(
 		{Key: "releases.folder", Name: "Creating the releases folder",
 			Fn: host.CreateReleasesFolder},
 	}
+}
+
+// takeOrDownload names a download step by where the archive will come from.
+// The owner may change /root/releases while the install runs: the step then
+// does what it finds at its own start, and its log line says which.
+// shown is the version as the step shows it.
+func takeOrDownload(c protocol.Component, version, shown string) string {
+	if host.ArchiveInFolder(c, version, paths.InstallReleasesFolder) {
+		return "Taking " + component.Name(c) + " " + shown + " from " + paths.InstallReleasesFolder
+	}
+	return "Downloading " + component.Name(c) + " " + shown + " through Tor"
 }

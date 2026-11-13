@@ -9,9 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/virtpriv/node/internal/artifact"
 	"github.com/virtpriv/node/internal/component"
-	"github.com/virtpriv/node/internal/logger"
+	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/update/files"
 	"github.com/virtpriv/node/internal/update/protocol"
 )
@@ -20,83 +19,19 @@ func UpdateArchive(c protocol.Component, version string) (string, map[string]str
 	if !protocol.ValidVersion(c, version) {
 		return "", nil, errors.New("invalid component version")
 	}
+	name := component.ArchiveName(c, version)
 	switch c {
 	case protocol.Bitcoin:
 		prefix := "bitcoin-" + version + "/bin/"
-		return "bitcoin-" + version + "-x86_64-linux-gnu.tar.gz", map[string]string{prefix + "bitcoind": "bitcoind", prefix + "bitcoin-cli": "bitcoin-cli"}, nil
+		return name, map[string]string{prefix + "bitcoind": "bitcoind", prefix + "bitcoin-cli": "bitcoin-cli"}, nil
 	case protocol.LND:
 		prefix := "lnd-linux-amd64-v" + version + "/"
-		return "lnd-linux-amd64-v" + version + ".tar.gz", map[string]string{prefix + "lnd": "lnd", prefix + "lncli": "lncli"}, nil
+		return name, map[string]string{prefix + "lnd": "lnd", prefix + "lncli": "lncli"}, nil
 	case protocol.Syncthing:
 		prefix := "syncthing-linux-amd64-v" + version + "/"
-		return "syncthing-linux-amd64-v" + version + ".tar.gz", map[string]string{prefix + "syncthing": "syncthing"}, nil
+		return name, map[string]string{prefix + "syncthing": "syncthing"}, nil
 	}
 	return "", nil, errors.New("unsupported component")
-}
-
-// errArchiveNotTested is the refusal of an archive whose SHA-256 differs from
-// the one the running VPN release was built and tested with.
-var errArchiveNotTested = errors.New("upstream archive differs from the tested VPN release")
-
-// checkPinnedArchive compares the archive of c in workDir with the SHA-256
-// this VPN release pins for it in internal/component. It runs after the
-// signature and signed checksum checks, so an archive is accepted only when it
-// is the one this release was tested with, even if the upstream signing keys
-// were taken. An update runs it in the new release's worker, whose pins equal
-// the plan's.
-func checkPinnedArchive(c protocol.Component, workDir string) error {
-	var label, version, want string
-	switch c {
-	case protocol.Bitcoin:
-		label, version, want = "Bitcoin Core", component.BitcoinCoreVersion, component.BitcoinCoreArchiveSHA256
-	case protocol.LND:
-		label, version, want = "LND", component.LNDVersion, component.LNDArchiveSHA256
-	case protocol.Syncthing:
-		label, version, want = "Syncthing", component.SyncthingVersion, component.SyncthingArchiveSHA256
-	default:
-		return errors.New("unsupported component")
-	}
-	name, _, err := UpdateArchive(c, version)
-	if err != nil {
-		return err
-	}
-	got, err := files.Hash(filepath.Join(workDir, name))
-	if err != nil {
-		logger.Verify("FAIL: %s archive: %v", label, err)
-		return fmt.Errorf("checksum failed: %w", err)
-	}
-	if got != want {
-		logger.Verify("FAIL: %s archive differs from the hash pinned in this VPN release", label)
-		return errArchiveNotTested
-	}
-	logger.Verify("OK %s archive matches the pinned hash", label)
-	return nil
-}
-
-// requirePinnedSigners applies a component's signer threshold to what its
-// signatures proved. A bad signature refuses the whole file, and a revoked
-// signer never counts.
-func requirePinnedSigners(label string, result artifact.Result, minValid int) error {
-	if result.Bad {
-		logger.Verify("FAIL: bad signature detected")
-		return errors.New("bad signature detected, verification aborted")
-	}
-	logger.Verify("%s valid pinned signatures: %d/%d required",
-		label, result.Signers, minValid)
-	if result.Signers < minValid {
-		logger.Verify(
-			"FAIL: insufficient valid signatures: got %d, need %d, revoked signers %d",
-			result.Signers, minValid, len(result.Revoked))
-		if len(result.Revoked) > 0 {
-			return fmt.Errorf(
-				"insufficient valid signatures: got %d, need %d. %d pinned signer key(s) revoked, a newer VPN release is needed",
-				result.Signers, minValid, len(result.Revoked))
-		}
-		return fmt.Errorf("insufficient valid signatures: got %d, need %d",
-			result.Signers, minValid)
-	}
-	logger.Verify("OK %s: %d valid pinned signatures", label, result.Signers)
-	return nil
 }
 
 // ExtractUpdateArchive only copies explicitly selected regular members. Tar
@@ -192,32 +127,14 @@ func StageUpdateComponent(c protocol.Component, a protocol.Artifact, dir string)
 			}
 		}
 	}
-	switch c {
-	case protocol.Bitcoin:
-		err = DownloadBitcoinCore(a.Version, dir)
-		if err == nil {
-			err = VerifyBitcoinCore(dir)
-		}
-	case protocol.LND:
-		err = DownloadLND(a.Version, dir)
-		if err == nil {
-			err = VerifyLND(a.Version, dir)
-		}
-	case protocol.Syncthing:
-		err = downloadSyncthing(a.Version, dir)
-		if err == nil {
-			err = verifySyncthing(a.Version, dir)
-		}
-	}
+	// The new release's worker runs this, and update.ValidateBuild already
+	// required the plan's versions and hashes to be its pins.
+	from, err := TakeArchive(c, a.Version, paths.ReleasesFolder, dir)
 	if err != nil {
 		return nil, err
 	}
-	hash, err := files.Hash(filepath.Join(dir, archive))
-	if err != nil {
+	if err := CheckArchive(c, a.Version, a.SHA256, dir, from); err != nil {
 		return nil, err
-	}
-	if hash != a.SHA256 {
-		return nil, errArchiveNotTested
 	}
 	if err := ExtractUpdateArchive(filepath.Join(dir, archive), filepath.Join(dir, "bin"), members); err != nil {
 		return nil, err

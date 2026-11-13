@@ -35,6 +35,14 @@ exists.
 2. Open the **Add-On** section in the sidebar
 3. Select **Syncthing** and press Enter to install
 
+The node downloads Syncthing through Tor. To bring it yourself instead, check
+it with Syncthing's own steps, then put
+`syncthing-linux-amd64-v2.1.5.tar.gz` in `/home/vpn/releases` before step 3.
+The node uses it only if it matches the hash this vpn release pins. A file
+that does not match stops the add-on before it changes anything, and the
+error names it. Once Syncthing is installed, vpn removes the file the next
+time you log in.
+
 ### Step 2. Install Syncthing on Your Local Computer or Phone
 
 Download Syncthing for your operating system from

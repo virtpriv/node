@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/component"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/release"
 	"github.com/virtpriv/node/internal/theme"
@@ -107,7 +108,7 @@ func (s *NodeUpdateScreen) prepared(answer protocol.Review) {
 func restartLine(affected []protocol.Component) string {
 	names := make([]string, 0, len(affected))
 	for _, c := range affected {
-		names = append(names, componentName(c))
+		names = append(names, component.Name(c))
 	}
 	switch len(names) {
 	case 0:
@@ -116,18 +117,6 @@ func restartLine(affected []protocol.Component) string {
 		return names[0] + " restarts during the update."
 	}
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1] + " restart during the update."
-}
-
-func componentName(c protocol.Component) string {
-	switch c {
-	case protocol.Bitcoin:
-		return "Bitcoin Core"
-	case protocol.LND:
-		return "LND"
-	case protocol.Syncthing:
-		return "Syncthing"
-	}
-	return string(c)
 }
 
 // preparingLine is the busy line while the node prepares the review of
@@ -644,7 +633,7 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 		p.field("VPN: ", r.Source.VPN+" → "+m.Version)
 		for _, c := range protocol.Components {
 			if from := r.Source.Get(c); from != "" {
-				p.field(componentName(c)+": ", from+" → "+m.Artifact(c).Version)
+				p.field(component.Name(c)+": ", from+" → "+m.Artifact(c).Version)
 			}
 		}
 		p.blank()

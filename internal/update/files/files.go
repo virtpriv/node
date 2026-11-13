@@ -1,6 +1,8 @@
 // Package files provides the durable file operations used by managed updates
-// and by the install to place programs.
-// Paths are chosen by trusted code and must be under owned, non-writable parents.
+// and by the install to place programs, and the reading of files out of a
+// folder the owner fills (Folder).
+// Paths are chosen by trusted code and must be under owned, non-writable
+// parents, except a Folder's, whose contents are never trusted.
 package files
 
 import (

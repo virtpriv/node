@@ -48,8 +48,9 @@ func (v Versions) Get(c Component) string {
 	return ""
 }
 
-// Artifact hashes bind upstream downloads to the maintainer's tested bytes.
-// Upstream signatures are also checked before any service is stopped.
+// Artifact hashes bind upstream archives to the maintainer's tested bytes,
+// whose signatures the maintainer checked at the bump. The node checks each
+// archive against its hash before any service is stopped.
 type Artifact struct {
 	Version string `json:"version"`
 	SHA256  string `json:"sha256"`

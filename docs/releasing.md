@@ -12,16 +12,18 @@ and explicitly implemented host changes on Debian 13 amd64.
 
 The release archive contains `vpn` and `update.json`. The vpn signature over
 the release manifest authenticates both through the archive checksum.
-Component archives are downloaded through Tor, checked against upstream
-signing pins, and also checked against the exact archive hashes in the vpn
-plan. Discovery of a GitHub release alone never authorizes installation.
+Component archives are taken from the owner's releases folder or downloaded
+through Tor, and checked against the archive hashes pinned in the release
+and named in the vpn plan. Each hash was checked against upstream's
+signatures at the bump, with `go run ./cmd/pincheck`. Discovery of a GitHub
+release alone never authorizes installation.
 
-Every signature check, for vpn and for each component, follows one rule. A
-pinned signer counts only when gpg reports its signature as good. A signature
-made with a revoked key, or a revoked signing subkey, never counts, whatever
-date the signature carries. An expired key still counts. Bitcoin Core still
-needs three of its five pinned builders, and LND three of its eleven listed
-developers, after a revoked one is left out.
+Every signature check, vpn's on the node and each component's in pincheck,
+follows one rule. A pinned signer counts only when gpg reports its signature
+as good. A signature made with a revoked key, or a revoked signing subkey,
+never counts, whatever date the signature carries. An expired key still
+counts. Bitcoin Core still needs three of its five pinned builders, and LND
+three of its eleven listed developers, after a revoked one is left out.
 
 The node reads the vpn release key from two places on every review: the file
 `keys/ripsline.asc` in this repository and keys.openpgp.org. It uses both
