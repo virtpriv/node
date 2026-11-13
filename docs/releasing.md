@@ -133,6 +133,14 @@ path. No alternate repository, signing key or persistent testing channel is
 used. An RC selection does not carry into a newly opened update screen. A saved
 job retains its exact release and remains available for Retry after reconnect.
 
+A node also takes a release's three files from the owner's releases folder,
+`/home/vpn/releases`, in place of the download, with the same checks. Prepare
+copies them into its private folder before checking them, follows no link out
+of the folder and reads only regular files, the archive up to 2 GiB and the
+other files up to 1 MiB. The owner's `ripsline.asc` there is used only when
+neither key source gives the pinned key. Every installed node reads that path
+and the release file names, so they never change.
+
 Use only disposable nodes without funds. For the first release, fresh-install
 an RC baseline with the chosen source component versions, then use the TUI to
 update to a later RC containing the intended component and host changes. For

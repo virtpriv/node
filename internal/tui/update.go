@@ -500,6 +500,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusResultMsg:
 		cmd := m.completeStatus(msg)
 		return m, cmd
+	case releasesFolderMsg:
+		m.screenCtx.applyReleasesFolder(msg)
+		return m, nil
 	case latestVersionMsg:
 		m.screenCtx.LatestVersion = string(msg)
 		m.screenCtx.LatestChecked = true
@@ -817,11 +820,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.continueWalletCreation(msg.owner)
 	case tickMsg:
 		if m.statusActive != nil {
-			return m, tea.Batch(requestStatusCmd, m.visibleWalletListsCmd(), tickEveryCmd(m.pollInterval()))
+			return m, tea.Batch(requestStatusCmd, m.visibleWalletListsCmd(), readReleasesFolderCmd, tickEveryCmd(m.pollInterval()))
 		}
 		cmds := []tea.Cmd{
 			m.visibleWalletListsCmd(),
 			requestStatusCmd,
+			readReleasesFolderCmd,
 			fetchWalletStateCmd(m.screenCtx),
 			tickEveryCmd(m.pollInterval()),
 		}

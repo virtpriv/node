@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/virtpriv/node/internal/app"
+	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/release"
 	"github.com/virtpriv/node/internal/theme"
 	"github.com/virtpriv/node/internal/tui/steplist"
@@ -63,6 +64,9 @@ type nodeUpdateMsg struct {
 	// prepare is the newest Prepare job, read by "restore".
 	prepare app.PrepareJob
 	found   bool
+	// folder is the releases folder, read with the state, not only on the
+	// TUI's slower poll, so files the owner just copied in are offered.
+	folder *releasesFolderMsg
 }
 type nodeUpdateTick struct{ owner *NodeUpdateScreen }
 
@@ -126,6 +130,15 @@ func componentName(c protocol.Component) string {
 	return string(c)
 }
 
+// preparingLine is the busy line while the node prepares the review of
+// version: its files are checked from the releases folder or downloaded.
+func preparingLine(ctx *ScreenContext, version string) string {
+	if ctx.inReleasesFolder(version) {
+		return "Checking the release files..."
+	}
+	return "Downloading and verifying the release plan..."
+}
+
 // nodeUpdatesBusy reports a Node Updates screen waiting for the node's
 // answer to a request, which a new screen in its tab would lose. The 2 s
 // status check is not such a wait.
@@ -135,10 +148,7 @@ func nodeUpdatesBusy(screen Screen) bool {
 }
 
 func (s *NodeUpdateScreen) selectStable() {
-	s.target, s.notice = "", ""
-	if release.IsStable(s.ctx.LatestVersion) {
-		s.target = s.ctx.LatestVersion
-	}
+	s.target, s.notice = s.ctx.offeredRelease(), ""
 }
 
 // Init reads the update's state and the newest Prepare job, so a review
@@ -173,6 +183,10 @@ func (s *NodeUpdateScreen) request(kind string) tea.Cmd {
 		if client == nil {
 			msg.err = errNodeUpdatesUnavailable
 			return msg
+		}
+		if kind == "status" || kind == "restore" {
+			folder := readReleasesFolderCmd().(releasesFolderMsg)
+			msg.folder = &folder
 		}
 		switch kind {
 		case "status":
@@ -248,6 +262,12 @@ func (s *NodeUpdateScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 			return s, nil
 		}
 		s.busy, s.checking = "", false
+		if m.folder != nil {
+			s.ctx.applyReleasesFolder(*m.folder)
+			if s.target == "" && s.notice == "" && s.review == nil {
+				s.selectStable()
+			}
+		}
 		if m.kind == "restore" && m.found {
 			if cmd, shown := s.restorePrepare(m.prepare, m.status); shown {
 				s.status, s.statusErr = m.status, m.err
@@ -642,7 +662,11 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 			p.line(" " + restarts)
 		}
 		p.blank()
-		p.line(" Downloads go through Tor.")
+		if r.FromFolder {
+			p.fitText(plain, "This release comes from your releases folder. Other downloads go through Tor.", 0)
+		} else {
+			p.line(" Downloads go through Tor.")
+		}
 		p.blank()
 		p.line(" The node's data is kept.")
 	} else if s.status.ID != "" && !s.status.Active && !s.olderThanUpdate() {
@@ -731,11 +755,18 @@ func (s *NodeUpdateScreen) messages(w int, fit nodeUpdateFit) []string {
 		// Green, as on System's header, so an update stands out.
 		p.lines = append(p.lines, " "+theme.Label.Render("Available: ")+
 			lipgloss.NewStyle().Foreground(theme.ColorUpdate).Render("v"+s.target))
+		if s.ctx.inReleasesFolder(s.target) {
+			p.line(" In your releases folder.")
+		}
+	}
+	if s.ctx.FolderNotFolder && s.review == nil && !fit.noAvailable {
+		p.blank()
+		p.fitText(theme.Warning, paths.ReleasesFolder+" is a link or a file, not a folder. It is not read.", 0)
 	}
 	if s.busy != "" && !fit.noBusy {
 		p.blank()
 		if s.busy == "prepare" || s.busy == "await" {
-			p.line(" Downloading and verifying the release plan...")
+			p.line(" " + preparingLine(s.ctx, s.target))
 		} else {
 			p.line(" Checking update state...")
 		}

@@ -303,6 +303,11 @@ const (
 	AdminBashrc        = AdminHome + "/.bashrc"
 	AdminBashProfile   = AdminHome + "/.bash_profile"
 	AuthorizedKeysFile = AdminHome + "/.ssh/authorized_keys"
+	// ReleasesFolder is where the owner may put release files the node
+	// would otherwise download. It belongs to the owner, so its contents
+	// are untrusted. Every installed node reads this path, so it never
+	// changes.
+	ReleasesFolder = AdminHome + "/releases"
 
 	// AdminSudoers is the owner grant installed after initial password creation.
 	// Unmarked pre-existing policy remains a fresh-install conflict.

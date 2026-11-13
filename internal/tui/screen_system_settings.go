@@ -277,7 +277,7 @@ func (s *SettingsScreen) View(w, h int) string {
 		switch {
 		case s.checking:
 			p.blank()
-			p.line(" Downloading and verifying the release plan...")
+			p.line(" " + preparingLine(s.ctx, strings.TrimPrefix(strings.TrimSpace(s.release.Value()), "v")))
 		case s.err != "":
 			p.blank()
 			p.fitText(theme.Warning, s.err, nodeUpdateActionRows)

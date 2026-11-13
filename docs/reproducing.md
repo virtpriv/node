@@ -124,8 +124,8 @@ wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VE
 Import the release signing key from the OpenPGP keyserver:
 
 ```bash
-wget -qO release-key.asc "https://keys.openpgp.org/vks/v1/by-fingerprint/AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
-gpg --import release-key.asc
+wget -qO ripsline.asc "https://keys.openpgp.org/vks/v1/by-fingerprint/AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
+gpg --import ripsline.asc
 ```
 
 Verify the signature:

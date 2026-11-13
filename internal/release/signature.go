@@ -43,7 +43,12 @@ const (
 	keyWebsiteURL = "https://keys.openpgp.org/vks/v1/by-fingerprint/"
 )
 
-var errKeyUnavailable = errors.New("the release signing key could not be downloaded from the repository or the key server")
+// ErrKeyUnavailable and ErrFolderKeyUnavailable refuse a release for want of
+// the pinned key, the second after the releases folder's copy was tried too.
+var (
+	ErrKeyUnavailable       = errors.New("the release signing key could not be downloaded from the repository or the key server")
+	ErrFolderKeyUnavailable = errors.New("the release signing key could not be downloaded, and ripsline.asc in the releases folder does not hold it")
+)
 
 // KeyCheck reports how the release key was obtained.
 type KeyCheck struct {
@@ -53,12 +58,14 @@ type KeyCheck struct {
 }
 
 // VerifySignature requires the pinned VPN signer and rejects bad signatures.
-// The caller owns the private workspace containing the downloaded manifest.
-func VerifySignature(version, workDir string) (KeyCheck, error) {
-	return verifySignature(version, workDir, SigningFingerprint, system.DownloadRequireTor)
+// The caller owns the private workspace containing the manifest. folderKey is
+// a private copy of the owner's ripsline.asc, or empty. It is used only when
+// neither download gives the pinned key.
+func VerifySignature(version, workDir, folderKey string) (KeyCheck, error) {
+	return verifySignature(version, workDir, folderKey, SigningFingerprint, system.DownloadRequireTor)
 }
 
-func verifySignature(version, workDir, fingerprint string, download func(url, dest string) error) (KeyCheck, error) {
+func verifySignature(version, workDir, folderKey, fingerprint string, download func(url, dest string) error) (KeyCheck, error) {
 	var check KeyCheck
 	assets, err := AssetsFor(version)
 	if err != nil {
@@ -96,31 +103,40 @@ func verifySignature(version, workDir, fingerprint string, download func(url, de
 	} else {
 		keyFiles = append(keyFiles, websiteKey)
 	}
-	if len(keyFiles) == 0 {
-		logger.Verify("FAIL: release signing key not downloaded")
-		return check, errKeyUnavailable
+	pinned := map[string]bool{fingerprint: true}
+	var result artifact.Result
+	if len(keyFiles) > 0 {
+		result, err = artifact.VerifySignature(keyFiles, sigFile, sumsFile, pinned)
+		if err != nil {
+			return check, fmt.Errorf("signature verification failed: %w", err)
+		}
 	}
-
-	result, err := artifact.VerifySignature(
-		keyFiles, sigFile, sumsFile, map[string]bool{fingerprint: true})
-	if err != nil {
-		return check, fmt.Errorf(
-			"signature verification failed: %w", err)
+	// An answer that is not the pinned key is no better than no answer.
+	if !result.Imported[repositoryKey] && !result.Imported[websiteKey] {
+		if folderKey == "" {
+			logger.Verify("FAIL: release signing key not obtained")
+			return check, ErrKeyUnavailable
+		}
+		// The owner's copy may be old, so the review says the key server
+		// was not asked.
+		logger.Verify("release key from the releases folder, both downloads gave none")
+		check.WebsiteUnreachable = true
+		result, err = artifact.VerifySignature([]string{folderKey}, sigFile, sumsFile, pinned)
+		if err != nil {
+			return check, fmt.Errorf("signature verification failed: %w", err)
+		}
+		if !result.Imported[folderKey] {
+			logger.Verify("FAIL: release signing key not obtained")
+			return check, ErrFolderKeyUnavailable
+		}
+	} else if !result.Imported[websiteKey] {
+		check.WebsiteUnreachable = true
 	}
 
 	if result.Bad {
 		logger.Verify("FAIL: bad signature detected")
 		return check, fmt.Errorf(
 			"bad signature detected, verification aborted")
-	}
-
-	// An answer that is not the pinned key is no better than no answer.
-	if !result.Imported[websiteKey] {
-		check.WebsiteUnreachable = true
-	}
-	if !result.Imported[repositoryKey] && !result.Imported[websiteKey] {
-		logger.Verify("FAIL: release signing key not obtained")
-		return check, errKeyUnavailable
 	}
 
 	if result.Signers < 1 {
