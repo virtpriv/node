@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/virtpriv/node/internal/component"
+	"github.com/virtpriv/node/internal/update/files"
 	"github.com/virtpriv/node/internal/upstream"
 )
 
@@ -121,7 +122,7 @@ func download(url, path string) error {
 	if err != nil {
 		return err
 	}
-	const limit = 2 << 30
+	const limit = files.ArchiveLimit
 	n, err := io.Copy(f, io.LimitReader(resp.Body, limit+1))
 	if closeErr := f.Close(); err == nil {
 		err = closeErr

@@ -111,7 +111,7 @@ func (f *Folder) RemoveMatching(match func(name string) bool, log func(format st
 		return
 	}
 	for _, e := range entries {
-		if !match(e.Name()) {
+		if e.IsDir() || !match(e.Name()) {
 			continue
 		}
 		if err := f.root.Remove(e.Name()); err != nil && !errors.Is(err, fs.ErrNotExist) {

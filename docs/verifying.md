@@ -147,5 +147,6 @@ Bitcoin Core 31.2 from /root/releases`.
 
 A file that does not match the pinned hash stops the install, and the error
 names it. Replace it, or remove it to download instead, and run
-`sudo vpn install` again. Once the install is complete, vpn removes the
-archives it used from `/root/releases`.
+`sudo vpn install` again. Once the install is complete, vpn removes from
+`/root/releases` the Bitcoin Core and LND archives of the versions it
+installed, and older ones.

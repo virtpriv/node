@@ -48,7 +48,6 @@ type Fetch func(url, path string) error
 
 // Checked is what a check proved. Hash is set only when every rule held.
 type Checked struct {
-	Version string
 	Signers []string
 	Hash    string
 }
@@ -139,7 +138,7 @@ func (p Program) Check(version string, fetch Fetch, work string) (Checked, error
 	if got != want {
 		return Checked{}, fmt.Errorf("%s differs from %s's signed list", name, p.Name)
 	}
-	return Checked{Version: version, Signers: signed, Hash: got}, nil
+	return Checked{Signers: signed, Hash: got}, nil
 }
 
 func sha256File(path string) (string, error) {

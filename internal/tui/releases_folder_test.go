@@ -63,7 +63,15 @@ func TestUsedProgramFilesLeaveTheReleasesFolder(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			// Only files go, never a folder that carries an archive's name.
+			folderNamed := filepath.Join(dir, "lnd-linux-amd64-v0.21.3-beta.tar.gz")
+			if err := os.Mkdir(folderNamed, 0o700); err != nil {
+				t.Fatal(err)
+			}
 			clearUsedReleaseFiles(dir, &nodeUpdateClientStub{status: tc.status}, running, tc.syncthing)
+			if _, err := os.Lstat(folderNamed); err != nil {
+				t.Errorf("a folder named as an archive was removed: %v", err)
+			}
 			for _, name := range all {
 				_, err := os.Lstat(filepath.Join(dir, name))
 				gone := os.IsNotExist(err)
