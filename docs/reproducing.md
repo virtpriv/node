@@ -45,7 +45,7 @@ Go is available for all supported platforms from
 [go.dev/dl](https://go.dev/dl/).
 
 ```bash
-GO_VERSION="1.26.10"  # check go.mod for exact version
+GO_VERSION="1.26.11"  # check go.mod for exact version
 wget "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
 ```
 
