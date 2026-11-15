@@ -75,7 +75,7 @@ from the same folder when it is there, and downloads only the ones missing.
 Each must match the exact hash the new release pins. A file that does not
 match stops the update before it changes anything, and the error names it.
 Use the names upstream gives, for example
-`lnd-linux-amd64-v0.21.6-beta.tar.gz`.
+`lnd-linux-amd64-v0.21.8-beta.tar.gz`.
 
 After an update is complete and you relaunch, vpn removes its own release
 files that are not newer than the version now running, and the Bitcoin Core

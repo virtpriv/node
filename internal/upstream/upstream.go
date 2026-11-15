@@ -192,10 +192,11 @@ func guixSigner(name, fingerprint string) Signer {
 // Source: scripts/verify-install.sh and scripts/keys in
 // github.com/lightningnetwork/lnd at master 11f79be (November 6 2026). Each
 // key file's primary fingerprint matched the script's list. Every LND final
-// release from v0.20.0 to v0.21.6-beta carries at least four of their
-// signatures (November 9 2026). LND's own script asks for five, but it is
-// meant for LND's latest release only, and LND removes the key of a
-// developer who stops signing, so three are required.
+// release from v0.20.0 to v0.21.8-beta carries at least four of their
+// signatures (November 15 2026), except v0.21.7-beta, which has no release
+// files. LND's own script asks for five, but it is meant for LND's latest
+// release only, and LND removes the key of a developer who stops signing,
+// so three are required.
 var LND = Program{
 	Component:  protocol.LND,
 	Name:       component.Name(protocol.LND),

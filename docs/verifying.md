@@ -141,7 +141,7 @@ mkdir -m 700 /root/releases
 ```
 
 For this release the names are `bitcoin-31.2-x86_64-linux-gnu.tar.gz` and
-`lnd-linux-amd64-v0.21.6-beta.tar.gz`. You can bring one of them, the
+`lnd-linux-amd64-v0.21.8-beta.tar.gz`. You can bring one of them, the
 other is downloaded. The install step then says, for example, `Taking
 Bitcoin Core 31.2 from /root/releases`.
 
