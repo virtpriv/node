@@ -10,6 +10,7 @@ import (
 	"github.com/virtpriv/node/internal/component"
 	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 type syncthingInstallStep struct {
@@ -101,31 +102,30 @@ func syncthingInstallSteps(
 	rand.Read(passBytes)
 	syncPassword := hex.EncodeToString(passBytes)
 
-	var syncWork string
+	var syncWork, from string
 	steps := []syncthingInstallStep{
-		{name: "Downloading Syncthing " + component.SyncthingVersion,
+		{name: "Getting Syncthing " + component.SyncthingVersion,
 			run: func() error {
 				var err error
 				syncWork, err = os.MkdirTemp("", "vpn-sync-")
 				if err != nil {
 					return fmt.Errorf("create work dir: %w", err)
 				}
-				return downloadSyncthing(
-					component.SyncthingVersion, syncWork)
+				from, err = TakeArchive(protocol.Syncthing,
+					component.SyncthingVersion, paths.ReleasesFolder, syncWork)
+				return err
 			},
 			// The work folder is in the job service's private
 			// /tmp (PrivateTmp=yes), not on the node.
 			noChange: true},
-		{name: "Verifying Syncthing",
+		{name: "Checking Syncthing against the pinned hash",
 			run: func() error {
-				return verifySyncthing(
-					component.SyncthingVersion, syncWork)
+				return CheckPinnedArchive(protocol.Syncthing, syncWork, from)
 			},
 			noChange: true},
 		{name: "Installing Syncthing",
 			run: func() error {
-				if err := extractAndInstallSyncthing(
-					component.SyncthingVersion, syncWork); err != nil {
+				if err := InstallPinnedPrograms(protocol.Syncthing, syncWork); err != nil {
 					return err
 				}
 				os.RemoveAll(syncWork)

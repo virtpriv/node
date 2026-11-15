@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"sync"
 	"time"
 )
@@ -33,16 +32,14 @@ var (
 	out io.Writer
 )
 
-func init() {
-	// Skip log file initialization during tests.
-	// Go test binaries have .test suffix in os.Args[0].
-	if len(os.Args) > 0 && strings.HasSuffix(os.Args[0], ".test") {
-		return
-	}
+// Open sends the log to LogPath. Only the vpn program calls it, first thing,
+// so a tool or test that shares vpn's code never writes the node's log.
+// Until then, and when the file cannot be opened, lines go nowhere.
+func Open() {
 	f, err := os.OpenFile(LogPath,
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
 	if err == nil {
-		out = f
+		SetOutput(f)
 	}
 }
 

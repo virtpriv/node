@@ -59,9 +59,8 @@ scp vpn-0.7.1-x86_64.tar.gz vpn-0.7.1-manifest.txt vpn-0.7.1-manifest.txt.asc vp
 ```
 
 Node Updates then shows the release as "Available" with "In your releases
-folder.", and the review says the release comes from that folder. Bitcoin
-Core, LND and Syncthing still download through Tor when the release changes
-them. All three vpn files must be there. With one or two the review is
+folder.", and the review says the release comes from that folder. All three
+vpn files must be there. With one or two the review is
 refused and names the file that is missing. If a check fails while a copy is
 still running, review again when it ends.
 
@@ -71,9 +70,18 @@ releases folder, if you put a copy there. Save it under that name as in
 [Release Verification](verifying.md). The review then says the key server was
 not reached.
 
+An update that changes Bitcoin Core, LND or Syncthing takes each archive
+from the same folder when it is there, and downloads only the ones missing.
+Each must match the exact hash the new release pins. A file that does not
+match stops the update before it changes anything, and the error names it.
+Use the names upstream gives, for example
+`lnd-linux-amd64-v0.21.6-beta.tar.gz`.
+
 After an update is complete and you relaunch, vpn removes its own release
-files that are not newer than the version now running. Other files stay,
-`ripsline.asc` too. If the folder is missing, make it again, logged in as
+files that are not newer than the version now running, and the Bitcoin Core
+and LND archives of the versions it pins or older. A Syncthing archive goes
+once Syncthing is installed. Newer ones and other files stay, `ripsline.asc`
+too. If the folder is missing, make it again, logged in as
 `vpn`:
 
 ```bash
@@ -115,9 +123,10 @@ stopped until it continues.
   published in either place is seen. A signature from a revoked key is
   refused. If the keyserver cannot be reached, the review says "Key server
   not reached. A new key revocation would be missed."
-- **Bitcoin Core, LND and Syncthing:** checked against their own pinned
-  signing keys, as at install, and against the exact archive hashes in the
-  signed release plan.
+- **Bitcoin Core, LND and Syncthing:** checked against the exact archive
+  hashes the new release pins and its signed plan names, as at install. The
+  maintainer checked upstream's signatures before pinning them, see
+  [Checking the pinned programs](reproducing.md#checking-the-pinned-programs).
 - **Which release:** the node offers the newest stable release, from GitHub's
   latest release or your releases folder, and remembers GitHub's answer for
   up to a day. Release candidates are never offered by themselves.

@@ -17,6 +17,7 @@ import (
 	"github.com/virtpriv/node/internal/host"
 	"github.com/virtpriv/node/internal/installer"
 	"github.com/virtpriv/node/internal/jobs"
+	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/tui"
 	installui "github.com/virtpriv/node/internal/tui/install"
@@ -31,6 +32,7 @@ var version = "dev"
 // node TUI and `sudo vpn install` is the installer. Nothing
 // infers one from the other.
 func main() {
+	logger.Open()
 	installer.SetVersion(version)
 
 	cmd, opts, err := parseArgs(os.Args[1:])

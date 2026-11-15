@@ -41,7 +41,7 @@ funds.
 
 ### Base (automatic)
 
-- **Bitcoin Core:** pruned node, all P2P through Tor, GPG-verified with at least 3 of 5 pinned builder signatures
+- **Bitcoin Core:** pruned node, all P2P through Tor, checked against the exact hash pinned in the signed vpn release
 - **LND:** Lightning Network daemon with Tor hidden services, installed Tor-only by default
 - **Tor:** Bitcoin Core, LND, updates and every download once the installer has set up Tor go through Tor. The exceptions are listed under [Privacy & Network Traffic](#privacy--network-traffic)
 - **UFW firewall:** deny all incoming except SSH
@@ -141,7 +141,7 @@ For maintainers and contributors: [How vpn Works Inside](docs/developing.md),
 - Tor control-cookie access is granted only inside `lnd.service`, for LND's Lightning onion. Tor itself makes Bitcoin Core's onion address, so Bitcoin Core, Syncthing and the backup exporter receive none
 - vpn and LND authenticate to Bitcoin Core with separate `rpcauth` identities. Neither reads a Core cookie or Core's data directory
 - Syncthing can read only the finished copy of `channel.backup`. It cannot change that copy or read LND's own files
-- GPG signature verification for all software, any bad signature is a hard stop
+- Every program is checked before install: vpn by its release signature, Bitcoin Core, LND and Syncthing by the exact hash the signed vpn release pins
 - Unattended security upgrades, checked every day, with an automatic restart right after when an update needs one, never during an install or an update
 - Base packages upgraded during install, through Tor and behind the firewall, to close CVE windows on stale server images
 - Syncthing backup sync: mutual TLS device approval, web UI only via Tor
@@ -196,21 +196,12 @@ traffic went.
 
 ## Software Verification
 
-All software is verified with GPG signatures and SHA256 checksums:
+Every program is checked before it is installed:
 
-- **Bitcoin Core:** 5 trusted builder keys from
-  [bitcoin-core/guix.sigs](https://github.com/bitcoin-core/guix.sigs).
-  Requires 3 of 5 valid signatures. A bad signature (BADSIG) from any
-  key is a hard stop.
-- **LND:** 11 developer keys from LND's own list. Requires 3 of 11
-  valid signatures. A bad signature (BADSIG) from any key is a hard stop.
-- **Syncthing:** pinned release binary, verified against the Syncthing
-  release signing key's known fingerprint. The release checksums are
-  clearsigned by the same key. vpn also writes Syncthing's entire
-  configuration itself and checks its privacy settings at install, at each
-  pairing and when an update changes Syncthing. At install it stops
-  Syncthing if one does not verify, at pairing it refuses the device. A
-  setting changed later in Syncthing's web UI is not checked before then.
+- **Bitcoin Core, LND and Syncthing:** each archive must match the exact
+  SHA-256 hash pinned in the signed vpn release, at install, at the
+  Syncthing add-on and at every update. Any other file is refused. The node
+  downloads only the archive, no signatures or keys for these programs.
 - **vpn binary:** signed with the project's release key, published on
   keys.openpgp.org and in this repository. You download and verify it
   yourself before running it (see [Release Verification](docs/verifying.md)),
@@ -219,9 +210,33 @@ All software is verified with GPG signatures and SHA256 checksums:
   both places, so an outage of either one does not stop updates. It
   trusts only the pinned fingerprint, never a copy itself.
 
-A signature from a key that its owner has revoked is refused for every
-download above. Each archive must also match the SHA-256 hash pinned in the
-vpn release, at install, at the Syncthing add-on and at every update.
+A hash is pinned when vpn moves to a new version of a program, and only
+after the maintainer checked upstream's own signatures on their own computer
+with `go run ./cmd/pincheck`:
+
+- **Bitcoin Core:** 5 trusted builder keys from
+  [bitcoin-core/guix.sigs](https://github.com/bitcoin-core/guix.sigs).
+  Requires 3 of 5 valid signatures. A bad signature from any key is a hard
+  stop.
+- **LND:** 11 developer keys from LND's own list. Requires 3 of 11 valid
+  signatures. A bad signature from any key is a hard stop.
+- **Syncthing:** the Syncthing release signing key's known fingerprint. The
+  release checksums are clearsigned by the same key.
+
+A signature from a key that its owner has revoked never counts. Anyone can
+repeat the check, see
+[Checking the pinned programs](docs/reproducing.md#checking-the-pinned-programs).
+You can also bring Bitcoin Core, LND and Syncthing files you checked
+yourself, see
+[Bring your own Bitcoin Core and LND](docs/verifying.md#bring-your-own-bitcoin-core-and-lnd)
+and [Syncthing](docs/syncthing.md#step-1-install-syncthing-on-your-node).
+The node uses them only when they match the pins.
+
+vpn also writes Syncthing's entire configuration itself and checks its
+privacy settings at install, at each pairing and when an update changes
+Syncthing. At install it stops Syncthing if one does not verify, at pairing
+it refuses the device. A setting changed later in Syncthing's web UI is not
+checked before then.
 
 The release signing key fingerprint is
 `AFA0 EBAC DC9A 4C4A A7B0  154A C97C E10F 170B A5FE`. The same key

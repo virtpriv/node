@@ -11,7 +11,7 @@ The installer takes a transient whole-run lock, checks the environment, and
 refuses with a full report before starting durable installation work if the
 machine is not one it can trust. It then asks for the owner account's password,
 installs Bitcoin Core and LND with every download after Tor routed through Tor
-and verified before install, and then shows how to log in as `vpn` over SSH,
+and checked against the pinned hashes before install, and then shows how to log in as `vpn` over SSH,
 where the TUI opens.
 
 During interactive installation, Ctrl+C requests a stop after the active step

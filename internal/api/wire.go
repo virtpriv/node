@@ -285,8 +285,8 @@ func UpgradeP2PToHybridStepNames() []string {
 // SyncthingInstallStepNames are the Syncthing install's steps.
 func SyncthingInstallStepNames(version string) []string {
 	return []string{
-		"Downloading Syncthing " + version,
-		"Verifying Syncthing",
+		"Getting Syncthing " + version,
+		"Checking Syncthing against the pinned hash",
 		"Installing Syncthing",
 		"Creating Syncthing directories",
 		"Creating Syncthing service",

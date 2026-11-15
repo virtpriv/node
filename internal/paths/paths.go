@@ -308,6 +308,12 @@ const (
 	// are untrusted. Every installed node reads this path, so it never
 	// changes.
 	ReleasesFolder = AdminHome + "/releases"
+	// InstallReleasesFolder is where the owner may put the Bitcoin Core and
+	// LND archives before and during the install, when the vpn account does
+	// not exist yet. Only root can write it, and its contents are untrusted
+	// all the same. The owner makes it. The install reads it and removes the
+	// archives it used once it is complete.
+	InstallReleasesFolder = "/root/releases"
 
 	// AdminSudoers is the owner grant installed after initial password creation.
 	// Unmarked pre-existing policy remains a fresh-install conflict.

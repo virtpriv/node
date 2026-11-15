@@ -1,10 +1,9 @@
-package host
+package upstream
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,8 +11,8 @@ import (
 )
 
 // Syncthing publishes one file that holds its checksum list and the signature
-// over it. Only text inside the signed block may decide which archive is
-// installed. These cases use the real gpg program with throwaway keys.
+// over it. Only text inside the signed block may decide the hash pincheck
+// prints. These cases use the real gpg program with throwaway keys.
 func TestSyncthingArchiveIsCheckedOnlyAgainstSignedChecksums(t *testing.T) {
 	const (
 		version     = "9.9.9"
@@ -30,6 +29,8 @@ func TestSyncthingArchiveIsCheckedOnlyAgainstSignedChecksums(t *testing.T) {
 	retired := h.Key("retired", "never", "")
 	stranger := h.Key("stranger", "never", "")
 	keyFile := h.Export("release", "release-key.asc")
+	program := Syncthing
+	program.Signers = []Signer{{Name: "release", Fingerprint: release, KeyURL: "key"}}
 
 	n := 0
 	signed := func(list string, signers ...string) string {
@@ -70,14 +71,20 @@ func TestSyncthingArchiveIsCheckedOnlyAgainstSignedChecksums(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, "sha256sum.txt.asc"), []byte(c.checksum), 0600); err != nil {
-				t.Fatal(err)
+			served := map[string][]byte{"signature": []byte(c.checksum), "archive": c.archive}
+			fetch := func(url, path string) error {
+				if url == "key" {
+					b, err := os.ReadFile(keyFile)
+					if err != nil {
+						return err
+					}
+					return os.WriteFile(path, b, 0o600)
+				}
+				return os.WriteFile(path, served[url], 0o600)
 			}
-			if err := os.WriteFile(filepath.Join(dir, archiveName), c.archive, 0600); err != nil {
-				t.Fatal(err)
-			}
-			err := verifySyncthingFiles(version, dir, keyFile, release)
+			program.SignatureURL = func(string, Signer) string { return "signature" }
+			program.ArchiveURL = func(string) string { return "archive" }
+			_, err := program.Check(version, fetch, t.TempDir())
 			if c.accepted && err != nil {
 				t.Fatalf("genuine release refused: %v", err)
 			}

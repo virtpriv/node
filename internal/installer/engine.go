@@ -31,11 +31,11 @@ import (
 //   - A check (a gate) runs on every pass, because it checks the machine as
 //     it is now. So no download can run in a pass that did not check Tor's
 //     routing itself, whatever the order of the steps.
-//   - A group (download, verify, install) hands files over through a folder
+//   - A group (download, check, install) hands files over through a folder
 //     made with MkdirTemp and kept only in this process. A group counts as
 //     done only when its last member is recorded. Otherwise every member runs
-//     again, and the new download is verified again from the start, its
-//     signatures and checksum.
+//     again, and the archive, taken or downloaded again, is checked again
+//     against the pinned hash.
 
 // StepKind classifies a step for resume.
 type StepKind int
