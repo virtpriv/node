@@ -48,12 +48,43 @@ func InstallInitialBinary() error {
 // InstallBasePackages prepares the packages needed before Tor routing is
 // configured. Installer keeps this initial clearnet phase before its Tor gate.
 // apt-transport-tor comes here with Tor, so step 10 only writes files.
+// logrotate is named because otherwise it comes only as a recommendation of
+// Debian's tor, and an image that installs no recommendations would leave
+// vpn's log and Debian's own logs without a limit.
 func InstallBasePackages() error {
 	if err := system.RunRoot("apt-get", "update", "-qq"); err != nil {
 		return err
 	}
 	return system.RunRoot("apt-get", "install", "-y", "-qq",
-		"sudo", "gnupg", "tor", "torsocks", "apt-transport-tor", "wget", "curl", "ufw")
+		"sudo", "gnupg", "tor", "torsocks", "apt-transport-tor", "wget", "curl", "ufw", "logrotate")
+}
+
+// logRotation keeps vpn's log at about 10 MB with four older copies.
+//
+// Every vpn program opens the log once when it starts and keeps it open, as
+// the TUI does for as long as it runs. So the log is copied, then emptied in
+// place, and keeps its owner and mode. Debian's default instead renames it
+// and creates a new file: the programs would go on writing to the renamed
+// copy, and a root program starting in between would create the new log as
+// root, which the TUI cannot write. The cost, from logrotate's manual: a line
+// written during the copy can be lost.
+//
+// Rotated by size only, so a quiet node keeps its install lines. The size is
+// in bytes, since logrotate's M is 1,048,576. Debian's daily timer checks it.
+const logRotation = `# Virtual Private Node keeps its own log to about 10 MB, with four older copies.
+` + paths.LogFile + ` {
+	size 10000000
+	rotate 4
+	compress
+	copytruncate
+	missingok
+}
+`
+
+// ConfigureLogRotation writes vpn's logrotate file. Its folder comes with
+// the logrotate package, which InstallBasePackages installs.
+func ConfigureLogRotation() error {
+	return system.WriteFileRoot(paths.LogRotate, []byte(logRotation), 0644)
 }
 
 // PrepareBaseHost repairs unresolved local hostname lookup when possible and

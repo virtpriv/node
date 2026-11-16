@@ -231,7 +231,7 @@ home. See [Hosting Your Node](hosting.md#hybrid-mode).
 | /var/lib/bitcoin/ | Bitcoin Core data |
 | /var/lib/lnd/ | LND data, wallet and `channel.backup` |
 | /var/lib/syncthing/ | Syncthing data |
-| /var/log/vpn.log | vpn's log (install, verification, status) |
+| /var/log/vpn.log | vpn's log (install, verification, status). Past 10 MB, once a day, it moves to vpn.log.1.gz. Four such files are kept |
 
 vpn writes these configuration files itself, and an update can write
 `lnd.conf` again. Changes made by hand are not supported and may be lost. The full

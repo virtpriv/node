@@ -104,6 +104,7 @@ func productionLifecycleFS() lifecycleFS {
 			paths.DisableIPv6Conf,
 			paths.DisableMPTCPConf,
 			paths.JournaldDropIn,
+			paths.LogRotate,
 			paths.Fail2banJail,
 			paths.BitcoinDir,
 			paths.BitcoinDataDir,

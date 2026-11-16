@@ -650,10 +650,12 @@ func parseOutpoint(op string) (*lnrpc.OutPoint, error) {
 
 // handleError rebuilds the link to LND when gRPC reports it lost. The new link
 // reaches the repair on connect, which copies LND's credentials again if they
-// were the problem.
+// were the problem. Only the first failure of an outage is logged.
 func (c *Client) handleError(err error) {
 	if linkLost(err) {
-		logger.Status("LND connection lost, will reconnect: %v", err)
+		if markLinkDown() {
+			logger.Status("LND connection lost, will reconnect: %v", err)
+		}
 		go c.Reconnect()
 	}
 }

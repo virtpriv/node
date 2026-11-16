@@ -69,6 +69,7 @@ type ScreenContext struct {
 	WalletRuntime       walletRuntime
 	walletRead          *walletStateRequest
 	walletReadPending   bool
+	walletReadFailing   bool // the failure is logged, the next success is too
 	walletClient        *walletClientRequest
 	walletGeneration    uint64 // Scopes retained observations. Routine reads do not change it.
 	Workflows           *app.Workflows
