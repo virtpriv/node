@@ -380,3 +380,117 @@ func TestRetryAndCancelLeaveNoOldAdvice(t *testing.T) {
 		})
 	}
 }
+
+// Prepare's cleanup decides what is deleted on every node's first update. A
+// wrong delete breaks a repair, which reads past updates' folders.
+func TestPrepareRemovesOnlyEarlierReviews(t *testing.T) {
+	digest := func(c string) string { return strings.Repeat(c, 64) }
+	mkdir := func(t *testing.T, path string, mode os.FileMode) {
+		t.Helper()
+		if err := os.Mkdir(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(t *testing.T, path string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte("x"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setup := func(t *testing.T) (root, outside string) {
+		t.Helper()
+		base, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		root, outside = filepath.Join(base, "updates"), filepath.Join(base, "outside")
+		mkdir(t, root, 0700)
+		mkdir(t, outside, 0700)
+		write(t, filepath.Join(outside, "keep"))
+		write(t, filepath.Join(root, "current.json"))
+		write(t, filepath.Join(root, "launcher"))
+		// The current update's folder, a past update's, and a review that
+		// never became an update, with a link inside it.
+		for _, c := range []string{"a", "b", "c"} {
+			mkdir(t, filepath.Join(root, digest(c)), 0700)
+			write(t, filepath.Join(root, digest(c), "vpn"))
+		}
+		write(t, filepath.Join(root, digest("b"), "result.json"))
+		if err := os.Symlink(filepath.Join(outside, "keep"), filepath.Join(root, digest("c"), "link")); err != nil {
+			t.Fatal(err)
+		}
+		mkdir(t, filepath.Join(root, "prepare-123"), 0700)
+		write(t, filepath.Join(root, "prepare-123", "vpn.tar.gz"))
+		mkdir(t, filepath.Join(root, "reviews"), 0700)
+		write(t, filepath.Join(root, "reviews", digest("d")+".json"))
+		write(t, filepath.Join(root, "reviews", digest("e")+".json"))
+		write(t, filepath.Join(root, "reviews", "other.json"))
+		// Entries vpn never makes stay, whatever their name.
+		if err := os.Symlink(outside, filepath.Join(root, digest("f"))); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(root, "prepare-link")); err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(root, digest("1")))
+		write(t, filepath.Join(root, "prepare-file"))
+		mkdir(t, filepath.Join(root, digest("2")), 0770)
+		mkdir(t, filepath.Join(root, "other"), 0700)
+		mkdir(t, filepath.Join(root, strings.ToUpper(digest("d"))), 0700)
+		return root, outside
+	}
+	check := func(t *testing.T, root, outside string, kept, removed []string) {
+		t.Helper()
+		for _, name := range kept {
+			if _, err := os.Lstat(filepath.Join(root, name)); err != nil {
+				t.Errorf("%s was removed: %v", name, err)
+			}
+		}
+		for _, name := range removed {
+			if _, err := os.Lstat(filepath.Join(root, name)); !os.IsNotExist(err) {
+				t.Errorf("%s was kept", name)
+			}
+		}
+		if _, err := os.Stat(filepath.Join(outside, "keep")); err != nil {
+			t.Errorf("a file outside the update folder was removed: %v", err)
+		}
+	}
+	odd := []string{"current.json", "launcher", "reviews", "reviews/other.json", digest("f"), "prepare-link", digest("1"), "prepare-file", digest("2"), "other", strings.ToUpper(digest("d"))}
+	earlier := []string{"prepare-123", "reviews/" + digest("d") + ".json", "reviews/" + digest("e") + ".json"}
+
+	t.Run("with an update record", func(t *testing.T) {
+		root, outside := setup(t)
+		removeEarlierReviews(root, digest("a"))
+		check(t, root, outside, append(odd, digest("a"), digest("b")), append(earlier, digest("c")))
+	})
+	t.Run("with a link for the review folder", func(t *testing.T) {
+		root, outside := setup(t)
+		if err := os.RemoveAll(filepath.Join(root, "reviews")); err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(outside, digest("d")+".json"))
+		if err := os.Symlink(outside, filepath.Join(root, "reviews")); err != nil {
+			t.Fatal(err)
+		}
+		removeEarlierReviews(root, digest("a"))
+		if _, err := os.Stat(filepath.Join(outside, digest("d")+".json")); err != nil {
+			t.Errorf("a file the review folder's link points at was removed: %v", err)
+		}
+	})
+	t.Run("with a review file vpn did not make", func(t *testing.T) {
+		root, outside := setup(t)
+		if err := os.Chmod(filepath.Join(root, "reviews", digest("d")+".json"), 0666); err != nil {
+			t.Fatal(err)
+		}
+		removeEarlierReviews(root, digest("a"))
+		check(t, root, outside, append(odd, digest("a"), digest("b"), digest("c"), "reviews/"+digest("d")+".json"), []string{"prepare-123", "reviews/" + digest("e") + ".json"})
+	})
+	t.Run("without an update record", func(t *testing.T) {
+		root, outside := setup(t)
+		removeEarlierReviews(root, "")
+		check(t, root, outside, append(odd, digest("b")), append(earlier, digest("a"), digest("c")))
+	})
+}
