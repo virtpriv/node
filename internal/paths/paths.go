@@ -253,6 +253,9 @@ const (
 
 const (
 	LogFile = "/var/log/vpn.log"
+	// LogRotate is vpn's file for Debian's logrotate, which keeps LogFile
+	// to a fixed size.
+	LogRotate = "/etc/logrotate.d/vpn"
 )
 
 // ── System ───────────────────────────────────────────────

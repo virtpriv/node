@@ -221,7 +221,7 @@ changes made in Syncthing's external web UI.
 | /var/lib/lnd/data/graph/{mainnet,testnet4,signet}/ | Profile-specific channel/graph KV state in `channel.sqlite` and native invoice, payment, and graph state in `lnd.sqlite` |
 | /var/lib/lnd/data/watchtower/bitcoin/{mainnet,testnet4,signet}/ | Profile-specific `watchtower.sqlite`. LND creates it even when the watchtower server is disabled |
 | /var/lib/syncthing/ | Syncthing's private data |
-| /var/log/vpn.log | Application log (install, verification, status) |
+| /var/log/vpn.log | Application log (install, verification, status), rotated by /etc/logrotate.d/vpn past 10 MB, copied then emptied in place, four compressed copies |
 
 `/etc/vpn/config.json` names the node's Bitcoin and Lightning programs in `bitcoin`
 and `lightning`. v0.7.0 installs Bitcoin Core and LND every time, as one group of

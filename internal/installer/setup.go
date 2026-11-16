@@ -525,7 +525,12 @@ func buildInstallSteps(
 			Fn:   host.InstallInitialBinary},
 		{Key: "apt.base",
 			Name: "Installing Tor, the firewall, and base tools",
-			Fn:   host.InstallBasePackages},
+			Fn: func() error {
+				if err := host.InstallBasePackages(); err != nil {
+					return err
+				}
+				return host.ConfigureLogRotation()
+			}},
 		{Key: "firewall", Name: "Closing every port except SSH",
 			Fn: host.ConfigureInitialFirewall},
 		{Key: "host.prep",

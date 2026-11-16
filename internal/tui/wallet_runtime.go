@@ -132,8 +132,17 @@ func (m *Model) publishWalletObservation(result app.WalletObservation) tea.Cmd {
 			snapshot := c.Status.WalletUnavailable(err)
 			c.Status = &snapshot
 		}
-		logger.TUI("read live wallet state: %v", err)
+		// Logged once until a read succeeds, so a long outage does not
+		// fill the log.
+		if !c.walletReadFailing {
+			logger.TUI("read live wallet state: %v", err)
+			c.walletReadFailing = true
+		}
 		return nil
+	}
+	if c.walletReadFailing {
+		logger.TUI("read live wallet state again")
+		c.walletReadFailing = false
 	}
 	exists := result.Presence == app.WalletPresent
 	recovered := !m.state.WalletKnown || m.state.WalletExists != exists

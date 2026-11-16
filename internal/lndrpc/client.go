@@ -98,9 +98,13 @@ func (c *Client) dial(parent context.Context, allowHeal bool) error {
 	ctx, cancel := context.WithTimeout(probeCtx, 30*time.Second)
 	defer cancel()
 
+	first := linkIs(linkUnknown)
 	_, err := c.lightning.GetInfo(ctx, &lnrpc.GetInfoRequest{})
 	if err == nil {
-		logger.Status("LND gRPC connected and ready")
+		// After a loss or a wait, noteAnswer has logged it.
+		if first {
+			logger.Status("LND gRPC connected and ready")
+		}
 		return nil
 	}
 	if parent.Err() != nil {
@@ -108,10 +112,14 @@ func (c *Client) dial(parent context.Context, allowHeal bool) error {
 		c.conn, c.lightning, c.state = nil, nil, nil
 		return parent.Err()
 	}
+	// While LND is known to be down, its reconnects write nothing.
+	quiet := linkLost(err) && linkIs(linkDown)
 	if allowHeal && requestCredentialRestage(parent) {
-		logger.Status("LND gRPC test call failed (%v), staged "+
-			"credentials re-staged in case they were stale, "+
-			"reconnecting once", err)
+		if !quiet {
+			logger.Status("LND gRPC test call failed (%v), staged "+
+				"credentials re-staged in case they were stale, "+
+				"reconnecting once", err)
+		}
 		c.conn.Close()
 		c.conn = nil
 		c.lightning = nil
@@ -123,7 +131,75 @@ func (c *Client) dial(parent context.Context, allowHeal bool) error {
 		c.conn, c.lightning, c.state = nil, nil, nil
 		return parent.Err()
 	}
-	logger.Status("LND gRPC connected, waiting for RPC ready: %v", err)
+	if !quiet {
+		logger.Status("LND gRPC connected, waiting for RPC ready: %v", err)
+	}
+	if linkLost(err) {
+		markLinkDown()
+	} else {
+		markLinkWaiting()
+	}
+	return nil
+}
+
+// The link to LND as this process last saw it, so a long outage writes one
+// line when the link is lost and one when it is back, not lines for every
+// failed call. Waiting is a link that answers but is not ready yet, such as
+// a wallet still being unlocked. Process-wide, like the re-stage limiter.
+type linkState int
+
+const (
+	linkUnknown linkState = iota
+	linkUp
+	linkDown
+	linkWaiting
+)
+
+var (
+	linkMu sync.Mutex
+	link   linkState
+)
+
+func linkIs(s linkState) bool {
+	linkMu.Lock()
+	defer linkMu.Unlock()
+	return link == s
+}
+
+// markLinkDown records a lost link and reports whether it was not down yet.
+func markLinkDown() bool {
+	linkMu.Lock()
+	defer linkMu.Unlock()
+	was := link
+	link = linkDown
+	return was != linkDown
+}
+
+// markLinkWaiting records a link that answered but is not ready, so its first
+// success is logged.
+func markLinkWaiting() {
+	linkMu.Lock()
+	defer linkMu.Unlock()
+	link = linkWaiting
+}
+
+// noteAnswer sees every unary call's answer. gRPC reconnects by itself once
+// LND is back, often before any reconnect of this client runs, so a success
+// is the only reliable sign of the return or of the end of a wait. Errors
+// change nothing here: handleError and dial record them.
+func noteAnswer(ctx context.Context, method string, req, reply any,
+	cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	err := invoker(ctx, method, req, reply, cc, opts...)
+	if err != nil {
+		return err
+	}
+	linkMu.Lock()
+	back := link == linkDown || link == linkWaiting
+	link = linkUp
+	linkMu.Unlock()
+	if back {
+		logger.Status("LND gRPC connected and ready")
+	}
 	return nil
 }
 
@@ -292,6 +368,7 @@ func (c *Client) loadStaged() error {
 			Time:    time.Minute,
 			Timeout: 20 * time.Second,
 		}),
+		grpc.WithUnaryInterceptor(noteAnswer),
 	}
 
 	// Match LND's configured loopback listener without hostname resolution.
