@@ -14,6 +14,7 @@ import (
 
 	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/host"
+	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/release"
 	"github.com/virtpriv/node/internal/system"
@@ -44,7 +45,9 @@ func readPrepared(root, token string) (prepared, error) {
 	if !protocol.ValidDigest(token) {
 		return p, errors.New("invalid review token")
 	}
-	if err := readJSON(filepath.Join(root, "reviews", token+".json"), &p); err != nil {
+	if err := readJSON(filepath.Join(root, "reviews", token+".json"), &p); errors.Is(err, os.ErrNotExist) {
+		return p, errors.New("this review is no longer saved, review the release again")
+	} else if err != nil {
 		return p, err
 	}
 	want, err := approvalToken(p)
@@ -118,6 +121,12 @@ func Prepare(current, version string) (protocol.Review, error) {
 		}
 		failed = previous.Review.Digest
 	}
+	// A new review replaces every earlier one.
+	onRecord := ""
+	if previous != nil {
+		onRecord = previous.Review.Digest
+	}
+	removeEarlierReviews(Root, onRecord)
 	cfg, err := config.Load()
 	if err != nil {
 		return none, err
@@ -562,4 +571,97 @@ func cancelUpdate(root, id string) error {
 		return errors.New("host changes may have begun, complete or repair this update")
 	}
 	return amendRecord(root, map[string]any{"phase": "canceled", "step": "Update canceled before host changes", "error": nil, "failure": nil, "next": nil, "advice": nil, "ended": time.Now().UTC()})
+}
+
+// removeEarlierReviews removes every review file, the folder of a review
+// that stopped, and every release folder that never became an update. The
+// folder of the update on record and every folder holding result.json, the
+// record of an earlier update, stay, since a repair reads them. Only files
+// and folders vpn made are removed, never a link, and other names are left
+// alone. A removal that fails is logged and the review goes on. Prepare is
+// v0.7.0's code on every node's first update, so a later release keeps what
+// it needs inside its job's folder.
+func removeEarlierReviews(root, current string) {
+	// Review files go first, so a review never names a folder half removed.
+	// While one is left, the release folders stay too.
+	reviews := filepath.Join(root, "reviews")
+	reviewsLeft := false
+	if err := files.Check(reviews, true); err == nil {
+		reviewsLeft = !removeReviewFiles(reviews)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		logger.System("WARNING: left %s, it is not a folder vpn made", reviews)
+		reviewsLeft = true
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		logger.System("WARNING: could not list %s: %v", root, err)
+	}
+	removed := false
+	for _, e := range entries {
+		name, path := e.Name(), filepath.Join(root, e.Name())
+		stopped := strings.HasPrefix(name, "prepare-")
+		if !stopped && (reviewsLeft || !protocol.ValidDigest(name) || name == current) {
+			continue
+		}
+		if err := files.Check(path, true); err != nil {
+			logger.System("WARNING: left %s, it is not a folder vpn made", path)
+			continue
+		}
+		if !stopped {
+			// A folder that may hold an earlier update's record stays.
+			if _, err := os.Lstat(filepath.Join(path, "result.json")); !errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+		}
+		if err := os.RemoveAll(path); err != nil {
+			logger.System("WARNING: could not remove %s: %v", path, err)
+			continue
+		}
+		removed = true
+		if stopped {
+			logger.System("removed the folder of a review that stopped, %s", path)
+		} else {
+			logger.System("removed the files of an earlier review, %s", path)
+		}
+	}
+	if removed {
+		if err := files.Sync(root); err != nil {
+			logger.System("WARNING: could not sync %s: %v", root, err)
+		}
+	}
+}
+
+// removeReviewFiles removes every review file in dir and reports whether
+// none is left.
+func removeReviewFiles(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		logger.System("WARNING: could not list %s: %v", dir, err)
+		return false
+	}
+	gone, removed := true, false
+	for _, e := range entries {
+		if token, ok := strings.CutSuffix(e.Name(), ".json"); !ok || !protocol.ValidDigest(token) {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		if err := files.Check(path, false); err != nil {
+			logger.System("WARNING: left %s, it is not a file vpn made", path)
+			gone = false
+			continue
+		}
+		if err := os.Remove(path); err != nil {
+			logger.System("WARNING: could not remove %s: %v", path, err)
+			gone = false
+			continue
+		}
+		removed = true
+	}
+	if removed {
+		if err := files.Sync(dir); err != nil {
+			logger.System("WARNING: could not sync %s: %v", dir, err)
+			return false
+		}
+	}
+	return gone
 }

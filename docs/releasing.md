@@ -170,7 +170,8 @@ the screen does not stop it, and the review comes back from its record.
 Approval binds the archive, observed component versions, network,
 configuration hash, and any previous failed update. Each review has its own
 token, so a second terminal cannot silently change what the first terminal
-approves.
+approves. A new review replaces every earlier one, so Install on an older
+review in another terminal is refused.
 
 On acceptance, vpn saves the update's record under
 `/var/lib/vpn/private/updates` with its job ID, retains the working launcher,
@@ -196,6 +197,12 @@ installed there must fit. A refusal leaves every service as it was and can be
 retried after freeing space. Before host changes have begun it also removes the
 downloaded component files and can be canceled. A successful update also removes its downloaded
 component files, and the release plan and job record remain.
+A new review first removes every earlier review's record, the files of
+earlier reviews that never became an update and the folder of a review that
+was stopped. The folders of updates stay. Every installed node's review does
+this, so a later release keeps everything its update needs inside its own
+job's folder, makes no other folder there named by a 64 character digest or
+starting with `prepare-`, and needs no review record after Start.
 
 Temporary systemd drop-ins disable automatic restarts and require a permit under
 `/run` before each start. The worker durably records that a component may run
