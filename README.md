@@ -5,26 +5,22 @@ Bitcoin Core, LND, and Tor, configured and running in minutes.
 
 ## Project status
 
-**A new home, new name, and v0.7.0.**
+**The Bitcoin and Lightning node ends here.**
 
-Virtual Private Node moved to github.com/virtpriv/node, and
-the move brought every earlier release with it. Those releases predate
-the rename: they install a binary called rlvpn, and they are the
-previous generation of this project. v0.7.0 is the first release under
-the new name and it is what this page describes. The program, its command
-and the account you log in with are all called `vpn`, for Virtual Private
-Node.
+This page and the guides describe v0.7.0, which was not released. There is
+no v0.7.0 to download. Its candidates, `v0.7.0-rc.1` to `v0.7.0-rc.13`, are
+test builds. The tag `bitcoin-final` marks the last commit of the node.
 
-If you are setting up a node now, it is worth waiting for v0.7.0.
-v0.7.0 is fresh-install-only: it does not perform an in-place migration from an
-existing `rlvpn` installation or an older unmarked `vpn` layout.
+The node is not maintained. Bitcoin Core and LND get no further updates
+from this project. Do not put funds on a node installed from this
+repository, from a candidate or from an earlier release.
 
-If you already run a node, nothing changes until you deliberately plan a move.
-[MIGRATION.md](MIGRATION.md) explains the supported fresh-machine procedure and
-why v0.7.0 does not migrate an old node.
+The earlier releases, up to v0.6.3, install a program called rlvpn. They are
+not maintained either. If you run one, [MIGRATION.md](MIGRATION.md) explains
+how to leave it safely.
 
-Please do not build and run the main branch on a node that holds
-funds.
+The project continues on the `main` branch as a hardened Debian and Tor
+base, without Bitcoin Core and LND.
 
 ## Screenshots
 
@@ -122,7 +118,8 @@ network needs a fresh machine.
   full disk
 - [Reproducible builds](docs/reproducing.md): build the release yourself and
   compare
-- [Moving from rlvpn](MIGRATION.md): for nodes of the earlier generation
+- [Leaving a node](MIGRATION.md): closing channels and moving funds off a
+  node of this project
 
 For maintainers and contributors: [How vpn Works Inside](docs/developing.md),
 [Releasing](docs/releasing.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -240,7 +237,7 @@ checked before then.
 
 The release signing key fingerprint is
 `AFA0 EBAC DC9A 4C4A A7B0  154A C97C E10F 170B A5FE`. The same key
-has signed every release of this project and will sign v0.7.0.
+has signed every release of this project.
 
 Verification failure is a hard stop.
 
