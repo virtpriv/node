@@ -17,7 +17,7 @@ repository, from a candidate or from an earlier release.
 
 The earlier releases, up to v0.6.3, install a program called rlvpn. They are
 not maintained either. If you run one, [MIGRATION.md](MIGRATION.md) explains
-how to leave it safely.
+how to move your funds off it.
 
 The project continues on the `main` branch as a hardened Debian and Tor
 base, without Bitcoin Core and LND.
@@ -118,8 +118,8 @@ network needs a fresh machine.
   full disk
 - [Reproducible builds](docs/reproducing.md): build the release yourself and
   compare
-- [Leaving a node](MIGRATION.md): closing channels and moving funds off a
-  node of this project
+- [Moving your funds off an old node](MIGRATION.md): for a node installed
+  from an earlier release or a candidate
 
 For maintainers and contributors: [How vpn Works Inside](docs/developing.md),
 [Releasing](docs/releasing.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
