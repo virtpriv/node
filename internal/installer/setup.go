@@ -66,6 +66,8 @@ type installStartupDependencies struct {
 	initializeLifecycle func(lifecycleFS, identityLookup, installContext) (*installLedger, error)
 	// inhibitShutdown holds off restarts until the returned release runs.
 	inhibitShutdown func(why string) (release func(), err error)
+	// systemBusRunning reports whether anything could hold off a restart.
+	systemBusRunning func() bool
 	// workBase holds each run's download folder.
 	workBase string
 }
@@ -87,7 +89,36 @@ func productionInstallStartupDependencies() installStartupDependencies {
 			}
 			return func() { inhibitor.Release() }, nil
 		},
-		workBase: os.TempDir(),
+		systemBusRunning: system.SystemBusRunning,
+		workBase:         os.TempDir(),
+	}
+}
+
+// basePackagesStep installs the system bus where a machine has none.
+const basePackagesStep = "apt.base"
+
+// restartHold holds off restarts from when it is taken to the run's end.
+type restartHold struct {
+	take func(why string) (release func(), err error)
+	held func()
+}
+
+// ensure takes the hold unless it is already held.
+func (h *restartHold) ensure() error {
+	if h.held != nil {
+		return nil
+	}
+	release, err := h.take("installing the node")
+	if err != nil {
+		return fmt.Errorf("cannot hold off a restart: %w", err)
+	}
+	h.held = release
+	return nil
+}
+
+func (h *restartHold) release() {
+	if h.held != nil {
+		h.held()
 	}
 }
 
@@ -140,12 +171,18 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	}
 
 	// Restarts wait until the run ends. Debian's update program restarts
-	// the machine when the restart flag is up, and step 11 runs it.
-	release, err := deps.inhibitShutdown("installing the node")
-	if err != nil {
-		return &StopError{NotStarted: true, StartErr: fmt.Errorf("cannot hold off a restart: %w", err)}
+	// the machine when the restart flag is up, and step 11 runs it. Without
+	// a system bus nothing can hold off a restart, so the hold is taken at
+	// the end of step 2, which installs and starts the bus. A run that would
+	// skip step 2 does not start without it.
+	hold := &restartHold{take: deps.inhibitShutdown}
+	defer hold.release()
+	if err := hold.ensure(); err != nil {
+		if deps.systemBusRunning() || (ledger != nil && ledger.done(basePackagesStep)) {
+			return &StopError{NotStarted: true, StartErr: err}
+		}
+		logger.Install("the system bus is not running, so restarts are held off once step 2 has started it")
 	}
-	defer release()
 
 	// Preflight is read-only and precedes every durable initialization.
 	_, err = deps.runPreflight()
@@ -201,7 +238,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 		return fmt.Errorf("create the download folder: %w", err)
 	}
 	defer os.RemoveAll(work)
-	steps := buildInstallSteps(cfg, dec, work)
+	steps := buildInstallSteps(cfg, dec, work, hold.ensure)
 	if err := validateBaseInstallSteps(steps); err != nil {
 		return err
 	}
@@ -508,6 +545,7 @@ var (
 // old image, waits until apt goes through Tor.
 func buildInstallSteps(
 	cfg *config.AppConfig, dec *InstallDecisions, work string,
+	holdRestarts func() error,
 ) []InstallStep {
 	// Pipeline working directories are created in each pipeline's first
 	// step inside the run's folder, captured by closures and removed in the
@@ -523,13 +561,17 @@ func buildInstallSteps(
 		{Key: "binary.install",
 			Name: "Installing the vpn program",
 			Fn:   host.InstallInitialBinary},
-		{Key: "apt.base",
+		{Key: basePackagesStep,
 			Name: "Installing Tor, the firewall, and base tools",
 			Fn: func() error {
 				if err := host.InstallBasePackages(); err != nil {
 					return err
 				}
-				return host.ConfigureLogRotation()
+				if err := host.ConfigureLogRotation(); err != nil {
+					return err
+				}
+				// Held already, unless the machine had no system bus.
+				return holdRestarts()
 			}},
 		{Key: "firewall", Name: "Closing every port except SSH",
 			Fn: host.ConfigureInitialFirewall},

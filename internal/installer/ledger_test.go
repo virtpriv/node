@@ -225,7 +225,7 @@ func TestLedgerFollowsThePackageUpgradeBehindTor(t *testing.T) {
 	if err := validateLedger(stopped); err != nil {
 		t.Fatal("install stopped before the package upgrade cannot resume:", err)
 	}
-	steps := buildInstallSteps(config.Default(), &InstallDecisions{}, t.TempDir())
+	steps := buildInstallSteps(config.Default(), &InstallDecisions{}, t.TempDir(), nil)
 	var runs []string
 	for i, p := range planRun(steps, stopped) {
 		if p.Run && steps[i].Kind != StepGate {

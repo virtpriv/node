@@ -161,7 +161,7 @@ through Tor. After that, the installer makes two types of network calls:
 
 **Phase 1 (clearnet, unavoidable):**
 - `apt-get update`: Debian package index refresh
-- one `apt-get install`: Tor, torsocks, ufw and base tools,
+- one `apt-get satisfy`: Tor, torsocks, ufw and base tools,
   from Debian package mirrors
 - NTP time sync enablement: ongoing clock sync queries to the
   Debian NTP pool (continues after install)
