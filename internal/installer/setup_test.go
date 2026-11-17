@@ -92,6 +92,7 @@ func installStartupFixture(
 	deps.fs = f.fs
 	deps.lookup = f.lookup
 	deps.inhibitShutdown = func(string) (func(), error) { return func() {}, nil }
+	deps.systemBusRunning = func() bool { return true }
 	deps.runPreflight = func() (host.SSHObservation, error) {
 		preflightCalls++
 		return preflight()
@@ -276,6 +277,53 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 		}
 	})
 
+	// Without a system bus the hold waits for step 2, which installs the
+	// bus. Once step 2 is recorded no later step would take it, so a run
+	// without a bus then must not start.
+	t.Run("no system bus after step 2", func(t *testing.T) {
+		f := newLifecycleFixture(t)
+		ledger := f.initialize(t)
+		if err := ledger.setDbCache(512); err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range baseInstallStepKeys[:2] {
+			if err := ledger.markDone(key, "0.7.0"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := ledger.save(f.fs.ledger); err != nil {
+			t.Fatal(err)
+		}
+		root := filepath.Dir(f.fs.varLibVPN)
+		before := snapshotProtectedTree(t, root)
+		preflightCalls, initializeCalls := installStartupFixture(
+			t, f, func() (host.SSHObservation, error) {
+				return host.SSHObservation{}, errors.New("unexpected preflight")
+			})
+		withDeps := newInstallStartupDependencies
+		newInstallStartupDependencies = func() installStartupDependencies {
+			deps := withDeps()
+			deps.inhibitShutdown = func(string) (func(), error) {
+				return nil, errors.New("systemd-inhibit: Failed to connect to bus")
+			}
+			deps.systemBusRunning = func() bool { return false }
+			return deps
+		}
+		t.Cleanup(func() { newInstallStartupDependencies = withDeps })
+
+		err := RunInstall(InstallOptions{}, unexpectedInstallFrontend(t))
+		var stop *StopError
+		if !errors.As(err, &stop) || !stop.NotStarted || !strings.Contains(err.Error(), "Failed to connect to bus") {
+			t.Fatalf("resume without a bus: %v", err)
+		}
+		if *preflightCalls != 0 || *initializeCalls != 0 {
+			t.Fatalf("refusal reached preflight=%d initialize=%d", *preflightCalls, *initializeCalls)
+		}
+		if after := snapshotProtectedTree(t, root); string(after) != string(before) {
+			t.Fatal("refused RunInstall path changed protected state")
+		}
+	})
+
 	t.Run("unsupported architecture", func(t *testing.T) {
 		f := newLifecycleFixture(t)
 		root := filepath.Dir(f.fs.varLibVPN)
@@ -302,7 +350,7 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 
 func TestBaseInstallStepsMatchLedgerSchema(t *testing.T) {
 	cfg := config.Default()
-	steps := buildInstallSteps(cfg, &InstallDecisions{}, t.TempDir())
+	steps := buildInstallSteps(cfg, &InstallDecisions{}, t.TempDir(), nil)
 	if err := validateBaseInstallSteps(steps); err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +372,7 @@ func unexpectedInstallFrontend(t *testing.T) InstallFrontend {
 // stepIndex finds a step in the install list by its key.
 func stepIndex(t *testing.T, key string) int {
 	t.Helper()
-	for i, s := range buildInstallSteps(config.Default(), &InstallDecisions{}, t.TempDir()) {
+	for i, s := range buildInstallSteps(config.Default(), &InstallDecisions{}, t.TempDir(), nil) {
 		if s.Key == key {
 			return i
 		}
@@ -395,7 +443,7 @@ func TestPackageUpgradeConfirmsTorBeforeItReportsDone(t *testing.T) {
 			return nil
 		}
 		var step *InstallStep
-		steps := buildInstallSteps(config.Default(), &InstallDecisions{}, t.TempDir())
+		steps := buildInstallSteps(config.Default(), &InstallDecisions{}, t.TempDir(), nil)
 		for i := range steps {
 			if steps[i].Key == "base.upgrade" {
 				step = &steps[i]

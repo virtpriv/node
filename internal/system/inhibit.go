@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -13,6 +14,17 @@ import (
 
 // inhibitStartLimit bounds how long systemd-inhibit may take to take its lock.
 const inhibitStartLimit = 30 * time.Second
+
+// systemBusSocket is where systemd's tools reach the system bus.
+const systemBusSocket = "/run/dbus/system_bus_socket"
+
+// SystemBusRunning reports whether the system bus listens. Without it there
+// is no logind, so nothing can hold off a restart and a restart does not
+// wait for anything.
+func SystemBusRunning() bool {
+	_, err := os.Lstat(systemBusSocket)
+	return err == nil
+}
 
 // ShutdownInhibitor holds a systemd block inhibitor for shutdown, so a
 // reboot, Debian's nightly one among them, is refused while vpn is busy.

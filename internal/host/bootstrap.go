@@ -48,15 +48,27 @@ func InstallInitialBinary() error {
 // InstallBasePackages prepares the packages needed before Tor routing is
 // configured. Installer keeps this initial clearnet phase before its Tor gate.
 // apt-transport-tor comes here with Tor, so step 10 only writes files.
-// logrotate is named because otherwise it comes only as a recommendation of
-// Debian's tor, and an image that installs no recommendations would leave
-// vpn's log and Debian's own logs without a limit.
+//
+// An image may install no recommended packages, so the ones vpn uses are
+// named. logrotate otherwise comes only with Debian's tor, and without it
+// vpn's log and Debian's own logs have no limit. ca-certificates is needed by
+// every download over HTTPS, apt's through Tor included. The system bus and a
+// clock service are named as Debian's systemd recommends them, each with its
+// alternatives. apt-get satisfy then installs one only when the machine has
+// none, so an image's own dbus-broker or chrony stays.
+//
+// Debian does not start a newly installed dbus before the next boot. The
+// restart hold and step 4's clock setting need it now, so it is started.
 func InstallBasePackages() error {
 	if err := system.RunRoot("apt-get", "update", "-qq"); err != nil {
 		return err
 	}
-	return system.RunRoot("apt-get", "install", "-y", "-qq",
-		"sudo", "gnupg", "tor", "torsocks", "apt-transport-tor", "wget", "curl", "ufw", "logrotate")
+	if err := system.RunRoot("apt-get", "satisfy", "-y", "-qq",
+		"sudo", "gnupg", "tor", "torsocks", "apt-transport-tor", "wget", "curl", "ufw", "logrotate",
+		"ca-certificates", "default-dbus-system-bus | dbus-system-bus", "systemd-timesyncd | time-daemon"); err != nil {
+		return err
+	}
+	return system.RunRoot("systemctl", "start", "dbus.socket")
 }
 
 // logRotation keeps vpn's log at about 10 MB with four older copies.

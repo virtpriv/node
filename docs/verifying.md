@@ -21,7 +21,7 @@ another account), then run:
 
 ```bash
 apt-get update
-apt-get install -y tor torsocks gnupg wget
+apt-get install -y tor torsocks gnupg wget ca-certificates
 ```
 
 These packages come from Debian's mirrors over the normal internet, because Tor
