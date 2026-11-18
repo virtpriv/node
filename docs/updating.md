@@ -107,7 +107,7 @@ An update does not install or remove Debian packages or restart the server.
 Debian's own security updates continue separately, see
 [Running Your Node](running.md#updates-and-restarts).
 
-Do not upgrade Debian to a new major version yourself. vpn will offer that
-move. Updates need Debian 13, so a node you upgraded takes no further update.
+Do not upgrade Debian to a new major version yourself. Updates need Debian 13,
+so a node you upgraded takes no further update.
 
 How releases and updates work inside is in [Releasing](releasing.md).

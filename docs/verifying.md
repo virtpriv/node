@@ -76,8 +76,9 @@ gpg: Good signature from "..."
 Primary key fingerprint: AFA0 EBAC DC9A 4C4A A7B0  154A C97C E10F 170B A5FE
 ```
 
-The line `using ... key` may show a different, shorter-lived signing subkey.
-That is expected. The primary key fingerprint is the one to compare.
+The line `using ... key` may show a different key, a signing subkey of the
+project key. That is expected. The primary key fingerprint is the one to
+compare.
 
 Do not install the release if gpg prints
 `WARNING: This key has been revoked by its owner!` or
@@ -108,6 +109,10 @@ It copies itself to `/usr/local/bin/vpn`:
 ```bash
 ./vpn install
 ```
+
+To install without screens, run `./vpn install --unattended` instead. It asks
+nothing and prints a generated login password for `vpn` once, at the end. Save
+it. If that install stops, continue it with `sudo vpn install --unattended`.
 
 If the install stops, or you close it, it shows the step it reached. To
 continue:
