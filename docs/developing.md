@@ -10,9 +10,9 @@ the owner guides, where an owner guide says only what to do. Releases and manage
 The installer takes a transient whole-run lock, checks the environment, and
 refuses with a full report before starting durable installation work if the
 machine is not one it can trust. It then asks for the owner account's password,
-installs Bitcoin Core and LND with every download after Tor routed through Tor
-and checked against the pinned hashes before install, and then shows how to log in as `vpn` over SSH,
-where the TUI opens.
+sets up the machine in 17 steps, with every package after the Tor check coming
+through Tor, and then shows how to log in as `vpn` over SSH, where the TUI
+opens.
 
 During interactive installation, Ctrl+C requests a stop after the active step
 and its progress record finish. Keep the terminal open while it stops. The
@@ -24,8 +24,7 @@ later run must repeat.
 If a step fails or installation stops, inspect the reported result before
 running it again. When the installer can prove that it is resuming the same
 recognizable fresh-install lifecycle, it continues from the incomplete work. A
-completed base installation reports already installed and stops. Optional
-add-ons and later settings remain available through the TUI.
+completed base installation reports already installed and stops.
 
 During installation, password paste preserves spaces and accepts one trailing
 newline. Input that would be altered or exceed the field's 128-character limit
@@ -36,31 +35,6 @@ The installer never opens the TUI. When installation finishes, it shows the
 after the installer started. Enter or Ctrl+C closes the installer and prints
 the command again. Before a login is seen, the installer first asks if you
 want to leave, because root can no longer log in over SSH.
-
-## Bitcoin network profiles
-
-Mainnet is the default. Testnet4 is the public proof-of-work test network.
-Default public signet is for testing only and uses Bitcoin Core and LND's
-pinned built-in public-signet parameters. vpn does not override its challenge
-or seed nodes.
-
-| vpn profile | Installer selector | Core/LND state directory | Address HRP | BOLT11 prefix |
-| --- | --- | --- | --- | --- |
-| `mainnet` | none (default) | `mainnet` conventions | `bc` | `lnbc` |
-| `testnet4` | `--testnet4` | `testnet4` | `tb` | `lntb` |
-| `public-signet` | `--signet` | `signet` | `tb` | `lntbs` |
-
-The chosen profile is recorded before installation work begins and cannot be
-changed. A node will not reuse another profile's Core data, LND wallet,
-macaroons, channel state, lifecycle authorization, or channel-backup source.
-Reusing the machine for another profile requires a new disposable machine.
-There is no in-place profile migration or switch.
-
-`controlled-signet-v1`, raw `signet`, custom challenges, and custom seed-node
-inputs are rejected and unsupported. vpn also does not install a faucet,
-explorer, miner, block signer, second Lightning node, or scenario controller.
-Testing profiles remain visibly marked in the TUI, and their coins have no
-mainnet value.
 
 ## Owner account and access
 
@@ -90,25 +64,11 @@ The TUI changes the account password with Debian's native `passwd` as `vpn`,
 without sudo. The TUI resumes when the command finishes. Root can still reset
 account passwords through normal host maintenance.
 
-## Wallet password check
-
-After wallet creation, vpn gracefully stops and starts LND once to verify the
-password, and reports success only after LND reaches its native `RPC_ACTIVE`
-state, or `SERVER_ACTIVE` if it advances between checks. Network-profile
-validation remains an independent installer responsibility, and password
-verification does not wait for blockchain synchronization. If verification
-fails, LND is left stably locked instead of entering a restart loop.
-
-Auto-unlock uses an `lnd:lnd` 0400 local password file and verifies a new LND
-invocation before publishing success.
-
 ## System actions and outcomes
 
 System service actions keep their confirmed target while you navigate.
 Completion means systemd reported `active` after Start or Restart, or
-`inactive` after Stop. LND Start and Restart also refresh the staged TLS
-certificate. These checks do not establish wallet unlock, blockchain
-synchronization or network reachability.
+`inactive` after Stop. These checks do not establish network reachability.
 
 An unconfirmed outcome means a job ended without a result, for example killed
 or cut by a power cut, or that the TUI lost `vpnd`'s answers. It is never
@@ -128,11 +88,10 @@ rules, which keep a configuration file the owner changed.
 After every package change apt runs `vpn reboot-check`, from
 `/etc/apt/apt.conf.d/99-vpn-reboot-check`. It raises Debian's restart flag,
 `/var/run/reboot-required`, when the running kernel is older than the newest one
-installed, or when Tor, SSH, Bitcoin Core or fail2ban still runs a program or
-library file an update replaced. LND and vpn carry their libraries inside
-their programs, so they are not checked. Install step 11 and Update
-Packages also run the check directly, since with nothing to install apt runs no
-hook. The check never makes apt fail. When the flag is up, Debian's nightly job
+installed, or when Tor, SSH or fail2ban still runs a program or library file an
+update replaced. vpn carries its libraries inside its program, so it is not
+checked. Install step 11 and Update Packages also run the check directly,
+since with nothing to install apt runs no hook. The check never makes apt fail. When the flag is up, Debian's nightly job
 restarts the node right after its run. The install, Update Packages and a node
 update hold a systemd block inhibitor, so a restart then waits for the next
 night.
@@ -144,85 +103,23 @@ that terminal session. If the reply is lost, including when SSH closes during
 shutdown, the outcome is unconfirmed. Closing the TUI cannot undo a reboot
 already accepted by systemd.
 
-Zeus connection information, its QR codes and **Copyable Macaroon** use one
-observation, read when the pairing tab is opened or revisited.
-
-## LND database
-
-Fresh v0.7.0 installations use LND's local SQLite backend and native SQL
-stores. vpn does not migrate an existing bbolt node, and the database settings
-must not be changed after initialization. SQLite's WAL, checkpoint, locking,
-and durability behavior remains at the pinned LND release's defaults.
-
-LND checks disk space every 12 hours and makes two attempts before gracefully
-stopping when filesystem free space reaches 10%. Because `Restart=on-failure`
-does not restart that successful safety shutdown, an operator frees space and
-starts LND explicitly. vpn does not synchronize the SQLite databases or
-advertise a live database-copy procedure.
-
-## Bitcoin Core credentials
-
-vpn and LND authenticate to Bitcoin Core with separate `rpcauth` identities.
-Bitcoin Core RPC-cookie generation is disabled for fresh v0.7 installations,
-and neither client reads a Core cookie or data directory. Unsupported legacy
-layouts are refused rather than modified, so vpn does not delete their
-historical cookie files.
-
-## Syncthing
-
-Pairing a device adds it and shares the backup folder. Completion confirms a
-read-back of the Node's configuration. A device may have been added even when
-sharing was not confirmed. An explicit pairing retry preserves that device's
-settings and completes a missing backup share. It does not reinstall Syncthing
-or roll back earlier changes. Editing the Node's Syncthing configuration in its
-web UI while the TUI pairs or removes a device can overwrite one change with the
-other, and Syncthing's API cannot prevent that.
-
-Removal identifies the selected device by its complete Device ID. It removes
-that device and its folder shares on the Node. Remote files remain intact. An
-unconfirmed removal requires checking the current device list before retrying.
-
-The Node publishes only a completed copy of `channel.backup` through its own
-`/var/lib/vpn/exports` boundary, by a dedicated `lnd` publisher. No temporary
-file is placed in the synchronized folder. Syncthing can read only that final
-export. It cannot write it, enter the private staging directory, or read
-`/var/lib/lnd`.
-
-The TUI refuses pairing when it cannot verify the Node's privacy settings or
-send-only backup boundary. During installation, a failed privacy check triggers
-stop and disable, and any failure of those actions is reported separately.
-Reinstalling over retained Syncthing state is not a supported repair.
-
-The **Web UI** tab refreshes the Tor address and staged installation password
-when opened or revisited. The URL is visible independently of **Show
-Password**, and returning to the tab hides the password again. **Retry**
-repeats an unsuccessful read. The displayed password does not track password
-changes made in Syncthing's external web UI.
-
 ## Directory layout
 
 | Path | Contents |
 | --- | --- |
-| /etc/bitcoin/bitcoin.conf | Bitcoin Core configuration |
-| /etc/lnd/lnd.conf | LND configuration |
-| /etc/syncthing/ | Syncthing configuration |
-| /etc/vpn/config.json | Root-owned, non-secret desired node configuration, root:vpn mode 0640 |
+| /etc/tor/torrc | Tor's configuration, written at install, root:debian-tor mode 0640. Debian's own copy is kept as /etc/tor/torrc.distrib |
+| /etc/vpn/config.json | Root-owned, written when the install finishes, root:vpn mode 0640. It holds its schema number alone |
 | /home/vpn/.config/vpn/preferences.json | User-owned TUI preferences (theme), vpn:vpn mode 0600 |
-| /var/lib/vpn-install-bootstrap-service-layout-1-{mainnet,testnet4,public-signet}-tor | Short-lived root-only indication while initial lifecycle authority is published |
+| /home/vpn/releases/ | The owner's releases folder, vpn:vpn mode 0700. Its contents are read as untrusted |
+| /var/lib/vpn-install-bootstrap-service-layout-2 | Short-lived root-only indication while initial lifecycle authority is published |
 | /var/lib/vpn/private/layout-version | Root-only supported-layout generation record |
 | /var/lib/vpn/private/install-state.json | Root-only bounded base-install progress and completion ledger |
 | /var/lib/vpn/private/password-pending | Root-only interrupted unattended-password delivery marker, present only while needed |
+| /var/lib/vpn/private/jobs/ | Root-only records of the vpn API's jobs |
 | /var/lib/vpn/private/updates/ | Root-only managed update jobs and their records |
 | /run/vpn/install.lock | Stable root-only runtime lock for one active base installer |
-| /var/lib/vpn/state/ | Root-written facts and credentials deliberately staged read-only for the TUI, including the Syncthing web password |
-| /var/lib/vpn/exports/lnd-backup/ | Read-only Syncthing export of the completed `channel.backup` |
-| /var/lib/bitcoin/ | Mainnet Core data at the root, testnet4 under `testnet4/`, public signet under `signet/` |
-| /var/lib/lnd/data/chain/bitcoin/{mainnet,testnet4,signet}/ | Profile-specific wallet and macaroon state in `chain.sqlite`, plus credentials and `channel.backup`. `signet/` is default public signet only |
-| /var/lib/lnd/data/graph/{mainnet,testnet4,signet}/ | Profile-specific channel/graph KV state in `channel.sqlite` and native invoice, payment, and graph state in `lnd.sqlite` |
-| /var/lib/lnd/data/watchtower/bitcoin/{mainnet,testnet4,signet}/ | Profile-specific `watchtower.sqlite`. LND creates it even when the watchtower server is disabled |
-| /var/lib/syncthing/ | Syncthing's private data |
-| /var/log/vpn.log | Application log (install, verification, status), rotated by /etc/logrotate.d/vpn past 10 MB, copied then emptied in place, four compressed copies |
+| /var/log/vpn.log | Application log, its lines marked install, verify, tui or system, rotated by /etc/logrotate.d/vpn past 10 MB, copied then emptied in place, four compressed copies |
 
-`/etc/vpn/config.json` names the node's Bitcoin and Lightning programs in `bitcoin`
-and `lightning`. v0.7.0 installs Bitcoin Core and LND every time, as one group of
-install steps.
+`/etc/vpn/config.json` is written once every install step is recorded. It is
+how the TUI and the update tell a finished install. The install record,
+`install-state.json`, stays the authority, which only root reads.

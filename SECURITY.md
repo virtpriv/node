@@ -1,6 +1,6 @@
 # Security Policy
 
-Virtual Private Node (vpn) is a Bitcoin and Lightning node. Vulnerabilities in this project can expose users to fund loss, unauthorized node access, or privacy compromise. Security reports are taken seriously and handled privately. *This is not where you store your net worth in Bitcoin. It's where you spend Bitcoin from, more like a checking account than a savings account.*
+Virtual Private Node (vpn) is a hardened Debian and Tor base. Vulnerabilities in this project can expose users to unauthorized node access or privacy compromise. Security reports are taken seriously and handled privately.
 
 ## Reporting a vulnerability
 
@@ -20,21 +20,20 @@ Please include as much of the following as you can:
 - A description of the vulnerability and its potential impact
 - Steps to reproduce, or a proof-of-concept if available
 - The affected version(s) of vpn
-- Your environment (Debian version, Bitcoin Core / LND versions if relevant)
+- Your environment (Debian version)
 - Whether you plan to disclose publicly, and on what timeline
 
 ## What to expect
 
-- **Acknowledgment within 7 days.** This is a samll team, so response time may be slower than a larger team, but every report will be read and acknowledged.
+- **Acknowledgment within 7 days.** This is a small team, so response time may be slower than a larger team, but every report will be read and acknowledged.
 - **Triage and assessment.** Once acknowledged, the report will be investigated and its severity assessed. You will be kept informed of progress.
 - **Coordinated disclosure.** If the vulnerability is confirmed, a fix will be developed privately. Once a release containing the fix is published, the vulnerability will be disclosed publicly, and your contribution will be credited unless you prefer to remain anonymous.
-- **Best-effort resolution.** As a small team, there is no fixed SLA for fix timelines. Critical issues affecting user funds will be prioritized over everything else.
+- **Best-effort resolution.** As a small team, there is no fixed SLA for fix timelines. Critical issues will be prioritized over everything else.
 
 ## Scope
 
 The following are in scope for security reports:
 
-- Vulnerabilities that could compromise user funds or private keys
 - Vulnerabilities that could compromise node integrity (remote code execution, privilege escalation, unauthorized access)
 - Weaknesses in the installer, update mechanism, or reproducible build process
 - Weaknesses in the Tor routing, SSH hardening, or firewall configuration applied by vpn
@@ -42,7 +41,7 @@ The following are in scope for security reports:
 
 The following are **out of scope**:
 
-- Bugs in upstream Bitcoin Core, LND, Tor, or Syncthing themselves. Please report those to their respective projects
+- Bugs in Debian's packages or in Tor themselves. Please report those to their respective projects
 - Cosmetic TUI bugs with no security impact
 - Issues requiring physical access to an already-compromised machine
 - Denial of service against a user's own node from the user's own network

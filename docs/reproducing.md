@@ -1,8 +1,8 @@
 # Reproducible builds
 
 The steps below reproduce the `vpn` program inside a published release archive
-byte for byte, for v0.7.0 and later. Releases before v0.7.0 shipped a program
-called rlvpn, built with other settings, and are not reproduced by these steps.
+byte for byte. Releases up to v0.6.3 shipped a program called rlvpn, built with
+other settings, and are not reproduced by these steps.
 
 Reproducibility is a goal of the Virtual Private Node project. The
 intent is that anyone can recreate the exact binary published in the
@@ -73,10 +73,10 @@ go version
 ### Building the binary
 
 First, assign a temporary variable in your shell for the specific
-release you want to build:
+release you want to build, with its tag in place of `vX.Y.Z`:
 
 ```bash
-GIT_TAG="v0.7.0"
+GIT_TAG="vX.Y.Z"
 ```
 
 The project can then be cloned as follows:
@@ -158,38 +158,6 @@ Both hashes should be identical.
 If there is output showing different hashes, please open an issue
 with detailed instructions to reproduce, including build system
 platform and Go version.
-
-## Checking the pinned programs
-
-This is the maintainer's check at each version bump. You do not need it to
-install, run or update a node. Run it yourself only if you want to see that
-the hashes vpn pins are the ones upstream signed, on your own computer, not
-on your node. Its downloads go directly over HTTPS, not through Tor.
-
-vpn pins the exact SHA-256 hash of each Bitcoin Core, LND and Syncthing
-archive it installs, and nodes check these programs by that hash alone.
-Before a hash is pinned, the maintainer checks upstream's signatures with
-this tool. Anyone can repeat the check from a clone of this repository, on a
-computer with Go and gpg:
-
-```bash
-go run ./cmd/pincheck
-```
-
-For each program it downloads the pinned version's checksum list,
-signatures, signer keys and archive, then prints the signers it counted, the
-hash, and whether the hash matches the pin. Bitcoin Core needs 3 of its 5
-listed builders, LND 3 of its 11 listed developers, Syncthing its release
-key. A revoked key never counts, an expired one does. Any failure prints
-`FAIL` and no hash.
-
-To check a version before it is pinned:
-
-```bash
-go run ./cmd/pincheck -lnd 0.21.8-beta
-```
-
-`-bitcoin` and `-syncthing` work the same way.
 
 ## Troubleshooting
 
