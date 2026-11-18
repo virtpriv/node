@@ -1,17 +1,22 @@
 # Virtual Private Node
 
-A Bitcoin + Lightning Node on Debian Linux.
-Bitcoin Core, LND, and Tor, configured and running in minutes.
+A hardened Debian and Tor base.
+Tor, a firewall, SSH login protection and automatic security updates on
+Debian 13, set up by one installer.
 
 ## Project status
 
-**The Bitcoin and Lightning node ends here.**
+**The `main` branch is a hardened Debian and Tor base. It has no release
+yet.**
 
-This page and the guides describe v0.7.0, which was not released. There is
-no v0.7.0 to download. Its candidates, `v0.7.0-rc.1` to `v0.7.0-rc.13`, are
-test builds. The tag `bitcoin-final` marks the last commit of the node.
+This page and the guides describe that base. There is nothing to download
+for it yet. The install steps apply once its first release is published.
 
-The node is not maintained. Bitcoin Core and LND get no further updates
+The Bitcoin and Lightning node of this project ended at the tag
+`bitcoin-final`. v0.7.0 was not released. Its candidates, `v0.7.0-rc.1` to
+`v0.7.0-rc.13`, are test builds of that node.
+
+That node is not maintained. Bitcoin Core and LND get no further updates
 from this project. Do not put funds on a node installed from this
 repository, from a candidate or from an earlier release.
 
@@ -19,65 +24,33 @@ The earlier releases, up to v0.6.3, install a program called rlvpn. They are
 not maintained either. If you run one, [MIGRATION.md](MIGRATION.md) explains
 how to move your funds off it.
 
-The project continues on the `main` branch as a hardened Debian and Tor
-base, without Bitcoin Core and LND.
-
-## Screenshots
-
-<p>
-  <img src="docs/images/channels_home_dark.png" width="49%" />
-  <img src="docs/images/channels_open_dark.png" width="49%" />
-</p>
-<p>
-  <img src="docs/images/channels_home_light.png" width="49%" />
-  <img src="docs/images/system_home_light.png" width="49%" />
-</p>
-
 ## What gets installed
 
-### Base (automatic)
-
-- **Bitcoin Core:** pruned node, all P2P through Tor, checked against the exact hash pinned in the signed vpn release
-- **LND:** Lightning Network daemon with Tor hidden services, installed Tor-only by default
-- **Tor:** Bitcoin Core, LND, updates and every download once the installer has set up Tor go through Tor. The exceptions are listed under [Privacy & Network Traffic](#privacy--network-traffic)
+- **Tor:** updates and every download once the installer has set up Tor go through Tor. The exceptions are listed under [Privacy & Network Traffic](#privacy--network-traffic). Tor carries outgoing traffic only, the node has no onion address
 - **UFW firewall:** deny all incoming except SSH
 - **fail2ban:** brute force protection
-- **Unattended upgrades:** automatic Debian security updates, checked every day, with a restart right after when an update needs one
-- **NTP clock sync:** accurate time for block timestamps, HTLC timeouts, and macaroon expiry
+- **Unattended upgrades:** automatic Debian updates, security fixes included, checked every day, with a restart right after when an update needs one
+- **NTP clock sync:** an accurate clock, which Tor and HTTPS need
 - **Compressed swap:** when memory runs short, unused memory is compressed and kept in memory (zram, when the kernel supports it). Swap on disk that your provider set up stays in use, see [Hosting Your Node](docs/hosting.md#requirements)
-
-### Optional (from the TUI)
-
-- **Syncthing:** automatic LND channel backup to your local device
+- **The `vpn` account and its TUI:** the account you log in with, and a screen for the node's services, Debian's updates, SSH keys, restarts and new releases of vpn
 
 ### Requirements
 
-- Fresh Debian 13 amd64 machine whose software comes only from Debian
-- 2 (v)CPU, 4+ GB RAM, 90+ GB total SSD. Once Bitcoin Core's first sync is
-  done, LND safety-stops at 10% free, leaving about 81 GB of operational
-  usage on a 90 GB filesystem.
+- A fresh Debian 13 amd64 machine set aside for the node, whose software
+  comes only from Debian
+- 2 (v)CPU, 4+ GB RAM, 90+ GB total SSD. These sizes are the ones the
+  Bitcoin and Lightning node needed. What the base needs has not been
+  measured yet.
 - The installer refuses a machine with less than 3.4 GB of memory or 80 GB
   of disk. It refuses before it changes anything but its own log,
-  `/var/log/vpn.log`.
+  `/var/log/vpn.log`, and a lock file under `/run` that a restart clears.
 - A container plan (LXC, OpenVZ and the like) is refused. Use a virtual
   machine or a computer of its own.
 - A machine without sudo is fine. Log in as root, and the installer adds
   Debian's sudo.
-- LND gets memory first. With less than 7.5 GB of memory, Bitcoin Core gets
-  a small cache, so its first sync takes longer.
 
 Running at home or on a VPS? See [Hosting Your Node](docs/hosting.md) for what
 differs.
-
-### Privacy
-
-- **Private channels by default.** Channel funding transactions are not linked to your node in the public graph. SCID alias hides the real channel ID from route hints when supported by the channel peer. Blinded paths (default on) go further by eliminating route hints entirely.
-- **Blinded paths on invoices (default on).** Invoices use encrypted route data instead of plain hop hints. Senders can pay you without learning your node's pubkey or channel funding UTXOs. With LND's defaults the hidden route starts at one of your channel partners, and the invoice names that partner.
-- **Coin control for channel opens.** You choose which UTXOs fund each channel. One UTXO in, one channel out. No silent coin consolidation linking your channels on-chain.
-- **Taproot channels (default on).** Cooperative channel closes produce a MuSig2 key-path spend, which looks identical to a regular single-sig transaction on-chain. Requires peer support. When a peer closes a channel, your node also offers its own closing transaction and may pay that fee. On a new node Core has no fee estimates yet, so LND uses a fixed 25 sat/vB, and a small channel balance can go entirely to fees.
-- **Consistent P2TR address type.** All addresses (receive, change, close delivery, sweep) use the same P2TR format: `bc1p` on mainnet and `tb1p` on the testing profiles. P2TR has a smaller anonymity set than P2WPKH today, but matching LND's internal address type prevents change-detection fingerprints that would link your outputs regardless of anonymity set size.
-- **No node alias.** Your node appears in the network graph with only its pubkey. No identifying name broadcast.
-- **Tor-only by default.** All LND connections go through Tor, to onion peers through their onion services and to clearnet peers through Tor's exits. Your server IP is never published to the Lightning Network unless you explicitly upgrade to hybrid P2P mode.
 
 ## Installing
 
@@ -88,34 +61,14 @@ checksum before you run anything. The installer then asks for the `vpn`
 account's password, sets up the node and shows the command to log in as
 `vpn`, where the TUI opens.
 
-### Bitcoin network profiles
-
-Mainnet is the default. Testnet4 and the default public signet are test
-networks whose coins have no value, and the TUI marks them as such.
-
-(VPS)
-
-```bash
-./vpn install
-./vpn install --testnet4
-./vpn install --signet
-```
-
-The network is chosen at install and cannot be changed later. Using another
-network needs a fresh machine.
-
 ## Guides
 
-- [Running Your Node](docs/running.md): logging in, SSH keys, the wallet and
-  auto-unlock, the dashboard, Zeus, Hybrid mode
+- [Running Your Node](docs/running.md): logging in, SSH keys, services,
+  updates and restarts
 - [Hosting Your Node](docs/hosting.md): what differs between a VPS and a
   machine at home
-- [Syncthing Setup Guide](docs/syncthing.md): channel backups to your own
-  device
 - [Updating Your Node](docs/updating.md): updates from the TUI and how they
   are checked
-- [Recovering Your Node](docs/recovering.md): the seed, `channel.backup`, a
-  full disk
 - [Reproducible builds](docs/reproducing.md): build the release yourself and
   compare
 - [Moving your funds off an old node](MIGRATION.md): for a node installed
@@ -126,29 +79,22 @@ For maintainers and contributors: [How vpn Works Inside](docs/developing.md),
 
 ## Security
 
-- The TUI runs unprivileged as the `vpn` owner. Its node operations that need root go through a helper with a fixed set of checked operations. General host maintenance requires sudo authentication. The helper cannot reset the owner password. Software running as `vpn` still has sensitive node credentials and can modify owner files, so this does not protect the owner from a compromised TUI.
-- Bitcoin Core, LND, updates and downloads go through Tor (SOCKS5 port 9050). The exceptions are listed under Privacy & Network Traffic below
+- The TUI runs unprivileged as the `vpn` owner. Its node operations that need root go through a helper with a fixed set of checked operations. General host maintenance requires sudo authentication. The helper cannot reset the owner password. Software running as `vpn` can still modify owner files, so this does not protect the owner from a compromised TUI.
+- Updates and downloads go through Tor (SOCKS5 port 9050). The exceptions are listed under Privacy & Network Traffic below
 - IPv6 turned off, and the firewall drops all IPv6, to prevent Tor bypass
-- Stream isolation: Bitcoin Core and LND use a separate Tor circuit per connection, and each release check uses a new one. apt and vpn's downloads share a circuit
-- UFW firewall: SSH only, on the port(s) sshd listens on at install (+ 9735, 8080 for hybrid P2P, 22000 for Syncthing)
+- Stream isolation: each release check uses a new Tor circuit. apt and vpn's downloads share a circuit
+- UFW firewall: SSH only, on the port(s) sshd listens on at install
 - Fail2ban: SSH brute-force protection on the same ports. A port you add to sshd later needs its own ufw rule and jail port
 - Root SSH disabled by the installer
 - SSH password controls apply to `vpn`. Other accounts retain their host password-authentication policy. Keyboard-interactive authentication and X11 forwarding are disabled for `vpn`. Native password changes require the current account password.
-- Bitcoin Core, LND, and Syncthing run as separate, non-login system users. Unprivileged `vpn` has no direct access to their private data directories, while authenticated root maintenance can access them
-- Tor control-cookie access is granted only inside `lnd.service`, for LND's Lightning onion. Tor itself makes Bitcoin Core's onion address, so Bitcoin Core, Syncthing and the backup exporter receive none
-- vpn and LND authenticate to Bitcoin Core with separate `rpcauth` identities. Neither reads a Core cookie or Core's data directory
-- Syncthing can read only the finished copy of `channel.backup`. It cannot change that copy or read LND's own files
-- Every program is checked before install: vpn by its release signature, Bitcoin Core, LND and Syncthing by the exact hash the signed vpn release pins
-- Unattended security upgrades, checked every day, with an automatic restart right after when an update needs one, never during an install or an update
+- Tor's control port listens on the node itself only and asks for Tor's cookie. Only the installer's Tor check uses it
+- vpn is checked by its release signature, before the install and at every update. Everything else the install adds comes from Debian's packages, which apt checks against Debian's keys
+- Unattended upgrades of Debian's packages, security fixes included, checked every day, with an automatic restart right after when an update needs one, held off while an install, Update Packages or a node update runs
 - Base packages upgraded during install, through Tor and behind the firewall, to close CVE windows on stale server images
-- Syncthing backup sync: mutual TLS device approval, web UI only via Tor
-- Bitcoin Core wallet disabled
 - All downloads and apt operations route through Tor once Tor is up (verified by a hard gate before any download)
 - Atomic writes with fsync and rename for configuration and program files (prevents corruption on power loss)
 - Secure temp file creation with O_EXCL (prevents symlink attacks)
 - Public IP detection uses kernel routing table (no external network calls)
-- Mandatory seed confirmation ("I SAVED MY SEED") during wallet creation
-- Auto-unlock (optional) keeps the wallet password in a file only LND can read and never sends it over the network
 
 ## Privacy & Network Traffic
 
@@ -168,9 +114,9 @@ through Tor. After that, the installer makes two types of network calls:
   deb.debian.org over HTTPS (behind the firewall, which is enabled
   in Phase 1). apt's plain http and https are turned off, so a
   source outside Tor fails
-- Bitcoin Core and LND downloads
-- Syncthing download (when Syncthing is installed)
 - All subsequent apt operations
+- One request to check.torproject.org, the installer's own check that
+  traffic leaves through Tor
 
 Before the first Phase 2 download, the installer verifies Tor
 routing on Tor's own control port and refuses to continue if it
@@ -178,9 +124,8 @@ cannot confirm it. It does so on every run, including resumes,
 and again after the package upgrade.
 
 After install, the only ongoing traffic to the internet outside Tor is
-NTP clock sync (to the Debian NTP pool), your own SSH logins, Syncthing
-sync (port 22000) if you install it, and LND P2P and wallet connections
-if you choose hybrid mode. Everything else routes through Tor.
+NTP clock sync (to the Debian NTP pool) and your own SSH logins. Debian's
+updates, vpn's release check and vpn's downloads go through Tor.
 
 vpn's log keeps the install's Tor checks:
 
@@ -195,10 +140,6 @@ traffic went.
 
 Every program is checked before it is installed:
 
-- **Bitcoin Core, LND and Syncthing:** each archive must match the exact
-  SHA-256 hash pinned in the signed vpn release, at install, at the
-  Syncthing add-on and at every update. Any other file is refused. The node
-  downloads only the archive, no signatures or keys for these programs.
 - **vpn binary:** signed with the project's release key, published on
   keys.openpgp.org and in this repository. You download and verify it
   yourself before running it (see [Release Verification](docs/verifying.md)),
@@ -206,34 +147,9 @@ Every program is checked before it is installed:
   verification for every later release. The updater reads the key from
   both places, so an outage of either one does not stop updates. It
   trusts only the pinned fingerprint, never a copy itself.
-
-A hash is pinned when vpn moves to a new version of a program, and only
-after the maintainer checked upstream's own signatures on their own computer
-with `go run ./cmd/pincheck`:
-
-- **Bitcoin Core:** 5 trusted builder keys from
-  [bitcoin-core/guix.sigs](https://github.com/bitcoin-core/guix.sigs).
-  Requires 3 of 5 valid signatures. A bad signature from any key is a hard
-  stop.
-- **LND:** 11 developer keys from LND's own list. Requires 3 of 11 valid
-  signatures. A bad signature from any key is a hard stop.
-- **Syncthing:** the Syncthing release signing key's known fingerprint. The
-  release checksums are clearsigned by the same key.
-
-A signature from a key that its owner has revoked never counts. Anyone can
-repeat the check, see
-[Checking the pinned programs](docs/reproducing.md#checking-the-pinned-programs).
-You can also bring Bitcoin Core, LND and Syncthing files you checked
-yourself, see
-[Bring your own Bitcoin Core and LND](docs/verifying.md#bring-your-own-bitcoin-core-and-lnd)
-and [Syncthing](docs/syncthing.md#step-1-install-syncthing-on-your-node).
-The node uses them only when they match the pins.
-
-vpn also writes Syncthing's entire configuration itself and checks its
-privacy settings at install, at each pairing and when an update changes
-Syncthing. At install it stops Syncthing if one does not verify, at pairing
-it refuses the device. A setting changed later in Syncthing's web UI is not
-checked before then.
+- **Everything else:** Debian's packages, which apt checks against Debian's
+  own keys. The installer refuses a machine whose package sources are not
+  Debian's, or that has apt's signature check turned off.
 
 The release signing key fingerprint is
 `AFA0 EBAC DC9A 4C4A A7B0  154A C97C E10F 170B A5FE`. The same key

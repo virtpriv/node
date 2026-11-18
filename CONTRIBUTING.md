@@ -1,6 +1,6 @@
 # Contributing to Virtual Private Node
 
-Thanks for your interest in contributing. This project exists to make running a self-hosted Bitcoin and Lightning node as frictionless as possible, and contributions from the community are welcome.
+Thanks for your interest in contributing. This project exists to make running a hardened Debian and Tor server as frictionless as possible, and contributions from the community are welcome.
 
 ## Code of conduct
 
@@ -8,7 +8,7 @@ This project follows the [Contributor Covenant](https://www.contributor-covenant
 
 ## Reporting security issues
 
-**Do not file security issues as public GitHub issues.** If you discover a vulnerability that could compromise user funds, private keys, or node integrity, please disclose it privately first. See [SECURITY.md](SECURITY.md) for the full security disclosure policy.
+**Do not file security issues as public GitHub issues.** If you discover a vulnerability that could compromise node integrity or an owner's privacy, please disclose it privately first. See [SECURITY.md](SECURITY.md) for the full security disclosure policy.
 
 For non-security bugs, open a GitHub issue with steps to reproduce, expected vs actual behavior, and your environment.
 
@@ -76,7 +76,7 @@ Passing the portable and privileged gates does not certify the complete
 installer. Changes affecting installation, services, lifecycle state,
 permissions, or other host-level behavior also require validation on a
 fresh disposable Debian 13 amd64 system. Never perform that validation
-on a funded node or an everyday development machine.
+on a node in use or an everyday development machine.
 
 ## Pull requests
 
@@ -112,8 +112,8 @@ Use the corresponding short branch prefix, such as `feat/`, `fix/`,
 Examples:
 
 ```text
-feat: add immutable bitcoin network profiles
-fix: verify auto-unlock transitions
+feat: update from release files the owner brings to the node
+fix: keep system logs on disk on every machine
 refactor: isolate service identities
 docs: document conventional commit policy
 ```
@@ -125,4 +125,4 @@ docs: document conventional commit policy
 - Document non-obvious decisions, security boundaries, and invariants.
 - Keep TUI text reasonably narrow for supported terminal layouts.
 
-Thanks for helping build a more sovereign Bitcoin ecosystem.
+Thanks for helping.

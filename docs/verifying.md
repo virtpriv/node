@@ -7,12 +7,13 @@ release and its signing key through Tor.
 After installation, the node checks every later release itself, with the same
 key and checksum rules, when you select Review, before you can install it.
 Managed release archives also contain `update.json`. Its integrity is covered
-by the same signed archive checksum. The TUI verifies that plan before review
-and checks each selected component against the exact archive hash pinned in
-the release. See [Updating Your Node](updating.md).
+by the same signed archive checksum. The node verifies that plan before it
+shows the review. See [Updating Your Node](updating.md).
 
-Releases published before v0.7.0 were made under the project's previous name
-and ship a program called rlvpn. They are not installed with these steps.
+The base has no release yet, so there is nothing to download with these
+steps today. The `v0.7.0` candidates are test builds of the Bitcoin and
+Lightning node, and releases up to v0.6.3 ship a program called rlvpn.
+Neither is installed with these steps.
 
 ### 1. Install Tor
 
@@ -42,8 +43,10 @@ and run it again.
 
 ### 3. Download the release and the signing key
 
+Set `VERSION` to the release you install, without the `v`:
+
 ```bash
-VERSION="0.7.0"
+VERSION="X.Y.Z"
 cd /root
 torsocks wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-x86_64.tar.gz"
 torsocks wget -q "https://github.com/virtpriv/node/releases/download/v${VERSION}/vpn-${VERSION}-manifest.txt"
@@ -89,7 +92,8 @@ yourself.
 sha256sum --check --ignore-missing "vpn-${VERSION}-manifest.txt"
 ```
 
-It must print `vpn-0.7.0-x86_64.tar.gz: OK`. Stop if it prints anything else.
+It must print the archive's name and `OK`, for example
+`vpn-X.Y.Z-x86_64.tar.gz: OK`. Stop if it prints anything else.
 
 ### 6. Install
 
@@ -105,10 +109,6 @@ It copies itself to `/usr/local/bin/vpn`:
 ./vpn install
 ```
 
-For the test networks, use `./vpn install --testnet4` or
-`./vpn install --signet` instead. The network cannot be changed later. See the
-[README](../README.md#bitcoin-network-profiles).
-
 If the install stops, or you close it, it shows the step it reached. To
 continue:
 
@@ -123,30 +123,3 @@ Leave out `cd /root` and use an empty folder of your own. Then copy `vpn` to
 the server (for example with `scp`) and run `./vpn install` there as root. On
 your own computer the downloads go through Tor only if you use `torsocks` or
 another Tor client.
-
-### Bring your own Bitcoin Core and LND
-
-The install downloads Bitcoin Core and LND through Tor. You can bring them
-instead, after checking them with each project's own steps: Bitcoin Core's
-[download page](https://bitcoincore.org/en/download/) and LND's
-[releases](https://github.com/lightningnetwork/lnd/releases). The node then
-checks each against the exact hash this vpn release pins, as it checks a
-download.
-
-Before you run the install, as root, make the folder and put the archives
-there:
-
-```bash
-mkdir -m 700 /root/releases
-```
-
-For this release the names are `bitcoin-31.2-x86_64-linux-gnu.tar.gz` and
-`lnd-linux-amd64-v0.21.8-beta.tar.gz`. You can bring one of them, the
-other is downloaded. The install step then says, for example, `Taking
-Bitcoin Core 31.2 from /root/releases`.
-
-A file that does not match the pinned hash stops the install, and the error
-names it. Replace it, or remove it to download instead, and run
-`sudo vpn install` again. Once the install is complete, vpn removes from
-`/root/releases` the Bitcoin Core and LND archives of the versions it
-installed, and older ones.
