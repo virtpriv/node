@@ -1,6 +1,7 @@
 package update
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -388,6 +389,27 @@ func installWorkerUnit() error {
 
 func startWorker() error { return system.RunRoot("systemctl", "start", "--no-block", Service) }
 
+// workerRuns reports whether the update's unit runs or is about to. systemd
+// calls a unit activating while it starts its program, and keeps a job on a
+// unit whose start waits for another unit, Tor for one. Both end in a
+// running worker with no step from the owner. A unit that someone stops has
+// a job too, and its worker runs until the stop ends. A state that cannot be
+// read counts as not running.
+func workerRuns() bool {
+	units, err := system.ReadUnitProperties(context.Background(), []string{Service}, "ActiveState", "Job")
+	return err == nil && unitRuns(units[Service])
+}
+
+// unitRuns reports the same from systemd's record of the unit, its
+// ActiveState and Job.
+func unitRuns(unit map[string]string) bool {
+	switch unit["ActiveState"] {
+	case "active", "activating", "reloading", "refreshing":
+		return true
+	}
+	return unit["Job"] != ""
+}
+
 // Resume records consent to retry. busy is the vpn API's busy rule for other
 // jobs, checked under the operations lock.
 func Resume(id string, busy func() error) (protocol.Status, error) {
@@ -429,12 +451,20 @@ func Status() (protocol.Status, error) {
 	if err := requireRoot(); err != nil {
 		return protocol.Status{}, err
 	}
+	// A node with no update on record asks systemd nothing.
+	if first, err := loadRecord(Root); err != nil || first == nil {
+		return protocol.Status{}, err
+	}
+	// The unit is read before the record that is reported. A worker that ends
+	// between the two reads is then seen with the end it saved, not as an
+	// unfinished update that does not run.
+	running := workerRuns()
 	j, err := loadRecord(Root)
 	if err != nil || j == nil {
 		return protocol.Status{}, err
 	}
 	s := j.status()
-	s.Running = system.IsServiceActive(Service)
+	s.Running = running
 	s.Cancellable = j.active() && !j.HostChanges && !s.Running
 	return s, nil
 }

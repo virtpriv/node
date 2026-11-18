@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/virtpriv/node/internal/system"
 	"github.com/virtpriv/node/internal/update/files"
 )
 
@@ -243,6 +244,35 @@ func TestRepairOfRepairKeepsTheCancellationBoundary(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(failed.dir(root), "result.json")); err != nil {
 			t.Fatal("lost a failed update's record:", err)
 		}
+	}
+}
+
+// Node Updates offers Retry and Cancel update only for an update that does
+// not run. An update that systemd is starting, or whose start waits for
+// another unit, runs with no step from the owner. The answers are systemd's
+// own on Debian 13, with the update's unit name.
+func TestStartingOrWaitingUpdateCountsAsRunning(t *testing.T) {
+	for _, c := range []struct {
+		name, answer string
+		runs         bool
+	}{
+		{"its start waits for another unit", "Id=vpn-update.service\nActiveState=inactive\nJob=7104\n", true},
+		{"systemd is starting it", "Id=vpn-update.service\nActiveState=activating\nJob=7611\n", true},
+		{"it runs", "Id=vpn-update.service\nActiveState=active\nJob=\n", true},
+		{"it ended or never ran", "Id=vpn-update.service\nActiveState=inactive\nJob=\n", false},
+		{"its program could not be run", "Id=vpn-update.service\nActiveState=failed\nJob=\n", false},
+		{"systemd is starting it, with no job on it", "Id=vpn-update.service\nActiveState=activating\nJob=\n", true},
+		{"it is being stopped", "Id=vpn-update.service\nActiveState=deactivating\nJob=1048\n", true},
+		{"its program ended and its shutdown still runs", "Id=vpn-update.service\nActiveState=deactivating\nJob=\n", false},
+		{"systemd gave no answer", "", false},
+		// systemd chooses the order of the lines.
+		{"the lines come in another order", "Job=7104\nActiveState=inactive\nId=vpn-update.service\n", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := unitRuns(system.ParseUnitProperties(c.answer)[Service]); got != c.runs {
+				t.Fatalf("running is %v, want %v", got, c.runs)
+			}
+		})
 	}
 }
 
