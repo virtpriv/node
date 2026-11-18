@@ -6,23 +6,19 @@ require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/btcsuite/btcd v0.25.1-0.20260310163610-1c55c7c18179
-	github.com/btcsuite/btcd/btcec/v2 v2.3.6
-	github.com/btcsuite/btcd/btcutil v1.1.6
-	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0
+	github.com/btcsuite/btcd v0.25.1-0.20260310163610-1c55c7c18179 // indirect
+	github.com/btcsuite/btcd/btcec/v2 v2.3.6 // indirect
+	github.com/btcsuite/btcd/btcutil v1.1.6 // indirect
+	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/lightningnetwork/lnd v0.21.2-beta
-	github.com/mdp/qrterminal/v3 v3.2.1
 	golang.org/x/crypto v0.52.0
 	golang.org/x/mod v0.35.0
 	golang.org/x/sys v0.47.0
 	google.golang.org/grpc v1.83.1
 )
 
-require (
-	golang.org/x/term v0.43.0
-	rsc.io/qr v0.2.0
-)
+require golang.org/x/term v0.43.0
 
 require (
 	dario.cat/mergo v1.0.1 // indirect

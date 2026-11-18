@@ -10,9 +10,9 @@ import (
 
 // ── SSHKeyDetailScreen ─────────────────────────────────
 // Key detail with Cancel / Remove buttons + confirm step.
-// Opened as its own tab from SSHKeysScreen list. Mirrors
-// SyncthingDeviceScreen (detail + confirm in-screen, close
-// the tab on remove success).
+// Opened as its own tab from SSHKeysScreen list. The detail
+// and its confirm step are in one screen, and the tab closes
+// when the key is removed.
 
 type sshKeyDetailStep int
 

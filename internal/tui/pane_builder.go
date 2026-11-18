@@ -51,15 +51,6 @@ func (p *paneBuilder) field(
 	return p
 }
 
-func (p *paneBuilder) monoField(
-	label, value string,
-) *paneBuilder {
-	p.lines = append(p.lines,
-		" "+theme.Label.Render(label)+
-			theme.Mono.Render(value))
-	return p
-}
-
 func (p *paneBuilder) labelLine(
 	label string,
 ) *paneBuilder {
@@ -75,8 +66,8 @@ func (p *paneBuilder) mono(text string) *paneBuilder {
 }
 
 // monoWrap renders a long string across multiple lines,
-// splitting at lineW characters per line. Used for txids,
-// pubkeys, addresses, invoices, and other long values.
+// splitting at lineW characters per line. Used for key
+// fingerprints and other long values.
 func (p *paneBuilder) monoWrap(text string) *paneBuilder {
 	lineW := p.w - 2
 	if lineW < 16 {
@@ -90,30 +81,6 @@ func (p *paneBuilder) monoWrap(text string) *paneBuilder {
 		p.mono(text[:end])
 		text = text[end:]
 	}
-	return p
-}
-
-// fieldAligned is like field but pads the label on
-// the right to labelW characters so that a run of
-// fieldAligned calls with the same labelW produces a
-// clean vertical column of colons. Callers compute
-// labelW from the longest label in their group.
-//
-// Only works correctly for plain-ASCII labels because
-// padding is computed against len(label), not
-// lipgloss.Width(label). If you need styled or
-// wide-rune labels, widen to lipgloss.Width first.
-func (p *paneBuilder) fieldAligned(
-	label, value string, labelW int,
-) *paneBuilder {
-	padded := label
-	if len(label) < labelW {
-		padded = label +
-			strings.Repeat(" ", labelW-len(label))
-	}
-	p.lines = append(p.lines,
-		" "+theme.Label.Render(padded)+
-			theme.Value.Render(value))
 	return p
 }
 

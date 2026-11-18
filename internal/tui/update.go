@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"errors"
-
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 
@@ -86,19 +84,14 @@ type stepSpinner interface {
 
 // shownStepSpinner is the step list screen on screen, if any.
 func (m Model) shownStepSpinner() stepSpinner {
-	// The QR and full URL views cover the screen.
-	if len(m.tabs) == 0 || m.subview != svNone {
+	if len(m.tabs) == 0 {
 		return nil
 	}
 	tabs := m.effectiveTabs()
 	if m.activeTab <= 0 || m.activeTab >= len(tabs) {
 		return nil
 	}
-	screen := tabs[m.activeTab].Screen
-	if progress := helperProgress(screen); progress != nil {
-		screen = progress
-	}
-	owner, _ := screen.(stepSpinner)
+	owner, _ := tabs[m.activeTab].Screen.(stepSpinner)
 	return owner
 }
 
@@ -109,11 +102,7 @@ func (m Model) shownStepSpinner() stepSpinner {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if tick, ok := msg.(spinner.TickMsg); ok {
 		for _, tab := range m.tabs {
-			screen := tab.Screen
-			if progress := helperProgress(screen); progress != nil {
-				screen = progress
-			}
-			owner, ok := screen.(stepSpinner)
+			owner, ok := tab.Screen.(stepSpinner)
 			if !ok || !owner.spinner().Owns(tick) {
 				continue
 			}
@@ -172,10 +161,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	case tea.ResumeMsg:
-		return m, tea.Batch(
-			requestStatusCmd,
-			m.visibleWalletListsCmd(),
-			fetchWalletStateCmd(m.screenCtx))
+		return m, requestStatusCmd
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case tea.PasteMsg:
@@ -191,8 +177,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setTabScreen(m.activeTab, newScreen)
 			return m, cmd
 		}
-		// Route paste to section home screen
-		// (e.g. UTXO label popup on on-chain home).
+		// Route paste to section home screen.
 		sec := m.nav.ActiveSection()
 		if sec >= 0 && sec < numSections &&
 			m.sectionScreens[sec] != nil {
@@ -213,26 +198,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.closeScreenTab(msg.screen)
 	case closeTabMsg:
 		return m.closeTab(m.activeTab)
-	case closeOnChainSendMsg:
-		if msg.screen == nil || msg.screen.step != ocStepResult {
-			return m, nil
-		}
-		return m.closeScreenTab(msg.screen)
-	case closeChannelOpenMsg:
-		if msg.screen == nil || msg.screen.step != coStepResult {
-			return m, nil
-		}
-		return m.closeScreenTab(msg.screen)
-	case closeChannelDoneMsg:
-		if msg.screen == nil || msg.screen.step != closeStepResult {
-			return m, nil
-		}
-		for _, tab := range m.tabs {
-			if detail, ok := tab.Screen.(*ChannelDetailScreen); ok && detail.closeScreen == msg.screen {
-				return m.closeScreenTab(detail)
-			}
-		}
-		return m, nil
 	case focusSidebarMsg:
 		m.focusSidebar()
 		return m, nil
@@ -284,55 +249,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activeTab = 0
 		m.focusContent()
 		return m, nil
-	case qrCopyDisplayMsg:
-		return m, m.showQRCopyDisplay(msg.request)
-	case qrCopyDisplayDoneMsg:
-		return m, m.completeQRCopyDisplay(msg)
 	case refreshStatusMsg:
 		cmd := m.admitStatus()
 		return m, cmd
 	case openTabMsg:
-		walletKind := msg.Kind
-		if walletKind == tabAutoUnlock && m.screenCtx.walletCreationOwner != nil {
-			// A created wallet can still need acknowledgement or credential staging.
-			// Finish that owning flow before opening its auto-unlock successor.
-			walletKind = tabWalletCreate
-		}
-		if walletKind == tabWalletCreate || walletKind == tabAutoUnlock {
-			// Each wallet workflow retains one owning tab across all entry sections.
-			for _, tab := range m.tabs {
-				if tab.Kind != walletKind {
-					continue
-				}
-				m.nav.ActiveItem, m.nav.Cursor = tab.Section, tab.Section
-				for i, visible := range m.effectiveTabs() {
-					if visible.Screen == tab.Screen {
-						m.activeTab = i
-						m.rememberTabPosition()
-						m.focusContent()
-						return m, m.activateTab()
-					}
-				}
-			}
-			if walletKind != msg.Kind {
-				return m, nil
-			}
-		}
-		if msg.Kind == tabSyncthingDevice {
-			detail, ok := msg.Screen.(*SyncthingDeviceScreen)
-			if !ok || msg.Key == "" || detail.deviceID != msg.Key || m.nav.ActiveSection() != secAddons {
-				return m, nil
-			}
-			for i, tab := range m.effectiveTabs() {
-				if tab.Kind == tabSyncthingDevice && tab.Key == msg.Key {
-					m.activeTab = i
-					m.rememberTabPosition()
-					m.focusContent()
-					return m, m.activateTab()
-				}
-			}
-		}
-
 		if msg.Kind == tabSSHKeyDetail {
 			detail, ok := msg.Screen.(*SSHKeyDetailScreen)
 			if !ok || msg.Key == "" || detail.keyInfo.Fingerprint != msg.Key || m.nav.ActiveSection() != secSystem {
@@ -348,88 +268,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		if msg.Kind == tabChannelHistory {
-			history, ok := msg.Screen.(*ChannelHistoryScreen)
-			if !ok || history.ctx != m.screenCtx || !history.current() || m.nav.ActiveSection() != secChannels {
-				return m, nil
-			}
-			for _, tab := range m.effectiveTabs() {
-				if old, ok := tab.Screen.(*ChannelHistoryScreen); ok && !old.current() {
-					msg.Replace = true
-				}
-			}
-		}
-		if msg.Kind == tabChannel {
-			detail, ok := msg.Screen.(*ChannelDetailScreen)
-			if !ok || msg.Key == "" || detail.point != msg.Key || detail.ctx != m.screenCtx || !detail.current() || m.nav.ActiveSection() != secChannels {
-				return m, nil
-			}
-			for i, tab := range m.effectiveTabs() {
-				if tab.Kind == tabChannel && tab.Key == msg.Key {
-					// Explicit reopening can adopt the current wallet scope. An
-					// existing close flow keeps its reviewed identity and result.
-					if old, ok := tab.Screen.(*ChannelDetailScreen); ok && !old.current() && old.closeScreen == nil {
-						m.setTabScreen(i, msg.Screen)
-					}
-					m.activeTab = i
-					m.rememberTabPosition()
-					m.focusContent()
-					return m, m.activateTab()
-				}
-			}
-		}
-		if msg.Kind == tabUtxoDetail || msg.Kind == tabOnChainTx {
-			if msg.Key == "" || onChainDetailKey(msg.Screen, msg.Kind) != msg.Key || m.nav.ActiveSection() != secOnChain {
-				return m, nil
-			}
-			for i, tab := range m.effectiveTabs() {
-				if tab.Kind == msg.Kind && tab.Key == msg.Key {
-					m.setTabScreen(i, msg.Screen)
-					m.activeTab = i
-					m.rememberTabPosition()
-					m.focusTabBar()
-					m.tabCursorX = 0
-					return m, nil
-				}
-			}
-		}
-		if msg.Kind == tabPayment {
-			detail, ok := msg.Screen.(*PaymentDetailScreen)
-			if !ok || !detail.current() || msg.Key == "" || detail.key != msg.Key || m.nav.ActiveSection() != secWallet {
-				return m, nil
-			}
-			for i, tab := range m.effectiveTabs() {
-				if tab.Kind == tabPayment && tab.Key == msg.Key {
-					m.setTabScreen(i, msg.Screen)
-					m.activeTab = i
-					m.rememberTabPosition()
-					m.focusTabBar()
-					m.tabCursorX = 0
-					return m, nil
-				}
-			}
-		}
-
-		// Dedup by kind + index if Index is set
-		if msg.Kind != tabPayment && msg.Kind != tabUtxoDetail && msg.Kind != tabOnChainTx && msg.Kind != tabChannel && msg.Kind != tabSSHKeyDetail && msg.Kind != tabSyncthingDevice && msg.Index != 0 {
-			tabs := m.effectiveTabs()
-			for i, t := range tabs {
-				if t.Kind == msg.Kind &&
-					t.Index == msg.Index {
-					m.activeTab = i
-					m.rememberTabPosition()
-					if msg.FocusTabBar {
-						m.focusTabBar()
-						m.tabCursorX = 0
-						return m, nil
-					}
-					m.focusContent()
-					return m, m.activateTab()
-				}
-			}
-		}
-		// Dedup flow tabs by kind + section
-		if msg.Kind != tabPayment && msg.Kind != tabUtxoDetail && msg.Kind != tabOnChainTx && msg.Kind != tabChannel && msg.Kind != tabSSHKeyDetail && msg.Kind != tabSyncthingDevice && msg.Index == 0 {
+		// A flow tab is open once in a section.
+		if msg.Kind != tabSSHKeyDetail {
 			sec := m.nav.ActiveSection()
 			tabs := m.effectiveTabs()
 			for i, t := range tabs {
@@ -437,34 +277,25 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					t.Section == sec {
 					m.activeTab = i
 					m.rememberTabPosition()
-					if msg.Replace && (autoUnlockBusy(t.Screen) || walletCreationBusy(t.Screen) || onChainSendBusy(t.Screen) || channelOpenBusy(t.Screen) || nodeUpdatesBusy(t.Screen) || m.sshTabBusy(t) || m.helperTabBusy(t) || m.syncthingTabBusy(t)) {
+					if msg.Replace && (nodeUpdatesBusy(t.Screen) || m.sshTabBusy(t)) {
 						return m, nil
 					}
 					if msg.Replace &&
 						msg.Screen != nil {
 						m.setTabScreen(i, msg.Screen)
 					}
-					if msg.FocusTabBar {
-						m.focusTabBar()
-						m.tabCursorX = 0
-					} else {
-						m.focusContent()
-					}
+					m.focusContent()
 					if msg.Replace &&
 						msg.Screen != nil {
 						return m, msg.Screen.Init()
 					}
-					if !msg.FocusTabBar {
-						return m, m.activateTab()
-					}
-					return m, nil
+					return m, m.activateTab()
 				}
 			}
 		}
 		m.tabs = append(m.tabs, openTab{
 			Kind:    msg.Kind,
 			Label:   msg.Label,
-			Index:   msg.Index,
 			Key:     msg.Key,
 			Section: m.nav.ActiveSection(),
 			Parent:  msg.Parent,
@@ -472,12 +303,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 		m.activeTab = len(m.effectiveTabs()) - 1
 		m.rememberTabPosition()
-		if msg.FocusTabBar {
-			m.focusTabBar()
-			m.tabCursorX = 0
-		} else {
-			m.focusContent()
-		}
+		m.focusContent()
 		if msg.Screen != nil {
 			return m, msg.Screen.Init()
 		}
@@ -510,244 +336,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, retryLatestVersionCmd()
 		}
 		return m, nil
-	case connectionInfoResultMsg:
-		return m, m.completeConnectionInfo(msg)
-	case connectionActionMsg:
-		return m, m.showConnectionInfo(msg)
-	case connectionDisplayDoneMsg:
-		if msg.request != nil {
-			for _, tab := range m.tabs {
-				if tab.Screen == msg.request.owner {
-					state := connectionState(tab.Screen)
-					if state != nil && state.request == msg.request {
-						state.displayFailed = msg.err != nil
-					}
-				}
-			}
-		}
-		return m, nil
-	case refreshWalletStateMsg:
-		if msg.owner != m.screenCtx {
-			return m, nil
-		}
-		return m, m.admitWalletState()
-	case walletStateMsg:
-		return m, m.completeWalletState(msg)
-	case walletClientMsg:
-		return m.completeWalletClient(msg)
-	case syncthingPairedMsg:
-		if msg.owner == nil || msg.owner.attempt != msg.attempt || msg.owner.step != syncPairStepPairing {
-			return m, nil
-		}
-		m.screenCtx.invalidateSyncthing()
-		rm, cmd := m.routeSyncthingResult(msg.owner, msg)
-		return rm, tea.Batch(cmd, requestSyncthingDevicesCmd(m.screenCtx))
-	case syncthingRemovedMsg:
-		if msg.owner == nil || msg.owner.attempt != msg.attempt || msg.owner.step != syncDeviceStepRemoving {
-			return m, nil
-		}
-		m.screenCtx.invalidateSyncthing()
-		rm, cmd := m.routeSyncthingResult(msg.owner, msg)
-		return rm, tea.Batch(cmd, requestSyncthingDevicesCmd(m.screenCtx))
-	case syncthingCloseMsg:
-		switch owner := msg.owner.(type) {
-		case *SyncthingPairScreen:
-			if owner == nil || owner.attempt != msg.attempt || syncthingBusy(owner) {
-				return m, nil
-			}
-		case *SyncthingDeviceScreen:
-			if owner == nil || owner.attempt != msg.attempt || syncthingBusy(owner) {
-				return m, nil
-			}
-		default:
-			return m, nil
-		}
-		return m.closeScreenTab(msg.owner)
-	case refreshSyncthingMsg:
-		if msg.owner != m.screenCtx {
-			return m, nil
-		}
-		return m, tea.Batch(m.admitSyncthing(), m.scheduleSyncthingPoll())
-	case syncthingPollMsg:
-		if msg.owner != m.screenCtx {
-			return m, nil
-		}
-		m.screenCtx.syncthingPolling = false
-		if !m.hasSyncthingObservers() {
-			return m, nil
-		}
-		return m, tea.Batch(m.admitSyncthing(), m.scheduleSyncthingPoll())
-	case syncthingDevicesMsg:
-		return m, m.completeSyncthing(msg)
-	case channelOpenResultMsg:
-		return m.dispatchToTab(tabOpenChannel, msg)
-	case channelCoinsMsg:
-		for _, tab := range m.tabs {
-			if msg.refresh != nil && tab.Screen == msg.refresh.screen {
-				_, cmd := msg.refresh.screen.HandleMsg(msg)
-				return m, cmd
-			}
-		}
-		return m, nil
-	case newAddressMsg:
-		for _, tab := range m.tabs {
-			if msg.owner != nil && tab.Screen == msg.owner {
-				_, cmd := msg.owner.HandleMsg(msg)
-				return m, cmd
-			}
-		}
-		return m, nil
-	case receiveAddressQRMsg:
-		tabs := m.effectiveTabs()
-		if msg.owner == nil || m.activeTab <= 0 || m.activeTab >= len(tabs) ||
-			tabs[m.activeTab].Screen != msg.owner || msg.owner.attempt != msg.attempt ||
-			msg.owner.requesting || msg.owner.address == "" {
-			return m, nil
-		}
-		m.subview = svQR
-		m.connectionDisplay = nil
-		m.qrCopyOverlay = nil
-		m.urlTarget = msg.owner.address
-		m.qrLabel = "On-Chain Address"
-		return m, nil
-	case invoiceCreatedMsg:
-		return m.dispatchToTab(tabReceive, msg)
-	case invoiceCheckMsg, invoiceStatusMsg:
-		return m.dispatchToTab(tabReceive, msg)
-	case payReqDecodedMsg:
-		return m.dispatchToTab(tabSend, msg)
-	case sendPaymentResultMsg:
-		return m.dispatchToTab(tabSend, msg)
-	case refreshPaymentHistoryMsg:
-		if msg.changed && m.screenCtx.PaymentHistory != nil {
-			m.screenCtx.PaymentHistory.revision++
-			m.screenCtx.PaymentHistory.PaymentHistorySnapshot = m.screenCtx.PaymentHistory.Unavailable(errors.New("history changed"))
-		}
-		return m, m.admitPaymentHistory()
-	case paymentHistoryResultMsg:
-		return m, m.completePaymentHistory(msg)
-	case refreshOnChainMsg:
-		return m, m.admitOnChain()
-	case onChainResultMsg:
-		return m, m.completeOnChain(msg)
-	case sendCoinsResultMsg:
-		return m.dispatchToTab(tabOnChain, msg)
-	case channelCloseResultMsg:
-		var cmds []tea.Cmd
-		for i, tab := range m.tabs {
-			if tab.Kind != tabChannel || tab.Screen == nil {
-				continue
-			}
-			m.screenCtx.HasTabs = true
-			m.screenCtx.ContentFocused = m.contentFocused && tab.Section == m.nav.ActiveSection()
-			screen, cmd := tab.Screen.HandleMsg(msg)
-			m.tabs[i].Screen = screen
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
-		return m, tea.Batch(cmds...)
-	case refreshChannelHistoryMsg:
-		if msg.changed {
-			m.statusRevision++
-			if m.screenCtx.Status != nil {
-				m.screenCtx.Status.Channels.Err = errors.New("channel state changed")
-			}
-			if history := m.screenCtx.ChannelHistory; history != nil {
-				history.revision++
-				history.Closed.Err = errors.New("channel state changed")
-			}
-			return m, tea.Batch(requestStatusCmd, m.admitChannelHistory())
-		}
-		return m, m.admitChannelHistory()
-	case channelHistoryResultMsg:
-		return m, m.completeChannelHistory(msg)
-	case labelTxMsg:
-		if msg.owner != nil && m.sectionScreens[secOnChain] == msg.owner {
-			_, cmd := msg.owner.HandleMsg(msg)
-			return m, cmd
-		}
-		return m, nil
-	case feeSuggestionsMsg:
-		if msg.request == nil {
-			return m, nil
-		}
-		for _, tab := range m.tabs {
-			if fees := screenFees(tab.Screen); fees != nil && fees.active == msg.request {
-				_, cmd := tab.Screen.HandleMsg(msg)
-				return m, cmd
-			}
-		}
-		return m, nil
-	case p2pAddressResultMsg:
-		if msg.read != nil {
-			for _, tab := range m.tabs {
-				if tab.Screen == msg.read.owner && msg.read.owner.ctx == m.screenCtx {
-					_, cmd := msg.read.owner.HandleMsg(msg)
-					return m, cmd
-				}
-			}
-		}
-		return m, nil
-	case workflowProgressMsg:
-		for _, tab := range m.tabs {
-			if progress := helperProgress(tab.Screen); progress != nil && progress.operation == msg.operation {
-				_, cmd := progress.HandleMsg(msg)
-				return m, cmd
-			}
-		}
-		// The screen was closed while its job ran. The setting the job
-		// changed is still published.
-		if result := msg.event.Result; result != nil && result.Config != nil {
-			publishWorkflowConfig(m.screenCtx, msg.operation.Kind(), result.Config)
-			return m, emitRefreshStatus
-		}
-		if msg.event.Result == nil {
-			// Keep reading the closed screen's watch to its end.
-			return m, (&InstallProgressScreen{operation: msg.operation}).waitProgress()
-		}
-		return m, nil
-	case latestWorkflowMsg:
-		for _, tab := range m.tabs {
-			if tab.Screen == msg.owner {
-				_, cmd := tab.Screen.HandleMsg(msg)
-				return m, cmd
-			}
-		}
-		return m, nil
 	case restoredJobsMsg:
 		return m, m.restoreSystemJobs(msg)
-	case autoUnlockRestoreMsg:
-		for _, tab := range m.tabs {
-			if tab.Screen == msg.owner && msg.owner != nil {
-				_, cmd := msg.owner.HandleMsg(msg)
-				return m, cmd
-			}
-		}
-		return m, nil
-	case closeHelperProgressMsg:
-		if msg.screen == nil || !msg.screen.done {
-			return m, nil
-		}
-		for _, tab := range m.tabs {
-			if helperProgress(tab.Screen) == msg.screen {
-				return m.closeScreenTab(tab.Screen)
-			}
-		}
-		return m, nil
-	case autoUnlockDoneMsg:
-		for _, tab := range m.tabs {
-			if tab.Screen == msg.owner && msg.owner != nil {
-				_, cmd := msg.owner.HandleMsg(msg)
-				return m, cmd
-			}
-		}
-		return m, nil
-	case closeAutoUnlockMsg:
-		if msg.owner == nil || msg.owner.attempt != msg.attempt || autoUnlockBusy(msg.owner) {
-			return m, nil
-		}
-		return m.closeScreenTab(msg.owner)
 	case refreshSSHKeysMsg:
 		var cmds []tea.Cmd
 		for _, tab := range m.tabs {
@@ -801,35 +391,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.closeScreenTab(msg.owner)
-	case walletLNDReadyMsg:
-		return m.routeWalletCreation(msg.owner, msg)
-	case walletExecDoneMsg:
-		return m.routeWalletCreation(msg.owner, msg)
-	case walletFinalizedMsg:
-		return m.finishWalletCreation(msg)
-	case closeWalletCreateMsg:
-		if msg.owner == nil || msg.owner.attempt != msg.attempt || walletCreationBusy(msg.owner) ||
-			(msg.attempt != nil && msg.revision != msg.attempt.finalization) {
-			return m, nil
-		}
-		return m.closeScreenTab(msg.owner)
-	case continueWalletCreateMsg:
-		if msg.owner == nil || msg.owner.attempt != msg.attempt || msg.owner.step != walletResult || !msg.owner.canContinue() {
-			return m, nil
-		}
-		return m.continueWalletCreation(msg.owner)
 	case tickMsg:
-		if m.statusActive != nil {
-			return m, tea.Batch(requestStatusCmd, m.visibleWalletListsCmd(), readReleasesFolderCmd, tickEveryCmd(m.pollInterval()))
-		}
-		cmds := []tea.Cmd{
-			m.visibleWalletListsCmd(),
-			requestStatusCmd,
-			readReleasesFolderCmd,
-			fetchWalletStateCmd(m.screenCtx),
-			tickEveryCmd(m.pollInterval()),
-		}
-		return m, tea.Batch(cmds...)
+		return m, tea.Batch(requestStatusCmd, readReleasesFolderCmd, tickEveryCmd(m.pollInterval()))
 	}
 	return m, nil
 }
@@ -859,22 +422,17 @@ func (m Model) handleKey(
 		return m, tea.Suspend
 	}
 
-	// 1. Fullscreen views
-	if m.subview == svQR || m.subview == svFullURL {
-		return m.handleGenericSubviewKey(key)
-	}
-
-	// 3. Tab bar focused
+	// 1. Tab bar focused
 	if m.tabFocused {
 		return m.handleTabBarKey(key)
 	}
 
-	// 4. Sidebar focused
+	// 2. Sidebar focused
 	if m.nav.Focused {
 		return m.handleSidebarKey(key)
 	}
 
-	// 5. Content focused, dispatch by active tab
+	// 3. Content focused, dispatch by active tab
 	tabs := m.effectiveTabs()
 	if m.activeTab > 0 && m.activeTab < len(tabs) {
 		tab := tabs[m.activeTab]
@@ -889,7 +447,7 @@ func (m Model) handleKey(
 		return m, nil
 	}
 
-	// 6. Section home, all sections are screen-backed
+	// 4. Section home, all sections are screen-backed
 	sec := m.nav.ActiveSection()
 	if sec >= 0 && sec < numSections &&
 		m.sectionScreens[sec] != nil {
@@ -960,27 +518,12 @@ func (m Model) handleSidebarKey(
 		// the new section, so we have to capture the
 		// old section's index here.
 		m.rememberTabPosition()
-		sec := m.nav.Activate()
+		m.nav.Activate()
 		m.focusContent()
 		m.activeTab = 0
 		m.tabFocused = false
 		m.tabCursorX = 0
-		return m.previewSection(sec)
-	}
-	return m, nil
-}
-
-func (m Model) previewSection(
-	sec int,
-) (tea.Model, tea.Cmd) {
-	switch sec {
-	case secChannels:
-		return m, tea.Batch(requestStatusCmd, m.visibleChannelHistoryCmd())
-	case secWallet:
-		return m,
-			requestPaymentHistoryCmd
-	case secOnChain:
-		return m, requestOnChainCmd
+		return m, nil
 	}
 	return m, nil
 }
@@ -1010,9 +553,6 @@ func (m Model) handleTabBarKey(
 		}
 		m.tabCursorX = 0
 		m.focusContent()
-		if m.activeTab == 0 {
-			m.subview = svNone
-		}
 		return m, m.activateTab()
 
 	case "left":
@@ -1057,9 +597,6 @@ func (m Model) handleTabBarKey(
 		}
 		// Enter on a tab label focuses its content.
 		m.focusContent()
-		if m.activeTab == 0 {
-			m.subview = svNone
-		}
 		return m, m.activateTab()
 
 	case "backspace":
@@ -1086,10 +623,6 @@ func (m Model) closeScreenTab(screen Screen) (tea.Model, tea.Cmd) {
 				}
 			}
 		} else {
-			m.releaseWalletCreation(tab.Screen)
-			cancelScreenFees(tab.Screen)
-			cancelChannelCoinRead(tab.Screen)
-			cancelP2PAddressRead(tab.Screen)
 			m.tabs = append(m.tabs[:i], m.tabs[i+1:]...)
 			m.sectionFocus[tab.Section] = 0
 			return m, nil
@@ -1108,15 +641,9 @@ func (m Model) closeTab(
 
 	closingTab := tabs[tabIdx]
 	// Keep submitted operations reachable until their bounded calls return.
-	// A Syncthing install or P2P switch is a job of its own: its screen may
-	// close, and opens on the job again.
-	if autoUnlockBusy(closingTab.Screen) || walletCreationBusy(closingTab.Screen) || onChainSendBusy(closingTab.Screen) || channelOpenBusy(closingTab.Screen) || channelCloseBusy(closingTab.Screen) || m.sshTabBusy(closingTab) || m.syncthingTabBusy(closingTab) {
+	if m.sshTabBusy(closingTab) {
 		return m, nil
 	}
-
-	// Screens own all subview state, so just clear the
-	// Model-level subview flag on any tab close.
-	m.subview = svNone
 
 	// Closing a parent also removes its child tabs in the same section.
 	// Future asynchronous results will no longer reach the removed screens.
@@ -1125,8 +652,7 @@ func (m Model) closeTab(
 		if t.Section != closingTab.Section {
 			return false
 		}
-		if t.Kind == closingTab.Kind &&
-			t.Index == closingTab.Index && t.Key == closingTab.Key {
+		if t.Kind == closingTab.Kind && t.Key == closingTab.Key {
 			return true
 		}
 		if descendants[t.Parent] {
@@ -1138,10 +664,6 @@ func (m Model) closeTab(
 	var newTabs []openTab
 	for _, t := range m.tabs {
 		if shouldRemove(t) {
-			m.releaseWalletCreation(t.Screen)
-			cancelScreenFees(t.Screen)
-			cancelChannelCoinRead(t.Screen)
-			cancelP2PAddressRead(t.Screen)
 			continue
 		}
 		newTabs = append(newTabs, t)
@@ -1156,14 +678,11 @@ func (m Model) closeTab(
 	// tab. If no detail tabs remain, fall back to
 	// the section home (index 0).
 	//
-	// This single rule replaces the previous
-	// addon-parent special case. Closing a Syncthing
-	// device with no siblings now lands on Syncthing
-	// manage (which is at the same neighbor index by
-	// virtue of being adjacent in the tab list).
-	// Closing it with siblings lands on the next
-	// sibling instead, which is what a Sparrow /
-	// browser user expects.
+	// Closing an SSH key's tab with no siblings lands
+	// on the key list, which is the neighbor at that
+	// index. Closing it with siblings lands on the next
+	// sibling, which is what a Sparrow or browser user
+	// expects.
 	newTabCount := len(m.effectiveTabs())
 	if newTabCount > 1 {
 		landing := tabIdx
@@ -1228,22 +747,6 @@ func (m Model) closeTab(
 	return m, nil
 }
 
-func (m Model) handleGenericSubviewKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "enter":
-		m.connectionDisplay = nil
-		m.qrCopyOverlay = nil
-		m.urlTarget = ""
-		m.subview = svNone
-		return m, nil
-	}
-	return m, nil
-}
-
 // ── Screen dispatch helpers ──────────────────────────────
 
 // setTabScreen updates the Screen on the active tab.
@@ -1259,56 +762,12 @@ func (m *Model) setTabScreen(
 	target := tabs[effectiveIdx]
 	for i := range m.tabs {
 		if m.tabs[i].Kind == target.Kind &&
-			m.tabs[i].Index == target.Index &&
 			m.tabs[i].Key == target.Key &&
 			m.tabs[i].Section == target.Section {
-			if m.tabs[i].Screen != s {
-				cancelScreenFees(m.tabs[i].Screen)
-				cancelChannelCoinRead(m.tabs[i].Screen)
-				cancelP2PAddressRead(m.tabs[i].Screen)
-			}
 			m.tabs[i].Screen = s
 			return
 		}
 	}
-}
-
-// Payment, invoice, on-chain send and channel-open results reach their open tabs across sections.
-// Other workflows retain visible-section routing until their lifecycle is reviewed.
-func (m Model) routeToScreen(kind tabKind, msg tea.Msg) (Model, tea.Cmd, bool) {
-	section := m.nav.ActiveSection()
-	for i, tab := range m.tabs {
-		if tab.Section != section && kind != tabSend && kind != tabReceive && kind != tabOnChain && kind != tabOpenChannel {
-			continue
-		}
-		if tab.Kind == kind && tab.Screen != nil {
-			m.screenCtx.HasTabs = true
-			m.screenCtx.ContentFocused = m.contentFocused && tab.Section == section
-			newScreen, cmd := tab.Screen.HandleMsg(msg)
-			m.tabs[i].Screen = newScreen
-			return m, cmd, true
-		}
-	}
-	return m, nil, false
-}
-
-// dispatchToTab routes msg to the screen on the tab of the
-// given kind and returns the updated model + cmd in the
-// shape every Update-switch arm needs. If no matching tab
-// is open, returns (m, nil) and the msg is dropped.
-//
-// This is the boilerplate collapsed. Any async message
-// whose only job is "deliver to the screen that started
-// the work" uses this. Pre-routing state mutations do NOT
-// go here. Those stay inline in Update so ordering stays
-// visible.
-func (m Model) dispatchToTab(
-	kind tabKind, msg tea.Msg,
-) (Model, tea.Cmd) {
-	if rm, cmd, ok := m.routeToScreen(kind, msg); ok {
-		return rm, cmd
-	}
-	return m, nil
 }
 
 // Parent close or replacement must not discard a submitted SSH operation.
@@ -1341,35 +800,4 @@ func (m Model) tabDescendantKinds(parent openTab) map[tabKind]bool {
 		}
 	}
 	return kinds
-}
-
-func syncthingBusy(screen Screen) bool {
-	switch s := screen.(type) {
-	case *SyncthingPairScreen:
-		return s.step == syncPairStepPairing
-	case *SyncthingDeviceScreen:
-		return s.step == syncDeviceStepRemoving
-	}
-	return false
-}
-func (m Model) syncthingTabBusy(tab openTab) bool {
-	if syncthingBusy(tab.Screen) {
-		return true
-	}
-	for _, child := range m.tabs {
-		if child.Section == tab.Section && child.Parent == tab.Kind && syncthingBusy(child.Screen) {
-			return true
-		}
-	}
-	return false
-}
-func (m Model) routeSyncthingResult(owner Screen, msg tea.Msg) (tea.Model, tea.Cmd) {
-	for i, tab := range m.tabs {
-		if tab.Screen == owner {
-			screen, cmd := owner.HandleMsg(msg)
-			m.tabs[i].Screen = screen
-			return m, cmd
-		}
-	}
-	return m, nil
 }

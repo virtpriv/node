@@ -8,14 +8,10 @@ import (
 	"github.com/virtpriv/node/internal/theme"
 )
 
-// Section IDs: the five sections and the theme toggle.
+// Section IDs: the sections and the theme toggle.
 const (
-	secChannels    = 0
-	secWallet      = 1
-	secOnChain     = 2
-	secAddons      = 3
-	secSystem      = 4
-	secThemeToggle = 5
+	secSystem      = 0
+	secThemeToggle = 1
 )
 
 const numSections = len(theme.Sections)
@@ -29,7 +25,6 @@ type NavSidebar struct {
 	Items      []NavItem
 	Cursor     int
 	ActiveItem int
-	Height     int
 	Focused    bool
 }
 
@@ -39,10 +34,6 @@ type NavSidebar struct {
 
 func NewNavSidebar() NavSidebar {
 	items := []NavItem{
-		{theme.Sections[secChannels], secChannels},
-		{theme.Sections[secWallet], secWallet},
-		{theme.Sections[secOnChain], secOnChain},
-		{theme.Sections[secAddons], secAddons},
 		{theme.Sections[secSystem], secSystem},
 		{theme.ThemeIcon(), secThemeToggle},
 	}
@@ -50,7 +41,6 @@ func NewNavSidebar() NavSidebar {
 		Items:      items,
 		Cursor:     0,
 		ActiveItem: 0,
-		Height:     24,
 		Focused:    true,
 	}
 }
@@ -121,16 +111,6 @@ func (n *NavSidebar) UpdateThemeLabel() {
 	}
 }
 
-func (n *NavSidebar) SetActive(section int) {
-	for i, it := range n.Items {
-		if it.Section == section {
-			n.Cursor = i
-			n.ActiveItem = i
-			return
-		}
-	}
-}
-
 // BlockRows returns the styled rows of each section's box, theme.SectionRows
 // tall, with the label in the middle. The active section is shown inverted,
 // and the cursor shows ▸ while the sidebar has focus. A red dot before System
@@ -169,8 +149,8 @@ func (n NavSidebar) BlockRows(w int, systemWarning bool) [numSections][]string {
 	return blocks
 }
 
-// ThemeIconCell draws the theme toggle in its own row under the sections,
-// bright while the cursor is on it.
+// ThemeIconCell draws the theme toggle for the sidebar's last row, bright
+// while the cursor is on it.
 func (n NavSidebar) ThemeIconCell(w int) string {
 	style := theme.Dim
 	if n.Focused && n.Cursor >= 0 && n.Cursor < len(n.Items) && n.Items[n.Cursor].Section == secThemeToggle {

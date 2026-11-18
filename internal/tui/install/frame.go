@@ -20,7 +20,7 @@ const (
 
 // The opening animation, in frames of frameRate: the top bar's line runs
 // across, the sidebar's divider runs down, its section lines run across,
-// then the five names appear one after another.
+// then the section names appear one after another.
 const (
 	lineAcross    = 10
 	dividerDown   = 22
@@ -88,8 +88,8 @@ func dialog(title, desc string, body []string, buttons string) []string {
 }
 
 // sidebar draws the TUI's sidebar for h rows at opening frame f. It holds the
-// five sections, each closed by a line, then the row where the TUI has its
-// theme icon, empty here. lit shows the section names in full color,
+// sections from its top, each closed by a line. Its last row, where the TUI
+// has its theme icon, is empty here. lit shows the section names in full color,
 // otherwise they are faint. It returns the sidebar cells, the divider column
 // beside them and the rows of the section lines, where the frame's left
 // border joins them.

@@ -77,10 +77,6 @@ func TUI(format string, args ...interface{}) {
 	Log("tui", format, args...)
 }
 
-func Status(format string, args ...interface{}) {
-	Log("status", format, args...)
-}
-
 func System(format string, args ...interface{}) {
 	Log("system", format, args...)
 }

@@ -12,9 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/virtpriv/node/internal/app"
-	"github.com/virtpriv/node/internal/bitcoin"
 	"github.com/virtpriv/node/internal/bytesize"
-	"github.com/virtpriv/node/internal/lndrpc"
 	"github.com/virtpriv/node/internal/release"
 	"github.com/virtpriv/node/internal/servicecontrol"
 	"github.com/virtpriv/node/internal/system"
@@ -99,7 +97,7 @@ func (s *SystemHomeScreen) HandleKey(
 	// Block service actions while one is pending
 	if s.svcPending != nil {
 		switch keyStr {
-		case "r", "s", "a", "p", "u":
+		case "r", "s", "a":
 			return s, nil
 		}
 	}
@@ -206,38 +204,6 @@ func (s *SystemHomeScreen) HandleKey(
 				})
 		}
 		return s, nil
-	case "p":
-		if s.focusZone == sysHomeZoneServices &&
-			s.svcName(s.svcCursor) == "lnd" &&
-			s.ctx.Cfg.P2PMode == "tor" {
-			screen := NewP2PUpgradeScreen(s.ctx)
-			return s, func() tea.Msg {
-				return openTabMsg{
-					Kind:   tabP2PUpgrade,
-					Label:  "P2P Upgrade",
-					Screen: screen,
-				}
-			}
-		}
-		return s, nil
-	case "u":
-		if s.focusZone == sysHomeZoneServices &&
-			s.svcName(s.svcCursor) == "lnd" &&
-			s.ctx.walletExists() {
-			screen := NewAutoUnlockScreen(s.ctx)
-			label := "Auto-Unlock"
-			if s.ctx.Cfg.AutoUnlock {
-				label = "Disable Auto-Unlock"
-			}
-			return s, func() tea.Msg {
-				return openTabMsg{
-					Kind:   tabAutoUnlock,
-					Label:  label,
-					Screen: screen,
-				}
-			}
-		}
-		return s, nil
 	case "backspace":
 		return s, emitFocusSidebar
 	case "enter":
@@ -304,7 +270,6 @@ func (s *SystemHomeScreen) View(
 	w, h int,
 ) string {
 	isFocused := s.ctx.ContentFocused
-	cfg := s.ctx.Cfg
 	status := s.ctx.Status
 
 	boxW := w - 4
@@ -312,7 +277,7 @@ func (s *SystemHomeScreen) View(
 		boxW = 30
 	}
 
-	border := theme.AddonBorderNormal
+	border := theme.CardBorder
 	titleStyle := lipgloss.NewStyle().
 		Foreground(theme.ColorPrimary).
 		Bold(true)
@@ -395,7 +360,7 @@ func (s *SystemHomeScreen) View(
 			strings.Repeat(" ", svcTitlePad)+
 			border.Render("│"))
 
-	names := serviceNames(cfg)
+	names := app.StatusServices()
 	for i, name := range names {
 		dot := theme.Dim.Render("?")
 		stateText := "unavailable"
@@ -430,12 +395,6 @@ func (s *SystemHomeScreen) View(
 		if stateText != "" {
 			svcLine += " " + theme.Dim.Render(stateText)
 		}
-		if name == "lnd" && status != nil &&
-			status.WalletState.Known() && status.WalletState.Value == lndrpc.WalletStateLocked {
-			// Shown while it sets the sidebar's dot, so the dot has a reason.
-			svcLine += "  " + theme.Warning.Render(observationText(status.WalletState, "locked"))
-		}
-
 		if s.svcPending != nil && s.svcPending.request.Service() == name {
 			svcLine += "  " +
 				theme.Dim.Render(servicePendingText(s.svcPending.request))
@@ -521,15 +480,6 @@ func (s *SystemHomeScreen) View(
 						bytesize.Format(status.Memory.Value.UsedBytes),
 						bytesize.Format(status.Memory.Value.TotalBytes),
 						status.Memory.Value.Percent))),
-			" " + theme.Label.Render("BTC:  ") +
-				theme.Value.Render(
-					bitcoinSize(status.Bitcoin)),
-		}
-		if cfg.HasLND() {
-			resRows = append(resRows,
-				" "+theme.Label.Render("LND:  ")+
-					theme.Value.Render(
-						observationText(status.LNDSize, status.LNDSize.Value)))
 		}
 
 		for _, rl := range resRows {
@@ -557,95 +507,6 @@ func (s *SystemHomeScreen) View(
 				loadLine+
 				strings.Repeat(" ", loadPad)+
 				border.Render("│"))
-	}
-
-	midLines = append(midLines,
-		"  "+border.Render(
-			"└"+strings.Repeat("─", boxW-2)+"┘"))
-
-	midLines = append(midLines, "")
-
-	// Bitcoin card
-	midLines = append(midLines,
-		"  "+border.Render(
-			"┌"+strings.Repeat("─", boxW-2)+"┐"))
-
-	btcTitle := " ₿ Bitcoin"
-	btcTitlePad := boxW - 2 -
-		lipgloss.Width(btcTitle)
-	if btcTitlePad < 0 {
-		btcTitlePad = 0
-	}
-	midLines = append(midLines,
-		"  "+border.Render("│")+
-			theme.Bitcoin.Render(btcTitle)+
-			strings.Repeat(" ", btcTitlePad)+
-			border.Render("│"))
-
-	if status == nil {
-		btcLoad := " " +
-			theme.Dim.Render(" Loading...")
-		btcLoadVis := lipgloss.Width(btcLoad)
-		btcLoadPad := boxW - 2 - btcLoadVis
-		if btcLoadPad < 0 {
-			btcLoadPad = 0
-		}
-		midLines = append(midLines,
-			"  "+border.Render("│")+
-				btcLoad+
-				strings.Repeat(" ", btcLoadPad)+
-				border.Render("│"))
-	} else if !status.Bitcoin.Known() {
-		btcErr := " " +
-			theme.Warn.Render(" Not responding")
-		btcErrVis := lipgloss.Width(btcErr)
-		btcErrPad := boxW - 2 - btcErrVis
-		if btcErrPad < 0 {
-			btcErrPad = 0
-		}
-		midLines = append(midLines,
-			"  "+border.Render("│")+
-				btcErr+
-				strings.Repeat(" ", btcErrPad)+
-				border.Render("│"))
-	} else {
-		var btcRows []string
-		syncVal := theme.Good.Render("synced")
-		if !status.Bitcoin.Value.Synced {
-			syncVal = theme.Warn.Render("syncing")
-		}
-		btcRows = append(btcRows,
-			" "+theme.Label.Render("Sync:     ")+
-				observationText(status.Bitcoin, syncVal))
-		btcRows = append(btcRows,
-			" "+theme.Label.Render("Height:   ")+
-				theme.Value.Render(
-					fmt.Sprintf("%d / %d",
-						status.Bitcoin.Value.Blocks,
-						status.Bitcoin.Value.Headers)))
-		if status.Bitcoin.Value.Progress > 0 {
-			btcRows = append(btcRows,
-				" "+theme.Label.Render("Progress: ")+
-					theme.Value.Render(
-						bitcoin.FormatProgress(
-							status.Bitcoin.Value.Progress)))
-		}
-		btcRows = append(btcRows,
-			" "+theme.Label.Render("Network:  ")+
-				theme.Value.Render(cfg.Network))
-
-		for _, bl := range btcRows {
-			blVis := lipgloss.Width(bl)
-			blPad := boxW - 2 - blVis
-			if blPad < 0 {
-				blPad = 0
-			}
-			midLines = append(midLines,
-				"  "+border.Render("│")+
-					bl+
-					strings.Repeat(" ", blPad)+
-					border.Render("│"))
-		}
 	}
 
 	midLines = append(midLines,
@@ -709,20 +570,6 @@ func (s *SystemHomeScreen) serviceBindings() []key.Binding {
 		bind("a", "start", "a"),
 		bind("l", "logs", "l"),
 	}
-	if s.svcName(s.svcCursor) == "lnd" &&
-		s.ctx.Cfg.P2PMode == "tor" {
-		binds = append(binds,
-			bind("p", "p2p", "p"))
-	}
-	if s.svcName(s.svcCursor) == "lnd" &&
-		s.ctx.walletExists() {
-		uHelp := "unlock"
-		if s.ctx.Cfg.AutoUnlock {
-			uHelp = "lock"
-		}
-		binds = append(binds,
-			bind("u", uHelp, "u"))
-	}
 	binds = append(binds, kShiftTabButtons, kSidebar, kBack, kQuit)
 	return binds
 }
@@ -773,11 +620,11 @@ func (s *SystemHomeScreen) buttonLabels() []string {
 }
 
 func (s *SystemHomeScreen) svcCount() int {
-	return len(serviceNames(s.ctx.Cfg))
+	return len(app.StatusServices())
 }
 
 func (s *SystemHomeScreen) svcName(i int) string {
-	names := serviceNames(s.ctx.Cfg)
+	names := app.StatusServices()
 	if i >= 0 && i < len(names) {
 		return names[i]
 	}

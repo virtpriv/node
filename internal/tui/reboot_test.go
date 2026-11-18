@@ -12,7 +12,7 @@ import (
 	"github.com/virtpriv/node/internal/system"
 )
 
-func TestRebootHiddenCompletionRetryAndDuplicateAdmission(t *testing.T) {
+func TestRebootCompletionRetryAndDuplicateAdmission(t *testing.T) {
 	m, _ := statusModelFixture(t)
 	fake := &fakeJobs{}
 	m.screenCtx.Jobs = fake
@@ -21,9 +21,7 @@ func TestRebootHiddenCompletionRetryAndDuplicateAdmission(t *testing.T) {
 	s := NewSystemHomeScreen(m.screenCtx)
 	m.sectionScreens[secSystem] = s
 	m.screenCtx.Status = &app.StatusSnapshot{Reboot: freshStatus(system.RebootFlag{Required: true})}
-	m.statusScope = m.currentStatusScope()
 	s.btnIdx = slices.Index(s.buttonActions(), sysBtnReboot)
-	m.sectionScreens[secAddons] = NewAddonsHomeScreen(m.screenCtx)
 	press := func(code rune) tea.Cmd { return statusUpdate(&m, tea.KeyPressMsg{Code: code}) }
 	press(tea.KeyEnter)
 	confirm := press('y')
@@ -55,23 +53,16 @@ func TestRebootHiddenCompletionRetryAndDuplicateAdmission(t *testing.T) {
 	if press('y') != nil || fake.calls != 1 {
 		t.Fatal("duplicate reboot accepted while pending")
 	}
-	// Navigate through root dispatch while the same System screen stays mounted.
+	// The result arrives while focus is in the sidebar.
 	statusUpdate(&m, press(tea.KeyBackspace)())
-	press(tea.KeyUp)
-	press(tea.KeyEnter)
-	if m.nav.ActiveSection() == secSystem {
-		t.Fatal("System did not hide")
-	}
 	fake.results <- done(app.JobUnconfirmed, errors.New("injected lost reboot reply"))
 	oldResult := resultCmd()
 	statusUpdate(&m, oldResult)
 	if s.rebootPending != nil {
-		t.Fatal("hidden owner did not complete")
+		t.Fatal("owner did not complete")
 	}
-	statusUpdate(&m, press(tea.KeyBackspace)())
-	press(tea.KeyDown)
 	press(tea.KeyEnter)
-	if m.nav.ActiveSection() != secSystem {
+	if !m.contentFocused {
 		t.Fatal("did not return to System")
 	}
 	view := ansi.Strip(m.viewMain())
@@ -116,7 +107,6 @@ func TestRebootRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 	m.focusContent()
 	s := NewSystemHomeScreen(m.screenCtx)
 	m.sectionScreens[secSystem] = s
-	m.statusScope = m.currentStatusScope()
 	m.screenCtx.Status = &app.StatusSnapshot{Reboot: freshStatus(system.RebootFlag{Required: true}), Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
 	s.btnIdx = slices.Index(s.buttonActions(), sysBtnReboot)
 	before, beforeDone := startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
@@ -175,7 +165,6 @@ func TestRebootRejectsReplacedScreenRequestsAndResults(t *testing.T) {
 		t.Fatal("mounted owner did not start")
 	}
 	m.sectionScreens[secSystem] = replacement
-	m.statusScope = m.currentStatusScope()
 	m.screenCtx.Status = &app.StatusSnapshot{Reboot: freshStatus(system.RebootFlag{})}
 	fake.results <- done(app.JobCompleted, nil)
 	if statusUpdate(&m, resultCmd()) != nil || !m.screenCtx.Status.Reboot.Fresh() {

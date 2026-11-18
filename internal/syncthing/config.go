@@ -5,11 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
-	"path/filepath"
-
-	"github.com/virtpriv/node/internal/paths"
 )
 
 // ConfirmPrivacy requires explicit fields; missing values are not evidence of
@@ -50,76 +45,4 @@ func (c *Client) ConfirmPrivacy(ctx context.Context) error {
 		return errors.New("syncthing Web UI privacy/authentication configuration has changed")
 	}
 	return nil
-}
-
-// BackupFolder keeps unmodeled per-device fields intact when PATCH replaces the
-// devices array. In particular, encryption passwords and introduction metadata
-// must survive pairing another receiver.
-type BackupFolder struct {
-	ID      string            `json:"id"`
-	Path    string            `json:"path"`
-	Type    string            `json:"type"`
-	Marker  string            `json:"markerName"`
-	Devices []json.RawMessage `json:"devices"`
-}
-
-func (f BackupFolder) HasDevice(id string) bool {
-	for _, raw := range f.Devices {
-		var d struct {
-			ID string `json:"deviceID"`
-		}
-		if json.Unmarshal(raw, &d) == nil && d.ID == id {
-			return true
-		}
-	}
-	return false
-}
-func (c *Client) BackupFolder(ctx context.Context, localID string) (BackupFolder, error) {
-	var f BackupFolder
-	if err := c.read(ctx, "/rest/config/folders/lnd-backup", &f); err != nil {
-		return f, err
-	}
-	return f, f.validate(localID)
-}
-
-func (f BackupFolder) validate(localID string) error {
-	if f.ID != "lnd-backup" || filepath.Clean(f.Path) != paths.LNDBackupExport || f.Type != "sendonly" || f.Marker != paths.ExportReadyMarkerName || !f.HasDevice(localID) {
-		return errors.New("backup folder boundary differs from the expected send-only export; maintenance inspection is required")
-	}
-	for _, raw := range f.Devices {
-		var d struct {
-			ID string `json:"deviceID"`
-		}
-		if json.Unmarshal(raw, &d) != nil || d.ID == "" {
-			return errors.New("invalid backup folder device entry")
-		}
-	}
-	return nil
-}
-func (c *Client) ShareBackup(ctx context.Context, f BackupFolder, id string) error {
-	if f.HasDevice(id) {
-		return nil
-	}
-	raw, _ := json.Marshal(struct {
-		ID string `json:"deviceID"`
-	}{id})
-	devices := append(append([]json.RawMessage(nil), f.Devices...), raw)
-	body, err := json.Marshal(struct {
-		Devices []json.RawMessage `json:"devices"`
-	}{devices})
-	if err != nil {
-		return err
-	}
-	_, err = c.Request(ctx, http.MethodPatch, "/rest/config/folders/lnd-backup", string(body))
-	return err
-}
-func (c *Client) AddDevice(ctx context.Context, id string) error {
-	// Explicitly disable trust-expanding defaults even if Web UI defaults changed.
-	body, _ := json.Marshal(map[string]any{"deviceID": id, "name": "local-backup", "addresses": []string{"dynamic"}, "autoAcceptFolders": false, "introducer": false, "skipIntroductionRemovals": false, "introducedBy": ""})
-	_, err := c.Request(ctx, http.MethodPost, "/rest/config/devices", string(body))
-	return err
-}
-func (c *Client) RemoveDevice(ctx context.Context, id string) error {
-	_, err := c.Request(ctx, http.MethodDelete, "/rest/config/devices/"+url.PathEscape(id), "")
-	return err
 }

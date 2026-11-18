@@ -71,12 +71,6 @@ func (m *Model) invalidateServiceStatus(service string) {
 		if status.Services != nil {
 			status.Services[service] = observation
 		}
-		if service == "bitcoind" || service == "tor" {
-			status.Bitcoin.Err = err
-		}
-		if service != "syncthing" {
-			*status = status.WalletUnavailable(err)
-		}
 	}
 }
 

@@ -305,9 +305,6 @@ func (s *NodeUpdateScreen) buttons() []string {
 	}
 	out := []string{"Close"}
 	if s.status.Active {
-		if s.status.Running && s.status.Phase == "waiting-unlock" {
-			return append(out, "Unlock wallet")
-		}
 		if !s.status.Running {
 			if expectedStop(s.status) {
 				out = append(out, "Continue")
@@ -338,8 +335,6 @@ func (s *NodeUpdateScreen) focusLead() {
 	case s.olderThanUpdate():
 		lead = "Relaunch"
 	case !st.Active:
-	case st.Running && st.Phase == "waiting-unlock":
-		lead = "Unlock wallet"
 	case st.Running:
 	case st.Phase == "failed":
 		next, _ := advice(st)
@@ -407,21 +402,6 @@ func (s *NodeUpdateScreen) HandleKey(k string, _ tea.KeyPressMsg) (Screen, tea.C
 			return s, s.request("resume")
 		case "Cancel update":
 			return s, s.request("cancel")
-		case "Unlock wallet":
-			args, err := app.UpdateUnlockArguments(s.status)
-			if err != nil {
-				s.err = err
-				return s, nil
-			}
-			s.busy = "unlock"
-			s.err = nil
-			s.attempt++
-			attempt := s.attempt
-			status := s.status
-			unlock := &introducedCommand{introduction: walletUnlockIntroduction, cmd: exec.Command("/usr/local/bin/lncli", args...)}
-			return s, tea.Exec(unlock, func(err error) tea.Msg {
-				return nodeUpdateMsg{owner: s, attempt: attempt, kind: "unlock", status: status, err: err}
-			})
 		}
 	}
 	return s, nil
@@ -550,9 +530,9 @@ func advice(st protocol.Status) (protocol.Next, string) {
 }
 
 // expectedStop reports a failure the update meets in normal use and that
-// Continue gets past, such as LND that exits with an error when it is
-// stopped while its wallet is locked or not created yet. Continue sends the
-// same request as Retry. Only the screen's words and colors differ.
+// Continue gets past, such as a service that exits with an error when it
+// is stopped. Continue sends the same request as Retry. Only the screen's
+// words and colors differ.
 func expectedStop(st protocol.Status) bool {
 	if st.Phase != "failed" {
 		return false
@@ -628,7 +608,7 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 		r := s.review
 		m := r.Manifest
 		if release.IsCandidate(m.Version) {
-			p.fitText(theme.Warning, "Release candidate, for testing on a node without funds.", 0)
+			p.fitText(theme.Warning, "Release candidate, for testing only.", 0)
 		}
 		p.field("VPN: ", r.Source.VPN+" → "+m.Version)
 		for _, c := range protocol.Components {
@@ -684,9 +664,6 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 		if s.olderThanUpdate() {
 			after.blank()
 			paragraphs(after, "Update complete.\n\nSelect Relaunch to open the new version.", 0)
-		} else if s.status.Phase == "waiting-unlock" && s.status.Running && len(s.status.Steps) > 0 {
-			after.blank()
-			paragraphs(after, "Unlock the LND wallet to finish.\n\nSelect Unlock wallet.", 0)
 		} else if failed && !s.status.Running {
 			// While the worker still finishes its cleanup neither Retry nor
 			// Cancel is offered, so no advice is given yet.
