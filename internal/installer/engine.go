@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"unicode"
 	"unicode/utf8"
 
@@ -51,8 +52,8 @@ const (
 	StepRunning
 	StepDone
 	StepFailed
-	// StepSkipped renders a resume skip: the ledger records a
-	// prior completion, the step did not execute this pass.
+	// StepSkipped renders a resume skip. The ledger records a
+	// prior completion, and the step did not execute this pass.
 	StepSkipped
 )
 
@@ -160,8 +161,9 @@ func newStepRunner(
 // runIndex executes one step per the plan. Every path leaves a
 // log line (start, skip, complete, FAILED), so a run's trail
 // in vpn.log never just stops. The ledger entry is written only after Fn returns nil.
-// A publication failure stops the run immediately: later steps must not
-// advance past a mutation whose completion is not durable for the next pass.
+// A publication failure stops the run immediately, because later steps must
+// not advance past a mutation whose completion is not durable for the next
+// pass.
 func (r *stepRunner) runIndex(i int) (skipped bool, err error) {
 	s := &r.steps[i]
 	n, total := i+1, len(r.steps)
@@ -275,8 +277,24 @@ func RefusedStartText(err error) string {
 	return "The install did not start. " + string(unicode.ToUpper(r)) + why[n:] + "."
 }
 
+// runsInstalledVPN reports whether the running program is the vpn that step
+// 1 installs. Only then is it certain that the vpn command exists.
+func runsInstalledVPN() bool {
+	self, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(self); err == nil {
+		self = resolved
+	}
+	return self == paths.BinaryPath
+}
+
 // Lines are what the shell shows after the install screen closes. A command
-// to type stands alone on the last line, after an empty one.
+// to type stands alone on the last line, after an empty one. The command is
+// named only when vpn is installed for certain, after a pause or when the
+// running program is the installed vpn. Otherwise the owner runs the
+// downloaded program again.
 func (e *StopError) Lines() []string {
 	var out []string
 	if e.StartErr != nil {
@@ -284,11 +302,15 @@ func (e *StopError) Lines() []string {
 	}
 	var run string
 	switch {
-	case e.NotStarted && e.StartErr != nil:
-		run = "To try again, run:"
 	case e.NotStarted:
-		out = append(out, "The install did not start.")
-		run = "To start it, run:"
+		if e.StartErr == nil {
+			out = append(out, "The install did not start.")
+		}
+		if runsInstalledVPN() {
+			run = "To try again, run:"
+		} else {
+			out = append(out, "To start it, run the installer again.")
+		}
 	case e.Paused:
 		out = append(out, fmt.Sprintf("Install paused after step %d of %d (%s).", e.DoneNum, e.Total, e.DoneName))
 		run = fmt.Sprintf("To continue with step %d (%s), run:", e.StepNum, e.StepName)
@@ -307,7 +329,8 @@ func (e *StopError) Lines() []string {
 }
 
 // PrintStop shows in the shell why an install ended without finishing, once
-// the install screen has closed: a pause, a refusal or a failure.
+// the install screen has closed. The reason is a pause, a refusal or a
+// failure.
 func PrintStop(err error) {
 	lines := []string{"Failed: " + err.Error()}
 	var stop *StopError

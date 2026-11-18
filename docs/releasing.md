@@ -240,12 +240,14 @@ through an update and still be resumed.
 `vpnd` likewise ignores plan fields it does not know, and still enforces the
 exact source, newer-version and recovery checks. The worker reads the approved
 plan bytes in full and refuses a plan it does not completely understand. A
-plan with a `protocol` number `vpnd` does not know is refused with "this
-release needs a newer VPN first, see its release notes", unless it names a
-`bridge` the node can install first. The same sentence shows when the plan is
-the older one, such as a plan of the Bitcoin and Lightning node on a base
-node. A corrective worker can read the failed update's retained record,
-`result.json` in that update's folder.
+plan with a later `protocol` number than `vpnd` knows is refused with "this
+release needs a newer VPN first, see its release notes". A plan with an
+earlier number, such as a plan of the Bitcoin and Lightning node on a base
+node, is refused with "this release was made for an older VPN and cannot
+update this node". A plan that names a `bridge` the node can install first
+gets neither sentence. The node is told to install that release first. A
+corrective worker can read the failed update's retained record, `result.json`
+in that update's folder.
 
 ## Limits
 

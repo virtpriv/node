@@ -33,7 +33,8 @@ type SettingsScreen struct {
 const settingsTestReleaseButton = "Test release"
 
 // settingsReviewMsg carries the node's answer for a test release back to its
-// form: whether an update is still on its way, else the review or the error.
+// form. It says whether an update is still on its way, or else carries the
+// review or the error.
 type settingsReviewMsg struct {
 	owner      *SettingsScreen
 	attempt    uint64
@@ -59,7 +60,7 @@ func (s *SettingsScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 		}
 		value := strings.TrimSpace(m.Content)
 		if len(value) > s.release.CharLimit || validatePrintableASCII(value) != nil {
-			s.err = "Enter a release tag, such as v0.7.0-rc.1."
+			s.err = "Enter a release tag, such as vX.Y.Z-rc.N."
 			return s, nil
 		}
 		s.release.SetValue(value)
@@ -175,7 +176,7 @@ func (s *SettingsScreen) HandleKey(k string, msg tea.KeyPressMsg) (Screen, tea.C
 		}
 	case "enter":
 		input := textinput.New()
-		input.Placeholder = "v0.7.0-rc.1"
+		input.Placeholder = "vX.Y.Z-rc.N"
 		input.CharLimit = 64
 		input.SetWidth(40)
 		input.Validate = validatePrintableASCII
@@ -238,9 +239,9 @@ func (s *SettingsScreen) handleFormKey(k string, msg tea.KeyPressMsg) (Screen, t
 
 // review asks the node for the named release's review. A tag that is not a
 // newer release is refused here. An update still on its way, or paused at
-// Continue, is not reviewed over: the node is not asked and Node Updates
+// Continue, is not reviewed over. The node is not asked and Node Updates
 // shows that update. After an update that needs Retry, or when the status
-// cannot be read, the node decides: it refuses a review while an unfinished
+// cannot be read, the node decides. It refuses a review while an unfinished
 // update needs a repair release.
 func (s *SettingsScreen) review() tea.Cmd {
 	version := strings.TrimPrefix(strings.TrimSpace(s.release.Value()), "v")

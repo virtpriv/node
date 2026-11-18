@@ -181,7 +181,7 @@ func TestInstalledSideAdmitsLaterPlanWithoutWeakeningAdmission(t *testing.T) {
 			p["protocol"] = 1
 			p["networks"] = []any{"mainnet"}
 			p["sources"] = []any{map[string]any{"vpn": "0.7.0", "bitcoin": "31.2", "lnd": "0.21.8-beta", "syncthing": ""}}
-		}, refused: "newer VPN"},
+		}, refused: "older VPN"},
 		{name: "bridge must be older than its release", change: func(p map[string]any) { p["bridge"] = "0.7.1" }, refused: "bridge"},
 		{name: "stable release cannot route through a candidate", change: func(p map[string]any) { p["bridge"] = "0.7.1-rc.1" }, refused: "bridge"},
 	} {
