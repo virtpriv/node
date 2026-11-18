@@ -11,8 +11,8 @@ import (
 
 // acquireRunLock serializes the whole base installer on a stable runtime
 // object. The lock is never renamed, deleted, truncated, or used as durable
-// payload; kernel close-on-exit semantics release flock after any process
-// death without a stale pid-file protocol.
+// payload. The kernel releases the lock when the process ends, so there is
+// no stale pid file to handle.
 func acquireRunLock(dir, path string) (*os.File, error) {
 	if err := ensureSecureRuntimeDir(dir); err != nil {
 		return nil, err
@@ -42,7 +42,7 @@ func acquireRunLock(dir, path string) (*os.File, error) {
 		f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return nil, errors.New(
-				"another `vpn install` is already running — wait for it to finish")
+				"another `vpn install` is already running, wait for it to finish")
 		}
 		return nil, fmt.Errorf("lock %s: %w", path, err)
 	}

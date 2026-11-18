@@ -114,8 +114,9 @@ To install without screens, run `./vpn install --unattended` instead. It asks
 nothing and prints a generated login password for `vpn` once, at the end. Save
 it. If that install stops, continue it with `sudo vpn install --unattended`.
 
-If the install stops, or you close it, it shows the step it reached. To
-continue:
+If the installer closes or stops before its first step has finished, run
+`./vpn install` again. After the first step, if the install stops, or you
+close it, it shows the step it reached. To continue:
 
 ```bash
 sudo vpn install

@@ -754,7 +754,13 @@ func (m wizardModel) connectDialog() []string {
 func (m wizardModel) endNotice() []string {
 	text := "Exit and inspect the reported problem. A later 'sudo vpn install' checks the saved state before resuming."
 	if m.failed {
-		text = "Installation stopped after a step failed. Inspect the reported problem before running 'sudo vpn install' again. It resumes from the first incomplete step."
+		// Step 1 installs vpn. When it is the step that failed, there is no
+		// vpn command to name yet.
+		again := "'sudo vpn install'"
+		if len(m.steps) > 0 && m.steps[0].Status == installer.StepFailed {
+			again = "the installer"
+		}
+		text = "Installation stopped after a step failed. Inspect the reported problem before running " + again + " again. It resumes from the first incomplete step."
 	}
 	text += " Details are in " + paths.LogFile + "."
 	if m.rootLoginOff {

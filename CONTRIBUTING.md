@@ -57,20 +57,20 @@ git diff --check
 The signature tests need the `gpg` program (GnuPG) installed. They fail,
 and do not skip, when it is missing.
 
-Tests whose names begin with `TestRoot` exercise real Linux ownership
-and filesystem behavior. Outside Linux or without effective UID 0, they
-skip with an explicit reason.
+Some tests exercise real Linux ownership and filesystem behavior and
+need root. Most of their names begin with `TestRoot`. Outside Linux or
+without effective UID 0, most of them skip with an explicit reason.
 
-Run the privileged gate only on a disposable Debian 13 amd64 system:
+Run the privileged gate only on a disposable Debian 13 amd64 system. It
+runs the tests of every package as root:
 
 ```bash
-sudo env VPN_REQUIRE_ROOT_TESTS=1 "$(command -v go)" test \
-  -count=1 -v ./internal/installer -run '^TestRoot'
+sudo env VPN_REQUIRE_ROOT_TESTS=1 "$(command -v go)" test -count=1 ./...
 ```
 
-`VPN_REQUIRE_ROOT_TESTS=1` does not grant privileges. It makes the
-selected tests fail instead of skip when their required environment is
-unavailable.
+`VPN_REQUIRE_ROOT_TESTS=1` does not grant privileges. It makes the tests
+of `internal/installer` and `internal/host` that need root, `sshd` or
+`visudo` fail instead of skip when what they need is unavailable.
 
 Passing the portable and privileged gates does not certify the complete
 installer. Changes affecting installation, services, lifecycle state,

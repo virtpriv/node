@@ -241,11 +241,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 		// The log must not just stop. Record how far the install got and
 		// what running it again does.
 		if len(ledger.Steps) == 0 {
-			if startErr != nil {
-				logger.Install("install did not start, run sudo vpn install to try again")
-			} else {
-				logger.Install("install did not start, run sudo vpn install to start it")
-			}
+			logger.Install("install did not start, run the installer again to start it")
 			return &StopError{NotStarted: true, StartErr: startErr}
 		}
 		stop := &StopError{Paused: true, Total: len(steps), StartErr: startErr}
