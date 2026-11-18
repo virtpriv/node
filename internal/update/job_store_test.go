@@ -13,16 +13,16 @@ import (
 	"github.com/virtpriv/node/internal/update/protocol"
 )
 
-func TestDurableRecordPreservesMigrationBoundary(t *testing.T) {
+// The record keeps, across a save and a load, that the program may have been
+// replaced. A record of another schema is refused, never read as an empty job.
+func TestDurableRecordKeepsThatChangesBegan(t *testing.T) {
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	j := workflowFixture()
 	j.Review.Manifest.Version = "0.7.1-rc.1"
-	j.Started["lnd"] = true
-	j.MayHaveRun["lnd"] = true
-	j.Phase = "starting"
+	j.Phase, j.HostChanges = "committing", true
 	if err := saveJob(root, j); err != nil {
 		t.Fatal(err)
 	}
@@ -30,16 +30,18 @@ func TestDurableRecordPreservesMigrationBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal("read saved update record:", err)
 	}
-	if loaded == nil || loaded.Review.Manifest.Version != "0.7.1-rc.1" || !loaded.MayHaveRun["lnd"] || !loaded.Started["lnd"] {
-		t.Fatal("lost possible database migration")
+	if loaded == nil || loaded.Review.Manifest.Version != "0.7.1-rc.1" || !loaded.HostChanges || loaded.Phase != "committing" {
+		t.Fatal("lost that changes began")
 	}
 	// Change only the schema so another missing field cannot mask the refusal.
-	j.Schema = 99
-	if err := saveJob(root, j); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := loadJob(root); err == nil {
-		t.Fatal("unknown record became an empty job")
+	for _, schema := range []int{1, 99} {
+		j.Schema = schema
+		if err := saveJob(root, j); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadJob(root); err == nil {
+			t.Fatalf("a record of schema %d became a job", schema)
+		}
 	}
 }
 
@@ -69,11 +71,10 @@ func TestApprovalBindsSourceConfigurationAndRelease(t *testing.T) {
 	}
 	for name, change := range map[string]func(*prepared){
 		"configuration": func(p *prepared) { p.ConfigHash = strings.Repeat("b", 64) },
-		"source":        func(p *prepared) { p.Review.Source.LND = "0.21.0-beta" },
+		"source":        func(p *prepared) { p.Review.Source.VPN = "0.6.9" },
 		"archive":       func(p *prepared) { p.Review.Digest = strings.Repeat("b", 64) },
 		"worker":        func(p *prepared) { p.WorkerHash = strings.Repeat("b", 64) },
 		"plan":          func(p *prepared) { p.PlanHash = strings.Repeat("b", 64) },
-		"network":       func(p *prepared) { p.Review.Network = "mainnet" },
 		"recovery":      func(p *prepared) { p.Previous = strings.Repeat("b", 64) },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -124,8 +125,8 @@ func rawRecord(t *testing.T, root string) map[string]any {
 	return m
 }
 
-// An installed helper and launcher stay in service for every later release
-// that admits them. A later worker may add fields, phases and components.
+// The installed side and launcher stay in service for every later release
+// that admits them. A later worker may add fields, phases and programs.
 func TestInstalledSideHandlesLaterWorkerRecord(t *testing.T) {
 	for _, tc := range []struct {
 		name, phase string
@@ -152,9 +153,9 @@ func TestInstalledSideHandlesLaterWorkerRecord(t *testing.T) {
 				m["snapshot"] = map[string]any{"taken": true}
 				// A later worker may shape the screen's list differently.
 				m["steps"] = map[string]any{"changed": true}
-				// And save a failure code with fields of its own.
+				// And save a failure code and the programs it changes.
 				m["failure"] = map[string]any{"code": "snapshot_failed", "service": "tor", "detail": 1}
-				m["affected"] = append(m["affected"].([]any), "tor")
+				m["affected"] = []any{"tor"}
 				m["review"].(map[string]any)["manifest"].(map[string]any)["tor"] = "0.5.0"
 			})
 			kept := func(when string) map[string]any {
@@ -169,7 +170,7 @@ func TestInstalledSideHandlesLaterWorkerRecord(t *testing.T) {
 			}
 			r, err := loadRecord(root)
 			if err != nil || r == nil {
-				t.Fatal("a later record locked the helper out:", err)
+				t.Fatal("a later record locked the installed side out:", err)
 			}
 			if !r.active() {
 				t.Fatal("an unknown phase lifted the maintenance restriction")
@@ -180,12 +181,9 @@ func TestInstalledSideHandlesLaterWorkerRecord(t *testing.T) {
 			if err := retryUpdate(root, j.Review.Digest); err != nil {
 				t.Fatal(err)
 			}
-			if m := kept("Retry"); m["phase"] != "retry" || m["error"] != nil || m["failure"] != nil {
-				t.Fatal("Retry did not hand the job back to the worker", m["phase"], m["error"], m["failure"])
+			if m := kept("Retry"); m["phase"] != "retry" || m["error"] != nil {
+				t.Fatal("Retry did not hand the job back to the worker", m["phase"], m["error"])
 			}
-			rewriteRecord(t, root, func(m map[string]any) {
-				m["failure"] = map[string]any{"code": "snapshot_failed"}
-			})
 			err = cancelUpdate(root, j.Review.Digest)
 			if (err == nil) == tc.begun {
 				t.Fatal("wrong cancellation boundary:", err)
@@ -194,60 +192,8 @@ func TestInstalledSideHandlesLaterWorkerRecord(t *testing.T) {
 			if (m["phase"] == "canceled") == tc.begun {
 				t.Fatal("cancellation outcome was not recorded as decided", m["phase"])
 			}
-			if !tc.begun && m["failure"] != nil {
-				t.Fatal("Cancel kept the failure code", m["failure"])
-			}
 			if r, err = loadRecord(root); err != nil || r.active() == !tc.begun {
 				t.Fatal("maintenance restriction does not match the cancellation", err)
-			}
-		})
-	}
-}
-
-// The installed helper passes a saved failure code to the screen only with
-// the error it explains, and only in a shape it can read. A later worker may
-// add codes and services, which pass so the screen can fall back to its
-// general advice. Any other shape is left out and status stays readable.
-func TestStatusPassesOnlyAReadableFailure(t *testing.T) {
-	stop := map[string]any{"code": "stop_failed", "service": "lnd"}
-	for _, tc := range []struct {
-		name    string
-		failure any
-		err     string
-		want    *protocol.Failure
-	}{
-		{"known code", stop, "lnd did not stop cleanly", &protocol.Failure{Code: "stop_failed", Service: "lnd"}},
-		{"code without the error it explains", stop, "", nil},
-		{"later code and service", map[string]any{"code": "snapshot_failed", "service": "tor", "detail": 1}, "x", &protocol.Failure{Code: "snapshot_failed", Service: "tor"}},
-		{"code without a service", map[string]any{"code": "start_interrupted"}, "x", &protocol.Failure{Code: "start_interrupted"}},
-		{"another shape", "stop_failed", "x", nil},
-		{"a list", []any{stop}, "x", nil},
-		{"empty code", map[string]any{"code": ""}, "x", nil},
-		{"capital letters", map[string]any{"code": "Stop_Failed"}, "x", nil},
-		{"code too long", map[string]any{"code": strings.Repeat("a", 33)}, "x", nil},
-		{"service with a space", map[string]any{"code": "stop_failed", "service": "lnd service"}, "x", nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			root, err := filepath.EvalSymlinks(t.TempDir())
-			if err != nil {
-				t.Fatal(err)
-			}
-			j := workflowFixture()
-			j.Phase, j.Error = "failed", tc.err
-			if err := saveJob(root, j); err != nil {
-				t.Fatal(err)
-			}
-			rewriteRecord(t, root, func(m map[string]any) { m["failure"] = tc.failure })
-			r, err := loadRecord(root)
-			if err != nil || r == nil {
-				t.Fatal("record with a failure code unreadable:", err)
-			}
-			s := r.status()
-			if !sameFailure(s.Failure, tc.want) {
-				t.Fatalf("status failure %+v, want %+v", s.Failure, tc.want)
-			}
-			if s.Error != tc.err || s.Phase != "failed" {
-				t.Fatal("the failure code changed the rest of the status", s)
 			}
 		})
 	}
@@ -256,7 +202,8 @@ func TestStatusPassesOnlyAReadableFailure(t *testing.T) {
 // Ignoring unknown fields must not turn a damaged record into "no update".
 func TestInstalledSideRefusesDamagedRecord(t *testing.T) {
 	for name, damage := range map[string]func(map[string]any){
-		"unknown schema": func(m map[string]any) { m["schema"] = 2 },
+		"later schema":   func(m map[string]any) { m["schema"] = 3 },
+		"earlier schema": func(m map[string]any) { m["schema"] = 1 },
 		"no release":     func(m map[string]any) { delete(m, "review") },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -277,7 +224,7 @@ func TestInstalledSideRefusesDamagedRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "current.json"), []byte(`{"schema":1,"phase":"sta`), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "current.json"), []byte(`{"schema":2,"phase":"sta`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if r, err := loadRecord(root); err == nil {
@@ -285,7 +232,7 @@ func TestInstalledSideRefusesDamagedRecord(t *testing.T) {
 	}
 }
 
-// The installed helper passes the screen's newer fields only in a shape it
+// The installed side passes the screen's newer fields only in a shape it
 // can read, and the next step and advice only with the error they explain.
 // A later worker may add next values, which pass by shape so the screen can
 // ignore them. Anything else is left out and status stays readable.
@@ -326,7 +273,7 @@ func TestStatusPassesOnlyReadableStepTimesAndAdvice(t *testing.T) {
 			}
 			j := workflowFixture()
 			j.Phase, j.Error = "failed", tc.err
-			j.Steps, j.StepNumber = []string{"Check the node", "Download and verify release files", "Finish VPN update"}, 2
+			j.Steps, j.StepNumber = []string{"Check the node", "Check free space", "Finish VPN update"}, 2
 			if err := saveJob(root, j); err != nil {
 				t.Fatal(err)
 			}
@@ -354,7 +301,7 @@ func TestStatusPassesALongStepList(t *testing.T) {
 		t.Fatal(err)
 	}
 	j := workflowFixture()
-	j.Phase = "installing"
+	j.Phase = "committing"
 	for i := range 20 {
 		j.Steps = append(j.Steps, fmt.Sprintf("Step %d", i+1))
 	}

@@ -12,7 +12,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/virtpriv/node/internal/app"
-	"github.com/virtpriv/node/internal/component"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/release"
 	"github.com/virtpriv/node/internal/theme"
@@ -102,23 +101,6 @@ func (s *NodeUpdateScreen) prepared(answer protocol.Review) {
 	s.ctx.markShown("review:" + answer.Token)
 }
 
-// restartLine names the services this release's rule says the update
-// restarts. A later release's update program may restart more, never fewer,
-// so with none named the screen says nothing about restarts.
-func restartLine(affected []protocol.Component) string {
-	names := make([]string, 0, len(affected))
-	for _, c := range affected {
-		names = append(names, component.Name(c))
-	}
-	switch len(names) {
-	case 0:
-		return ""
-	case 1:
-		return names[0] + " restarts during the update."
-	}
-	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1] + " restart during the update."
-}
-
 // preparingLine is the busy line while the node prepares the review of
 // version: its files are checked from the releases folder or downloaded.
 func preparingLine(ctx *ScreenContext, version string) string {
@@ -201,7 +183,7 @@ func (s *NodeUpdateScreen) request(kind string) tea.Cmd {
 
 // restorePrepare shows the newest Prepare job when the screen opens: one
 // still running is waited for, a review not shown yet in this TUI is shown
-// for 24 hours, and a failure until a newer Prepare (decision 3).
+// for 24 hours, and a failure until a newer Prepare.
 func (s *NodeUpdateScreen) restorePrepare(p app.PrepareJob, status protocol.Status) (tea.Cmd, bool) {
 	switch {
 	case p.Running:
@@ -526,13 +508,13 @@ func advice(st protocol.Status) (protocol.Next, string) {
 		st.Next == protocol.NextCancel && st.Cancellable:
 		return st.Next, st.Advice
 	}
-	return protocol.Advise(st.Failure, st.Cancellable)
+	return protocol.Advise(st.Cancellable)
 }
 
-// expectedStop reports a failure the update meets in normal use and that
-// Continue gets past, such as a service that exits with an error when it
-// is stopped. Continue sends the same request as Retry. Only the screen's
-// words and colors differ.
+// expectedStop reports a stop the worker says the update meets in normal use
+// and that Continue gets past. No worker of this release sends one, a later
+// release's worker can. Continue sends the same request as Retry. Only the
+// screen's words and colors differ.
 func expectedStop(st protocol.Status) bool {
 	if st.Phase != "failed" {
 		return false
@@ -611,11 +593,6 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 			p.fitText(theme.Warning, "Release candidate, for testing only.", 0)
 		}
 		p.field("VPN: ", r.Source.VPN+" → "+m.Version)
-		for _, c := range protocol.Components {
-			if from := r.Source.Get(c); from != "" {
-				p.field(component.Name(c)+": ", from+" → "+m.Artifact(c).Version)
-			}
-		}
 		p.blank()
 		// The summary is what the operator approves, so it is never shortened.
 		p.fitText(plain, m.Summary, 0)
@@ -626,17 +603,11 @@ func (s *NodeUpdateScreen) View(w, h int) string {
 			p.blank()
 			p.fitText(theme.Warning, "Key server not reached. A new key revocation would be missed.", 0)
 		}
-		if restarts := restartLine(m.Affected(r.Source)); restarts != "" {
-			p.blank()
-			p.line(" " + restarts)
-		}
 		p.blank()
 		if r.FromFolder {
-			p.fitText(plain, "This release comes from your releases folder. Other downloads go through Tor.", 0)
-		} else {
-			p.line(" Downloads go through Tor.")
+			p.fitText(plain, "This release comes from your releases folder.", 0)
+			p.blank()
 		}
-		p.blank()
 		p.line(" The node's data is kept.")
 	} else if s.status.ID != "" && !s.status.Active && !s.olderThanUpdate() {
 		// A finished or canceled update is history, shown in one line.

@@ -24,7 +24,7 @@ func exchangeWith(t *testing.T, ctx context.Context, handler func(net.Conn)) err
 	done := make(chan struct{})
 	go func() { defer close(done); defer peer.Close(); handler(peer) }()
 	t.Cleanup(func() { peer.Close(); <-done })
-	return exchange(ctx, client, VerbStartJob, []byte(`{"api":1,"verb":"start-job"}`), nil)
+	return exchange(ctx, client, VerbStartJob, []byte(`{"api":2,"verb":"start-job"}`), nil)
 }
 
 // readRequest reads the one request line, as vpnd does.

@@ -5,20 +5,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/virtpriv/node/internal/config"
 )
 
 const validLedgerJSON = `{
-  "schema": 1,
+  "schema": 2,
   "status": "in_progress",
-  "context": {
-    "network": "testnet4",
-    "initial_p2p_mode": "tor",
-    "bitcoin": "core",
-    "lightning": "lnd",
-    "db_cache_mb": 1024
-  },
   "steps": {
     "binary.install": {
       "completed_at": "2026-08-10T12:00:00Z",
@@ -32,48 +23,41 @@ func TestParseLedgerValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !l.done("binary.install") || l.Context.Network != "testnet4" ||
-		l.Context.DbCacheMB == nil || *l.Context.DbCacheMB != 1024 {
+	if !l.done("binary.install") || l.Status != ledgerInProgress {
 		t.Fatalf("parsed ledger lost state: %+v", l)
 	}
 }
 
 func TestParseLedgerRefusesAmbiguousOrInvalidState(t *testing.T) {
+	const entry = `{"completed_at":"2026-08-10T12:00:00Z","version":"x"}`
 	cases := map[string]string{
 		"empty":                  "",
 		"garbage":                "not json",
-		"truncated":              `{"schema":1`,
+		"truncated":              `{"schema":2`,
 		"trailing value":         validLedgerJSON + `{}`,
-		"missing schema":         `{"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd"},"steps":{}}`,
-		"old schema":             `{"schema":0,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd"},"steps":{}}`,
-		"future schema":          `{"schema":2,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd"},"steps":{}}`,
-		"missing status":         `{"schema":1,"context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd"},"steps":{}}`,
-		"unknown status":         `{"schema":1,"status":"done","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd"},"steps":{}}`,
-		"missing context":        `{"schema":1,"status":"in_progress","steps":{}}`,
-		"bad network":            `{"schema":1,"status":"in_progress","context":{"network":"signet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd"},"steps":{}}`,
-		"controlled signet":      `{"schema":1,"status":"in_progress","context":{"network":"controlled-signet-v1","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd"},"steps":{}}`,
-		"bad p2p":                `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"open","bitcoin":"core","lightning":"lnd"},"steps":{}}`,
-		"hybrid start":           `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"hybrid","bitcoin":"core","lightning":"lnd"},"steps":{}}`,
-		"bad dbcache":            `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd","db_cache_mb":999},"steps":{}}`,
-		"null steps":             `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd"},"steps":null}`,
-		"unknown root field":     `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd"},"steps":{},"extra":true}`,
-		"unknown context field":  `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd","extra":true},"steps":{}}`,
-		"unknown step":           `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd"},"steps":{"addon.install":{"completed_at":"2026-08-10T12:00:00Z","version":"x"}}}`,
-		"unknown entry field":    `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd","db_cache_mb":512},"steps":{"binary.install":{"completed_at":"2026-08-10T12:00:00Z","version":"x","extra":true}}}`,
-		"invalid timestamp":      `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd","db_cache_mb":512},"steps":{"binary.install":{"completed_at":"yesterday","version":"x"}}}`,
-		"empty version":          `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd","db_cache_mb":512},"steps":{"binary.install":{"completed_at":"2026-08-10T12:00:00Z","version":""}}}`,
-		"complete missing steps": `{"schema":1,"status":"complete","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd"},"steps":{}}`,
-		"btc without dbcache":    `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd"},"steps":{"btc.install":{"completed_at":"2026-08-10T12:00:00Z","version":"x"}}}`,
-		"unreachable subset":     `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd","db_cache_mb":512},"steps":{"identity.access":{"completed_at":"2026-08-10T12:00:00Z","version":"x"}}}`,
-		"duplicate root":         `{"schema":1,"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd"},"steps":{}}`,
-		"duplicate context":      `{"schema":1,"status":"in_progress","context":{"network":"mainnet","network":"testnet4","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd"},"steps":{}}`,
-		"duplicate step":         `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd","db_cache_mb":512},"steps":{"binary.install":{"completed_at":"2026-08-10T12:00:00Z","version":"x"},"binary.install":{"completed_at":"2026-08-10T12:00:00Z","version":"x"}}}`,
-		"duplicate entry":        `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd","db_cache_mb":512},"steps":{"binary.install":{"completed_at":"2026-08-10T12:00:00Z","version":"x","version":"y"}}}`,
-		"missing bitcoin":        `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","lightning":"lnd"},"steps":{}}`,
-		"missing lightning":      `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core"},"steps":{}}`,
-		"other bitcoin":          `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"knots","lightning":"lnd"},"steps":{}}`,
-		"other lightning":        `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"ldk"},"steps":{}}`,
-		"no bitcoin lightning":   `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"none","lightning":"none"},"steps":{}}`,
+		"missing schema":         `{"status":"in_progress","steps":{}}`,
+		"future schema":          `{"schema":3,"status":"in_progress","steps":{}}`,
+		"missing status":         `{"schema":2,"steps":{}}`,
+		"unknown status":         `{"schema":2,"status":"done","steps":{}}`,
+		"null steps":             `{"schema":2,"status":"in_progress","steps":null}`,
+		"unknown root field":     `{"schema":2,"status":"in_progress","steps":{},"extra":true}`,
+		"unknown step":           `{"schema":2,"status":"in_progress","steps":{"addon.install":` + entry + `}}`,
+		"unknown entry field":    `{"schema":2,"status":"in_progress","steps":{"binary.install":{"completed_at":"2026-08-10T12:00:00Z","version":"x","extra":true}}}`,
+		"invalid timestamp":      `{"schema":2,"status":"in_progress","steps":{"binary.install":{"completed_at":"yesterday","version":"x"}}}`,
+		"empty version":          `{"schema":2,"status":"in_progress","steps":{"binary.install":{"completed_at":"2026-08-10T12:00:00Z","version":""}}}`,
+		"complete missing steps": `{"schema":2,"status":"complete","steps":{}}`,
+		"unreachable subset":     `{"schema":2,"status":"in_progress","steps":{"identity.access":` + entry + `}}`,
+		"duplicate root":         `{"schema":2,"schema":2,"status":"in_progress","steps":{}}`,
+		"duplicate step":         `{"schema":2,"status":"in_progress","steps":{"binary.install":` + entry + `,"binary.install":` + entry + `}}`,
+		"duplicate entry":        `{"schema":2,"status":"in_progress","steps":{"binary.install":{"completed_at":"2026-08-10T12:00:00Z","version":"x","version":"y"}}}`,
+		// The records of a Bitcoin and Lightning node. This installer wrote
+		// none of them, so it never continues or completes one.
+		"an earlier node's new record": `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd"},"steps":{}}`,
+		"an earlier node's record":     `{"schema":1,"status":"in_progress","context":{"network":"mainnet","initial_p2p_mode":"tor","bitcoin":"core","lightning":"lnd","db_cache_mb":512},"steps":{"binary.install":` + entry + `}}`,
+		"schema 1 in this shape":       `{"schema":1,"status":"in_progress","steps":{}}`,
+		"a context":                    `{"schema":2,"status":"in_progress","context":{"network":"mainnet"},"steps":{}}`,
+		"an empty context":             `{"schema":2,"status":"in_progress","context":{},"steps":{}}`,
+		"an earlier node's step":       `{"schema":2,"status":"in_progress","steps":{"btc.download":` + entry + `}}`,
 	}
 	for name, data := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -84,24 +68,11 @@ func TestParseLedgerRefusesAmbiguousOrInvalidState(t *testing.T) {
 	}
 }
 
-func TestLedgerAcceptsEverySupportedImmutableProfile(t *testing.T) {
-	for _, network := range []string{"mainnet", "testnet4", "public-signet"} {
-		ledger, err := newLedger(newInstallContext(network))
-		if err != nil {
-			t.Errorf("%s ledger rejected: %v", network, err)
-			continue
-		}
-		if ledger.Context.Network != network {
-			t.Errorf("%s ledger recorded %q", network, ledger.Context.Network)
-		}
-	}
-}
-
 // An install records its steps in list order, and a resumed run continues
 // that order, so the steps done are always the first steps of the list.
 func TestLedgerAcceptsOnlyTheFirstStepsInOrder(t *testing.T) {
 	for n := 0; n <= len(baseInstallStepKeys); n++ {
-		l := testLedger()
+		l := newLedger()
 		for _, key := range baseInstallStepKeys[:n] {
 			if err := l.markDone(key, "0.7.0"); err != nil {
 				t.Fatal(err)
@@ -112,7 +83,7 @@ func TestLedgerAcceptsOnlyTheFirstStepsInOrder(t *testing.T) {
 		}
 	}
 	// The first six steps without the owner account, which no install writes.
-	l := testLedger()
+	l := newLedger()
 	for _, key := range baseInstallStepKeys[:6] {
 		if key == "identity.access" {
 			continue
@@ -128,7 +99,7 @@ func TestLedgerAcceptsOnlyTheFirstStepsInOrder(t *testing.T) {
 
 func TestLedgerRoundTripAndAtomicReplacement(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "install-state.json")
-	l := testLedger()
+	l := newLedger()
 	if err := l.markDone("binary.install", "0.7.0"); err != nil {
 		t.Fatal(err)
 	}
@@ -165,15 +136,24 @@ func TestLedgerRoundTripAndAtomicReplacement(t *testing.T) {
 	}
 }
 
+// The record is complete only with every step of the install, the last one
+// included, and it takes no step of anything installed later.
 func TestLedgerCompletionRequiresBoundedBaseSteps(t *testing.T) {
-	l := testLedger()
+	l := newLedger()
 	if err := l.markComplete(); err == nil {
 		t.Fatal("incomplete ledger marked complete")
 	}
-	for _, key := range baseInstallStepKeys {
+	last := len(baseInstallStepKeys) - 1
+	for _, key := range baseInstallStepKeys[:last] {
 		if err := l.markDone(key, "0.7.0"); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := l.markComplete(); err == nil {
+		t.Fatal("ledger without its last step marked complete")
+	}
+	if err := l.markDone(baseInstallStepKeys[last], "0.7.0"); err != nil {
+		t.Fatal(err)
 	}
 	if err := l.markComplete(); err != nil {
 		t.Fatal(err)
@@ -186,25 +166,6 @@ func TestLedgerCompletionRequiresBoundedBaseSteps(t *testing.T) {
 	}
 }
 
-func TestLedgerDbCacheImmutable(t *testing.T) {
-	l, err := newLedger(newInstallContext("mainnet"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := l.setDbCache(1024); err != nil {
-		t.Fatal(err)
-	}
-	if err := l.setDbCache(1024); err != nil {
-		t.Fatalf("same value not idempotent: %v", err)
-	}
-	if err := l.setDbCache(512); err == nil {
-		t.Fatal("recorded dbcache changed")
-	}
-	if err := l.setDbCache(123); err == nil {
-		t.Fatal("invalid dbcache accepted")
-	}
-}
-
 // The record accepts only step sets this installer can produce. With the
 // package upgrade behind Tor, an install stopped just before or just after it
 // must resume, and a record in the earlier order is refused, not reinterpreted.
@@ -213,7 +174,7 @@ func TestLedgerFollowsThePackageUpgradeBehindTor(t *testing.T) {
 		"ipv6.disable", "mptcp.disable", "tor.configure", "tor.gate", "apt.tor"}
 	record := func(keys ...string) *installLedger {
 		t.Helper()
-		l := testLedger()
+		l := newLedger()
 		for _, key := range keys {
 			if err := l.markDone(key, "0.7.0"); err != nil {
 				t.Fatal(err)
@@ -225,7 +186,7 @@ func TestLedgerFollowsThePackageUpgradeBehindTor(t *testing.T) {
 	if err := validateLedger(stopped); err != nil {
 		t.Fatal("install stopped before the package upgrade cannot resume:", err)
 	}
-	steps := buildInstallSteps(config.Default(), &InstallDecisions{}, t.TempDir(), nil)
+	steps := buildInstallSteps(&InstallDecisions{}, nil)
 	var runs []string
 	for i, p := range planRun(steps, stopped) {
 		if p.Run && steps[i].Kind != StepGate {
@@ -240,29 +201,5 @@ func TestLedgerFollowsThePackageUpgradeBehindTor(t *testing.T) {
 	}
 	if validateLedger(record("binary.install", "apt.base", "firewall", "base.upgrade")) == nil {
 		t.Fatal("accepted a record in the earlier order, where the upgrade ran before Tor")
-	}
-}
-
-// "Restarting Tor" and "Configuring LND" repeated steps 8 and 15 and are
-// gone. A record from a build that still had them is refused, like any
-// record this installer did not write. That holds for a finished record
-// too: on a node installed by such a build, sudo vpn install now refuses
-// instead of saying it is already installed. Only test nodes hold one,
-// since v0.7.0 installs fresh.
-func TestLedgerRefusesTheRemovedSteps(t *testing.T) {
-	for _, removed := range []string{"tor.lnd", "lnd.configure"} {
-		l := testLedger()
-		for _, key := range baseInstallStepKeys {
-			if key == "lnd.start" {
-				break
-			}
-			if err := l.markDone(key, "0.7.0"); err != nil {
-				t.Fatal(err)
-			}
-		}
-		l.Steps[removed] = ledgerEntry{CompletedAt: "2026-10-20T12:00:00Z", Version: "0.7.0-rc.13"}
-		if err := validateLedger(l); err == nil {
-			t.Errorf("a record holding %s was accepted", removed)
-		}
 	}
 }

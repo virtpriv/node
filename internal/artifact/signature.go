@@ -3,8 +3,6 @@ package artifact
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -29,15 +27,12 @@ type Result struct {
 	// an update to one from it. A file that is unreadable, is not a key, or
 	// holds only other keys is false.
 	Imported map[string]bool
-	// SignedText is the text of a clearsigned file. It is set only when a
-	// pinned signer is accepted and no signature is bad, and holds nothing
-	// from outside the signed block.
-	SignedText []byte
 }
 
-// VerifySignature verifies a GPG signature inside an ephemeral keyring. It
-// imports the key files in the order given and reads gpg's machine-readable
-// output; gpg's exit code and its messages for people are not used.
+// VerifySignature verifies a detached GPG signature of dataFile inside an
+// ephemeral keyring. It imports the key files in the order given and reads
+// gpg's machine-readable output. gpg's exit code and its messages for people
+// are not used.
 //
 // A pinned signer counts once, by primary-key fingerprint, when gpg reports
 // its signature as good. A signature made with a revoked key or revoked
@@ -47,22 +42,20 @@ type Result struct {
 // expired does not count.
 //
 // GPG may exit unsuccessfully when another signature uses an unavailable key,
-// as in Syncthing's dual-signed releases. Callers must require their pinned
-// signer threshold and reject Bad, rather than infer trust from exit status.
+// as in a file signed by two keys. Callers must require their pinned signer
+// threshold and reject Bad, rather than infer trust from exit status.
 //
-// dataFile == "" means sigFile is CLEARSIGNED (data and signature in one
-// file, e.g. Syncthing's sha256sum.txt.asc). Otherwise the signature is
-// detached and gpg gets both arguments.
-//
-// A clearsigned file must be exactly one signed block. gpg reports a good
-// signature for a file that also has text before or after the block, and
-// that text is not signed. Callers must read the data from Result.SignedText,
-// never from sigFile.
+// A call without a data file is refused. A file that holds its data and its
+// signature in one is not read here: gpg reports a good signature for such
+// a file even when it also has text that is not signed.
 func VerifySignature(
 	keyFiles []string,
 	sigFile, dataFile string,
 	pinnedFPs map[string]bool,
 ) (Result, error) {
+	if dataFile == "" {
+		return Result{}, errors.New("signature check needs the signed file")
+	}
 	// Ephemeral GPG home: 0700, random path, cleaned up on return.
 	gpgHome, err := os.MkdirTemp("", "vpn-gpg-")
 	if err != nil {
@@ -101,117 +94,13 @@ func VerifySignature(
 	}
 	revokedKeys := revokedFingerprints(listing)
 
-	args := []string{"--verify", sigFile, dataFile}
-	// For a clearsigned file: the signed lines as this code reads them, and
-	// where gpg writes the text it verified.
-	var block []string
-	verified := filepath.Join(gpgHome, "signed-text")
-	if dataFile == "" {
-		data, err := os.ReadFile(sigFile)
-		if err != nil {
-			return Result{}, err
-		}
-		if block, err = clearsignedText(data); err != nil {
-			return Result{}, err
-		}
-		// gpg writes out the text it checked the signature against.
-		args = []string{"--output", verified, "--decrypt", sigFile}
-	}
-	status, err := gpgStatus(gpgHome, args...)
+	status, err := gpgStatus(gpgHome, "--verify", sigFile, dataFile)
 	if err != nil {
 		return Result{}, err
 	}
 	result := readStatus(status, pinnedFPs, revokedKeys)
 	result.Imported = imported
-	if dataFile == "" && result.Signers > 0 && !result.Bad {
-		out, err := os.ReadFile(verified)
-		if err != nil {
-			return Result{}, fmt.Errorf("read the text gpg verified: %w", err)
-		}
-		// Two independent readings of the file must agree on what was signed.
-		if !slices.Equal(textLines(string(out)), block) {
-			return Result{}, errors.New("gpg verified other text than the signed block holds")
-		}
-		result.SignedText = []byte(strings.Join(block, "\n") + "\n")
-	}
 	return result, nil
-}
-
-const (
-	clearsignBegin = "-----BEGIN PGP SIGNED MESSAGE-----"
-	signatureBegin = "-----BEGIN PGP SIGNATURE-----"
-	signatureEnd   = "-----END PGP SIGNATURE-----"
-)
-
-var errNotOneSignedBlock = errors.New("file is not exactly one clearsigned block")
-
-// clearsignedText returns the signed lines of a file that is exactly one
-// clearsigned block, with nothing before it and nothing after it. The lines
-// come back without dash escaping.
-func clearsignedText(data []byte) ([]string, error) {
-	lines := textLines(string(data))
-	if len(lines) == 0 || lines[0] != clearsignBegin || lines[len(lines)-1] != signatureEnd {
-		return nil, errNotOneSignedBlock
-	}
-	// Headers such as the hash name end at the first empty line.
-	i := 1
-	for ; i < len(lines) && lines[i] != ""; i++ {
-		if strings.HasPrefix(lines[i], "-") {
-			return nil, errNotOneSignedBlock
-		}
-	}
-	var text []string
-	for i++; i < len(lines) && lines[i] != signatureBegin; i++ {
-		line, escaped := strings.CutPrefix(lines[i], "- ")
-		if !escaped && strings.HasPrefix(line, "-") {
-			// Signed text never has a bare dash at the start of a line, so
-			// this is another marker.
-			return nil, errNotOneSignedBlock
-		}
-		text = append(text, line)
-	}
-	if i >= len(lines)-1 {
-		return nil, errNotOneSignedBlock
-	}
-	for i++; i < len(lines)-1; i++ {
-		if strings.HasPrefix(lines[i], "-") {
-			return nil, errNotOneSignedBlock
-		}
-	}
-	return textLines(strings.Join(text, "\n")), nil
-}
-
-// textLines splits text into lines without the white space at the end of
-// each line and without empty lines at the end of the text. A clearsigned
-// signature does not cover either.
-func textLines(text string) []string {
-	lines := strings.Split(strings.TrimRight(text, " \t\r\n"), "\n")
-	for i := range lines {
-		lines[i] = strings.TrimRight(lines[i], " \t\r")
-	}
-	if len(lines) == 1 && lines[0] == "" {
-		return nil
-	}
-	return lines
-}
-
-// SignedSHA256 returns the SHA-256 that a signed checksum list gives for the
-// named file. The list must name the file exactly once.
-func SignedSHA256(signedText []byte, name string) (string, error) {
-	var found []string
-	for _, line := range strings.Split(string(signedText), "\n") {
-		// sha256sum writes "<hash>  <name>", or "<hash> *<name>" in binary mode.
-		if f := strings.Fields(line); len(f) == 2 && strings.TrimPrefix(f[1], "*") == name {
-			found = append(found, f[0])
-		}
-	}
-	if len(found) != 1 {
-		return "", fmt.Errorf("signed checksums name %s %d times, want once", name, len(found))
-	}
-	if sum, err := hex.DecodeString(found[0]); err != nil || len(sum) != sha256.Size {
-		return "", fmt.Errorf("signed checksum for %s is not a SHA-256", name)
-	}
-	return strings.ToLower(found[0]), nil
 }
 
 // gpgStatus runs gpg and returns its status lines. They arrive alone on

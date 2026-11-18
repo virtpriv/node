@@ -1,11 +1,10 @@
 // internal/installer/torgate.go
 //
 // The Tor check, the install step "Verifying the Tor connection". It comes
-// after "Setting up Tor and your onion addresses" and before "Sending apt
-// package downloads through Tor". As a gate it runs again on every pass, so
-// no download through Tor runs in a pass whose Tor was not checked. The
-// package upgrade step waits for Tor again with waitForTorBootstrap, because
-// an upgrade can restart Tor.
+// after "Setting up Tor" and before "Sending apt package downloads through
+// Tor". As a gate it runs again on every pass, so no download through Tor
+// runs in a pass whose Tor was not checked. The package upgrade step waits
+// for Tor again with waitForTorBootstrap, because an upgrade can restart Tor.
 //
 // Two layers:
 //
@@ -42,9 +41,9 @@ import (
 	"github.com/virtpriv/node/internal/system"
 )
 
-// Tor's own values, not Go logic paths, like the HiddenServiceDir strings
-// in tor.go. The control port matches host.BuildTorConfig. The cookie path
-// is the one set by Debian's tor-service-defaults-torrc.
+// Tor's own values, not Go logic paths. The control port matches
+// host.BuildTorConfig. The cookie path is the one set by Debian's
+// tor-service-defaults-torrc.
 const (
 	torControlAddr = "127.0.0.1:9051"
 	torCookiePath  = "/run/tor/control.authcookie"
@@ -153,9 +152,8 @@ func keepWaitingForTor(
 // parse PROGRESS. The cookie is re-read on every attempt because Tor
 // regenerates it on restart.
 func queryTorBootstrapProgress() (int, error) {
-	// The installer runs as root. Of the daemons only LND's unit reaches
-	// this cookie, through SupplementaryGroups=debian-tor. Here it is read
-	// through the wrapper that requires root.
+	// The installer runs as root, and reads the cookie through the wrapper
+	// that requires root.
 	cookie, err := system.ReadFileRoot(torCookiePath)
 	if err != nil {
 		return 0, fmt.Errorf("read control cookie: %w", err)

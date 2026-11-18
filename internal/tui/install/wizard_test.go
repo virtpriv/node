@@ -287,14 +287,14 @@ func TestWizardStopWaitsForEngineResult(t *testing.T) {
 	assertQuit(t, cmd)
 }
 
-// A start the installer refuses, for example because the cache decision was
-// not saved, returns to the password screen with the error and can be retried.
+// A start the installer refuses returns to the password screen with the error
+// and can be retried.
 func TestWizardDecisionRetryAndCompletionFailure(t *testing.T) {
 	m, session := wizardFixture(t)
 	m.pwInput.SetValue("abcdefghijklmnop")
 	m.pwConfirm.SetValue("abcdefghijklmnop")
 	m.pwFocus = 2
-	session.err = errors.New("cache write failed")
+	session.err = errors.New("start refused")
 	m, cmd := updateWizard(t, m, enter())
 	if m.phase != wzPassword || cmd == nil {
 		t.Fatal("the start was not requested from the password dialog")

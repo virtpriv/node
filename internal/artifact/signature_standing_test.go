@@ -17,7 +17,6 @@ func TestSignerStandingDecidesWhetherASignatureCounts(t *testing.T) {
 	// allowed to depend on the date a signature claims.
 	stolen := h.Key("stolen", "never", "")
 	stolenSig := h.Sign(stolen, "", data, "stolen.sig")
-	clearRevoked := h.Clearsign(stolen, data, "stolen-clearsigned.asc")
 	h.RevokeKey("stolen", gpgtest.Compromised)
 
 	retired := h.Key("retired", "never", "")
@@ -82,7 +81,6 @@ func TestSignerStandingDecidesWhetherASignatureCounts(t *testing.T) {
 		{name: "revoked key", keys: []string{"stolen"}, sig: stolenSig, data: data, pinned: []string{stolen}, revoked: []string{stolen}},
 		{name: "revoked key, reason superseded", keys: []string{"retired"}, sig: retiredSig, data: data, pinned: []string{retired}, revoked: []string{retired}},
 		{name: "revoked signing subkey", keys: []string{"master"}, sig: oldSubSig, data: data, pinned: []string{master}, revoked: []string{master}},
-		{name: "revoked key, clearsigned file", keys: []string{"stolen"}, sig: clearRevoked, pinned: []string{stolen}, revoked: []string{stolen}},
 		{name: "one good and one revoked signer in one file", keys: []string{"good", "stolen"}, sig: h.Join("mixed.sig", goodSig, stolenSig), data: data, pinned: []string{good, stolen}, signers: 1, revoked: []string{stolen}},
 		{name: "revoked signer listed before the good one", keys: []string{"good", "stolen"}, sig: h.Join("mixed-reversed.sig", stolenSig, goodSig), data: data, pinned: []string{good, stolen}, signers: 1, revoked: []string{stolen}},
 		{name: "expired and revoked key", keys: []string{"lapsed"}, sig: lapsedSig, data: data, pinned: []string{lapsed}, revoked: []string{lapsed}},
@@ -117,5 +115,23 @@ func TestSignerStandingDecidesWhetherASignatureCounts(t *testing.T) {
 				t.Fatalf("accepted signers = %d, revoked = %v; want %d and %v", got.Signers, got.Revoked, c.signers, c.revoked)
 			}
 		})
+	}
+}
+
+// Nothing reads a file that holds its data and its signature in one. A call
+// without a data file is refused, also when that file's signature is good.
+func TestVerifySignatureRefusesAFileThatHoldsItsOwnData(t *testing.T) {
+	h := gpgtest.NewHome(t)
+	data := h.File("data.txt", "release checksums\n")
+	signer := h.Key("signer", "never", "")
+	both := h.Clearsign(signer, data, "data-and-signature.asc")
+	key := h.Export("signer", "signer.key")
+
+	got, err := VerifySignature([]string{key}, both, "", map[string]bool{signer: true})
+	if err == nil {
+		t.Fatalf("no error, accepted signers = %d", got.Signers)
+	}
+	if got.Signers != 0 || got.Imported != nil {
+		t.Fatalf("a refused call returned %+v", got)
 	}
 }

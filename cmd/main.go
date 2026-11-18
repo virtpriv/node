@@ -75,39 +75,6 @@ func main() {
 			fmt.Fprintf(os.Stderr, "vpn run-job: %v\n", err)
 			os.Exit(1)
 		}
-	case cmdStageLNDCert:
-		// Run by systemd's certificate watch (a path unit on
-		// LND's tls.cert), never by hand. LND rewrites its
-		// certificate on its own (tlsautorefresh), and this
-		// refreshes the TUI's staged copy to match. Its
-		// output lands in this oneshot unit's own journal
-		// (journalctl -u vpn-lnd-cert-stage.service), which is
-		// where watcher-driven restages are audited. vpnd's
-		// journal only records requests that went through its
-		// socket and the jobs it started.
-		if os.Geteuid() != 0 {
-			fmt.Fprintln(os.Stderr,
-				"vpn stage-lnd-cert runs as root via its "+
-					"systemd unit, it is not meant to be "+
-					"started by hand")
-			os.Exit(1)
-		}
-		// Explicit dispatch, nothing inferred. But refuse
-		// fast and clearly on a box this command cannot apply
-		// to, instead of waiting out the stager's stability
-		// window against a file that will never appear.
-		if _, err := os.Stat(config.DefaultPath); err != nil {
-			fmt.Fprintf(os.Stderr,
-				"vpn stage-lnd-cert: no configuration at %s, "+
-					"this node is not installed\n",
-				config.DefaultPath)
-			os.Exit(1)
-		}
-		if err := host.StageLNDTLSCert(); err != nil {
-			fmt.Fprintf(os.Stderr, "vpn stage-lnd-cert: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("staged LND TLS certificate copy refreshed")
 	case cmdRebootCheck:
 		// Run by apt's hook after every package change, as root. apt
 		// must never fail on it, so after the root check it always exits
@@ -119,20 +86,6 @@ func main() {
 			os.Exit(1)
 		}
 		host.RebootCheckHook(os.Stdout, os.Stderr)
-	case cmdPublishLNDBackup:
-		// Intended for lnd-backup-export.service. The publisher
-		// validates the exact lnd identity and unit-local backup
-		// group itself. This dispatch grants no privileges.
-		published, err := host.PublishLNDBackup(opts.Network)
-		if err != nil {
-			fmt.Fprintf(os.Stderr,
-				"vpn publish-lnd-backup: %v\n", err)
-			os.Exit(1)
-		}
-		// The unit also runs every minute. Only a real publication is logged.
-		if published {
-			fmt.Println("published LND channel backup")
-		}
 	case cmdVersion:
 		fmt.Println(version)
 	case cmdHelp:
@@ -217,9 +170,7 @@ const (
 	cmdInstall
 	cmdVPND
 	cmdRunJob
-	cmdStageLNDCert
 	cmdRebootCheck
-	cmdPublishLNDBackup
 	cmdVersion
 	cmdHelp
 	cmdUpdateLaunch
@@ -258,29 +209,12 @@ func parseArgs(
 				"run-job requires exactly one job ID")
 		}
 		return cmdRunJob, opts, nil
-	case "stage-lnd-cert":
-		if len(args) > 1 {
-			return 0, opts, fmt.Errorf(
-				"stage-lnd-cert takes no arguments")
-		}
-		return cmdStageLNDCert, opts, nil
 	case "reboot-check":
 		if len(args) > 1 {
 			return 0, opts, fmt.Errorf(
 				"reboot-check takes no arguments")
 		}
 		return cmdRebootCheck, opts, nil
-	case "publish-lnd-backup":
-		if len(args) != 2 {
-			return 0, opts, fmt.Errorf(
-				"publish-lnd-backup requires exactly one network")
-		}
-		if err := config.ValidateNetwork(args[1]); err != nil {
-			return 0, opts, fmt.Errorf(
-				"publish-lnd-backup: %w", err)
-		}
-		opts.Network = args[1]
-		return cmdPublishLNDBackup, opts, nil
 	case "version", "--version", "-v":
 		return cmdVersion, opts, nil
 	case "help", "--help", "-h":
@@ -296,8 +230,6 @@ func parseInstall(args []string) (command, installer.InstallOptions, error) {
 	var opts installer.InstallOptions
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	testnet4 := fs.Bool("testnet4", false, "")
-	signet := fs.Bool("signet", false, "")
 	fs.BoolVar(&opts.Unattended, "unattended", false, "")
 	// Go names an unknown option with one dash, whatever was typed, so
 	// vpn names it the way the owner typed it.
@@ -320,28 +252,18 @@ func parseInstall(args []string) (command, installer.InstallOptions, error) {
 	if fs.NArg() > 0 {
 		return 0, opts, fmt.Errorf("install: unexpected %q", fs.Arg(0))
 	}
-	switch {
-	case *testnet4 && *signet:
-		return 0, opts, errors.New("install: --testnet4 and --signet conflict")
-	case *testnet4:
-		opts.Network = config.NetworkTestnet4
-	case *signet:
-		opts.Network = config.NetworkPublicSignet
-	}
 	return cmdInstall, opts, nil
 }
 
 // usage lists what an owner runs. The commands that systemd or apt start
-// (vpnd, run-job, stage-lnd-cert, reboot-check, publish-lnd-backup,
-// update-launch and update-worker) are left out.
+// (vpnd, run-job, reboot-check, update-launch and update-worker) are left
+// out.
 func usage() string {
 	return `Virtual Private Node
 
 Usage:
   vpn                open your node (run as the ` + paths.AdminUser + ` user)
   sudo vpn install   install, or continue an install that stopped
-      --testnet4     use testnet4 instead of mainnet
-      --signet       use the default public signet (testing only)
       --unattended   install without screens and print a generated
                      login password once
   vpn version        print the version

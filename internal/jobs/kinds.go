@@ -5,15 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/virtpriv/node/internal/api"
-	"github.com/virtpriv/node/internal/autounlock"
-	"github.com/virtpriv/node/internal/component"
 	"github.com/virtpriv/node/internal/host"
-	"github.com/virtpriv/node/internal/p2p"
 	"github.com/virtpriv/node/internal/release"
 	"github.com/virtpriv/node/internal/servicecontrol"
 	"github.com/virtpriv/node/internal/update"
@@ -23,9 +18,9 @@ import (
 type kind struct {
 	rule Rule
 	// accept validates the request's parameters in vpnd, before anything is
-	// recorded. It returns the job's title, the parameters to keep in its
-	// record, and a secret for the job's credential copy.
-	accept func(params json.RawMessage) (title string, keep json.RawMessage, secret string, err error)
+	// recorded. It returns the job's title and the parameters to keep in its
+	// record.
+	accept func(params json.RawMessage) (title string, keep json.RawMessage, err error)
 	// steps is the kind's step list, or none.
 	steps func(keep json.RawMessage) []string
 	// run does the work in the job's service and returns its typed result.
@@ -41,10 +36,6 @@ type PrepareResult struct {
 	UpdateFirst string `json:"update_first,omitempty"`
 }
 
-// credentialName is the auto-unlock password's name in the job's
-// credential folder.
-const credentialName = "password"
-
 var kinds = map[string]kind{
 	api.KindPackageUpdate: {
 		accept: noParams("Update Packages"),
@@ -55,16 +46,16 @@ var kinds = map[string]kind{
 	},
 	api.KindPrepareUpdate: {
 		rule: RuleJobs,
-		accept: func(raw json.RawMessage) (string, json.RawMessage, string, error) {
+		accept: func(raw json.RawMessage) (string, json.RawMessage, error) {
 			var p api.PrepareUpdateParams
 			if err := decode(raw, &p); err != nil {
-				return "", nil, "", err
+				return "", nil, err
 			}
 			if !release.ValidVersion(p.Version) {
-				return "", nil, "", fmt.Errorf("%q is not a valid release version", p.Version)
+				return "", nil, fmt.Errorf("%q is not a valid release version", p.Version)
 			}
 			keep, err := json.Marshal(p)
-			return "Prepare update to v" + p.Version, keep, "", err
+			return "Prepare update to v" + p.Version, keep, err
 		},
 		run: func(c *runCtx, raw json.RawMessage) (any, error) {
 			var p api.PrepareUpdateParams
@@ -79,85 +70,20 @@ var kinds = map[string]kind{
 		},
 	},
 	api.KindServiceAction: {
-		accept: func(raw json.RawMessage) (string, json.RawMessage, string, error) {
+		accept: func(raw json.RawMessage) (string, json.RawMessage, error) {
 			request, keep, err := serviceRequest(raw)
 			if err != nil {
-				return "", nil, "", err
+				return "", nil, err
 			}
 			action := request.Action()
-			return strings.ToUpper(action[:1]) + action[1:] + " " + request.Service(), keep, "", nil
+			return strings.ToUpper(action[:1]) + action[1:] + " " + request.Service(), keep, nil
 		},
 		run: func(_ *runCtx, raw json.RawMessage) (any, error) {
 			request, _, err := serviceRequest(raw)
 			if err != nil {
 				return nil, err
 			}
-			completion, err := host.ControlService(request)
-			if err != nil {
-				return nil, err
-			}
-			// LND may replace its TLS certificate at startup. Publish the
-			// matching staged copy before the job reports completion.
-			if request.Service() == "lnd" && request.Action() != "stop" {
-				if err := Restage(api.KindServiceAction); err != nil {
-					return nil, fmt.Errorf("lnd is active, credential refresh failed: %w", err)
-				}
-			}
-			return completion, nil
-		},
-	},
-	api.KindSyncthingInstall: {
-		accept: noParams("Install Syncthing"),
-		steps: func(json.RawMessage) []string {
-			return api.SyncthingInstallStepNames(component.SyncthingVersion)
-		},
-		run: func(c *runCtx, _ json.RawMessage) (any, error) {
-			return nil, host.InstallSyncthing(func() error {
-				return Restage(api.KindSyncthingInstall)
-			}, c.step)
-		},
-	},
-	api.KindP2PUpgrade: {
-		accept: func(raw json.RawMessage) (string, json.RawMessage, string, error) {
-			_, keep, err := p2pRequest(raw)
-			return "Upgrade P2P to Hybrid", keep, "", err
-		},
-		steps: func(json.RawMessage) []string { return api.UpgradeP2PToHybridStepNames() },
-		run: func(c *runCtx, raw json.RawMessage) (any, error) {
-			request, _, err := p2pRequest(raw)
-			if err != nil {
-				return nil, err
-			}
-			return nil, host.UpgradeP2PToHybrid(request, func() error {
-				return Restage(api.KindP2PUpgrade)
-			}, c.step)
-		},
-	},
-	api.KindAutoUnlockOn: {
-		accept: func(raw json.RawMessage) (string, json.RawMessage, string, error) {
-			var p api.AutoUnlockOnParams
-			if err := decode(raw, &p); err != nil {
-				return "", nil, "", err
-			}
-			password, err := autounlock.NewPassword(p.Password)
-			if err != nil {
-				return "", nil, "", err
-			}
-			// The password goes only to the job's credential copy.
-			return "Turn on auto-unlock", nil, password.Text(), nil
-		},
-		run: func(_ *runCtx, _ json.RawMessage) (any, error) {
-			password, err := readCredential()
-			if err != nil {
-				return nil, err
-			}
-			return host.SetupAutoUnlock(password)
-		},
-	},
-	api.KindAutoUnlockOff: {
-		accept: noParams("Turn off auto-unlock"),
-		run: func(_ *runCtx, _ json.RawMessage) (any, error) {
-			return host.DisableAutoUnlock()
+			return host.ControlService(request)
 		},
 	},
 	api.KindReboot: {
@@ -170,17 +96,17 @@ var kinds = map[string]kind{
 		},
 	},
 	api.KindSSHPasswordLogin: {
-		accept: func(raw json.RawMessage) (string, json.RawMessage, string, error) {
+		accept: func(raw json.RawMessage) (string, json.RawMessage, error) {
 			var p api.SSHPasswordLoginParams
 			if err := decode(raw, &p); err != nil {
-				return "", nil, "", err
+				return "", nil, err
 			}
 			keep, err := json.Marshal(p)
 			title := "Turn on SSH password login"
 			if p.PasswordAuthDisabled {
 				title = "Turn off SSH password login"
 			}
-			return title, keep, "", err
+			return title, keep, err
 		},
 		run: func(_ *runCtx, raw json.RawMessage) (any, error) {
 			var p api.SSHPasswordLoginParams
@@ -195,20 +121,19 @@ var kinds = map[string]kind{
 }
 
 // Validate checks a start request in vpnd. It returns the job's title, the
-// parameters its record keeps, a secret for the job's credential copy and
-// the busy rule of its kind.
-func Validate(kindName string, params json.RawMessage) (title string, keep json.RawMessage, secret string, rule Rule, err error) {
+// parameters its record keeps and the busy rule of its kind.
+func Validate(kindName string, params json.RawMessage) (title string, keep json.RawMessage, rule Rule, err error) {
 	k, ok := kinds[kindName]
 	if !ok {
-		return "", nil, "", 0, fmt.Errorf("unknown job kind %q", kindName)
+		return "", nil, 0, fmt.Errorf("unknown job kind %q", kindName)
 	}
-	title, keep, secret, err = k.accept(params)
-	return title, keep, secret, k.rule, err
+	title, keep, err = k.accept(params)
+	return title, keep, k.rule, err
 }
 
-func noParams(title string) func(json.RawMessage) (string, json.RawMessage, string, error) {
-	return func(raw json.RawMessage) (string, json.RawMessage, string, error) {
-		return title, nil, "", RejectParams(raw)
+func noParams(title string) func(json.RawMessage) (string, json.RawMessage, error) {
+	return func(raw json.RawMessage) (string, json.RawMessage, error) {
+		return title, nil, RejectParams(raw)
 	}
 }
 
@@ -223,32 +148,6 @@ func serviceRequest(raw json.RawMessage) (servicecontrol.Request, json.RawMessag
 	}
 	keep, err := json.Marshal(p)
 	return request, keep, err
-}
-
-func p2pRequest(raw json.RawMessage) (p2p.UpgradeRequest, json.RawMessage, error) {
-	var p api.UpgradeP2PParams
-	if err := decode(raw, &p); err != nil {
-		return p2p.UpgradeRequest{}, nil, err
-	}
-	request, err := p2p.NewUpgradeRequest(p.ExpectedIPv4)
-	if err != nil {
-		return p2p.UpgradeRequest{}, nil, err
-	}
-	keep, err := json.Marshal(p)
-	return request, keep, err
-}
-
-// readCredential reads the password systemd copied for this job only.
-func readCredential() (autounlock.Password, error) {
-	dir := os.Getenv("CREDENTIALS_DIRECTORY")
-	if dir == "" {
-		return autounlock.Password{}, errors.New("the job has no credential folder")
-	}
-	b, err := os.ReadFile(filepath.Join(dir, credentialName))
-	if err != nil {
-		return autounlock.Password{}, err
-	}
-	return autounlock.NewPassword(string(b))
 }
 
 // decode unmarshals parameters strictly: an unknown field is an error, so a

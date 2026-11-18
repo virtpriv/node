@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -48,8 +49,25 @@ func TestEffectiveOwnerSudoPolicy(t *testing.T) {
 	}
 }
 
+// requireLinuxRoot skips a test that needs root on Linux, or fails it when
+// VPN_REQUIRE_ROOT_TESTS asks for those tests to run.
+func requireLinuxRoot(t *testing.T) {
+	t.Helper()
+	required := os.Getenv("VPN_REQUIRE_ROOT_TESTS")
+	if required != "" && required != "1" {
+		t.Fatal("VPN_REQUIRE_ROOT_TESTS must be unset or 1")
+	}
+	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
+		return
+	}
+	if required == "1" {
+		t.Fatal("this test requires Linux root")
+	}
+	t.Skip("this test requires Linux root")
+}
+
 func TestRootOwnerSudoPublicationAndRefusal(t *testing.T) {
-	requireStagingRoot(t)
+	requireLinuxRoot(t)
 	for _, phase := range []string{"existing policy invalid", "candidate invalid", "effective conflict", "success"} {
 		t.Run(phase, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "vpn")
@@ -107,7 +125,7 @@ func TestRootOwnerSudoPublicationAndRefusal(t *testing.T) {
 }
 
 func TestRootOwnerSudoRefusesChangedPolicyWithoutOverwriting(t *testing.T) {
-	requireStagingRoot(t)
+	requireLinuxRoot(t)
 	for _, change := range []string{"permissions", "contents"} {
 		t.Run(change, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "vpn")

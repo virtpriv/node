@@ -5,25 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
-	"syscall"
 
-	"github.com/virtpriv/node/internal/component"
 	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/host"
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/loginpassword"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/system"
-	"github.com/virtpriv/node/internal/update/protocol"
-)
-
-const (
-	bitcoinUser   = "bitcoin"
-	lndUser       = "lnd"
-	syncthingUser = "syncthing"
-	backupGroup   = "vpn-lnd-backup"
 )
 
 var appVersion = "dev"
@@ -43,9 +31,6 @@ func SetVersion(v string) { appVersion = v }
 
 // InstallOptions carries the `vpn install` command line.
 type InstallOptions struct {
-	// Network from --testnet4 or --signet ("" = mainnet for a pristine host,
-	// or keep the interrupted lifecycle's recorded answer).
-	Network string
 	// Unattended runs without a TUI or prompts and generates a login password.
 	// SSH keys are configured by the owner after installation.
 	Unattended bool
@@ -63,13 +48,11 @@ type installStartupDependencies struct {
 	acquireRunLock      func(string, string) (*os.File, error)
 	classifyLifecycle   func(lifecycleFS, identityLookup) (lifecycleState, error)
 	runPreflight        func() (host.SSHObservation, error)
-	initializeLifecycle func(lifecycleFS, identityLookup, installContext) (*installLedger, error)
+	initializeLifecycle func(lifecycleFS, identityLookup) (*installLedger, error)
 	// inhibitShutdown holds off restarts until the returned release runs.
 	inhibitShutdown func(why string) (release func(), err error)
 	// systemBusRunning reports whether anything could hold off a restart.
 	systemBusRunning func() bool
-	// workBase holds each run's download folder.
-	workBase string
 }
 
 func productionInstallStartupDependencies() installStartupDependencies {
@@ -90,7 +73,6 @@ func productionInstallStartupDependencies() installStartupDependencies {
 			return func() { inhibitor.Release() }, nil
 		},
 		systemBusRunning: system.SystemBusRunning,
-		workBase:         os.TempDir(),
 	}
 }
 
@@ -191,71 +173,25 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	}
 
 	if lifecycle.Disposition == lifecyclePristine {
-		network := opts.Network
-		if network == "" {
-			network = "mainnet"
-		}
-		ledger, err = deps.initializeLifecycle(fs, lookup, newInstallContext(network))
+		ledger, err = deps.initializeLifecycle(fs, lookup)
 		if err != nil {
 			return err
 		}
 	} else if lifecycle.Disposition == lifecycleBootstrap {
-		ctx := *lifecycle.BootstrapContext
-		if opts.Network != "" && opts.Network != ctx.Network {
-			return fmt.Errorf(
-				"--%s conflicts with the interrupted install network %q, drop the flag to resume the recorded lifecycle",
-				opts.Network, ctx.Network)
-		}
-		ledger, err = resumeLifecycleBootstrap(fs, lookup, ctx)
+		ledger, err = resumeLifecycleBootstrap(fs, lookup)
 		if err != nil {
 			return err
 		}
-	} else if opts.Network != "" && opts.Network != ledger.Context.Network {
-		return fmt.Errorf(
-			"--%s conflicts with the interrupted install network %q, drop the flag to resume the recorded lifecycle",
-			opts.Network, ledger.Context.Network)
 	}
 
-	// General configuration is reconstructed from immutable lifecycle context
-	// and fresh observations. It is not installation-completion authority.
-	cfg := config.Default()
-	cfg.Network = ledger.Context.Network
-	cfg.P2PMode = ledger.Context.InitialP2PMode
-	cfg.Bitcoin = ledger.Context.Bitcoin
-	cfg.Lightning = ledger.Context.Lightning
 	dec := &InstallDecisions{}
-	if ledger.Context.DbCacheMB != nil {
-		dec.DbCacheMB = *ledger.Context.DbCacheMB
-		cfg.DbCache = dec.DbCacheMB
-	}
-
-	// Downloads wait in a folder of this run until they are installed. The
-	// folder goes when the run ends, however it ends. Folders of a run that
-	// was killed go first, since /tmp is kept in memory on Debian 13.
-	removeKilledRunFolders(deps.workBase)
-	work, err := os.MkdirTemp(deps.workBase, workFolderPrefix)
-	if err != nil {
-		return fmt.Errorf("create the download folder: %w", err)
-	}
-	defer os.RemoveAll(work)
-	steps := buildInstallSteps(cfg, dec, work, hold.ensure)
+	steps := buildInstallSteps(dec, hold.ensure)
 	if err := validateBaseInstallSteps(steps); err != nil {
 		return err
 	}
 
-	persistDbCache := func(v int) error {
-		if err := ledger.setDbCache(v); err != nil {
-			return err
-		}
-		if err := ledger.save(paths.InstallStateFile); err != nil {
-			return fmt.Errorf("could not save the install's progress: %w", err)
-		}
-		dec.DbCacheMB = v
-		cfg.DbCache = v
-		return nil
-	}
 	completeInteractive := func() error {
-		if err := prepareInstallCompletion(cfg, dec, ledger, len(steps)); err != nil {
+		if err := prepareInstallCompletion(ledger, len(steps)); err != nil {
 			return err
 		}
 		return publishTerminalLedger(ledger)
@@ -263,19 +199,10 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 
 	var res RunResult
 	var startErr error
-	if opts.Unattended && lifecycle.Disposition != lifecycleCompletionPending {
-		if err := fillUnattendedDecisions(dec); err != nil {
-			return err
-		}
-		if ledger.Context.DbCacheMB == nil {
-			if err := persistDbCache(dec.DbCacheMB); err != nil {
-				return err
-			}
-		} else {
-			dec.DbCacheMB = *ledger.Context.DbCacheMB
-			cfg.DbCache = dec.DbCacheMB
-		}
-	} else if opts.Unattended && passwordPending() {
+	// An unattended run generates its password. A run that only finishes a
+	// recorded install needs one when an earlier pass applied a password it
+	// never showed.
+	if opts.Unattended && (lifecycle.Disposition != lifecycleCompletionPending || passwordPending()) {
 		if err := fillGeneratedPassword(dec); err != nil {
 			return err
 		}
@@ -292,7 +219,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 		if runnerErr != nil {
 			return runnerErr
 		}
-		session := newInstallSession(runner, dec, persistDbCache, completeInteractive)
+		session := newInstallSession(runner, dec, completeInteractive)
 		res, err = runInstallInteractive(session, installView(session), frontend)
 		startErr = session.refusal()
 	}
@@ -338,8 +265,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	}
 
 	if opts.Unattended {
-		if err := prepareInstallCompletion(
-			cfg, dec, ledger, len(steps)); err != nil {
+		if err := prepareInstallCompletion(ledger, len(steps)); err != nil {
 			return err
 		}
 		if needsPasswordReapply(dec.GeneratedPassword,
@@ -377,10 +303,6 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 		}
 	}
 
-	// The archives the install used, and older ones, leave /root/releases
-	// only now that the install is complete. A failure is logged.
-	host.RemoveUsedArchives(paths.InstallReleasesFolder, protocol.Bitcoin, protocol.LND)
-
 	// Both paths leave the connect command in the shell. The install terminal
 	// never opens the node TUI. The owner reaches it by logging in over SSH.
 	printConnectInstructions()
@@ -401,39 +323,6 @@ func withRootLoginOff(err error, ledger *installLedger) error {
 	return &StopError{Err: err, RootLoginOff: true}
 }
 
-// workFolderPrefix names a run's download folder.
-const workFolderPrefix = "vpn-install-"
-
-// removeKilledRunFolders removes the download folders of runs that were
-// killed before they could remove their own. Only vpn's own are touched, each
-// a real folder, not a link, owned by root, private, with vpn's name. The
-// install lock means no other run is using one.
-func removeKilledRunFolders(base string) {
-	entries, err := os.ReadDir(base)
-	if err != nil {
-		logger.Install("WARNING: could not list %s for old download folders: %v", base, err)
-		return
-	}
-	for _, e := range entries {
-		if !strings.HasPrefix(e.Name(), workFolderPrefix) {
-			continue
-		}
-		path := filepath.Join(base, e.Name())
-		fi, err := os.Lstat(path)
-		if err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o700 {
-			continue
-		}
-		if st, ok := fi.Sys().(*syscall.Stat_t); !ok || st.Uid != 0 {
-			continue
-		}
-		if err := os.RemoveAll(path); err != nil {
-			logger.Install("WARNING: could not remove the old download folder %s: %v", path, err)
-			continue
-		}
-		logger.Install("removed the download folder of an earlier run, %s", path)
-	}
-}
-
 func validateBaseInstallSteps(steps []InstallStep) error {
 	if len(steps) != len(baseInstallStepKeys) {
 		return fmt.Errorf("base install has %d steps, ledger schema requires %d",
@@ -448,10 +337,7 @@ func validateBaseInstallSteps(steps []InstallStep) error {
 	return nil
 }
 
-func prepareInstallCompletion(
-	cfg *config.AppConfig, dec *InstallDecisions,
-	ledger *installLedger, stepCount int,
-) error {
+func prepareInstallCompletion(ledger *installLedger, stepCount int) error {
 	if !ledger.allBaseStepsDone() {
 		return errors.New("cannot finalize installation before every base step is recorded")
 	}
@@ -462,12 +348,9 @@ func prepareInstallCompletion(
 		return err
 	}
 	logger.Install("all %d install steps complete", stepCount)
-	if ledger.Context.DbCacheMB == nil {
-		return errors.New("cannot finalize installation without recorded db cache")
-	}
-	cfg.DbCache = *ledger.Context.DbCacheMB
-	dec.DbCacheMB = cfg.DbCache
-	if err := config.Save(cfg); err != nil {
+	// Written once every step is recorded. It is how the TUI and the update
+	// tell a finished install.
+	if err := config.Save(config.Default()); err != nil {
 		return fmt.Errorf("write %s: %w", config.DefaultPath, err)
 	}
 	if err := host.SetOperatorLogOwnership(); err != nil {
@@ -500,16 +383,8 @@ func printGeneratedPassword(password string) error {
 	return nil
 }
 
-// fillUnattendedDecisions prepares a generated password and hardware defaults.
-// Password delivery follows the applied/pending-marker contract.
-func fillUnattendedDecisions(dec *InstallDecisions) error {
-	if err := fillGeneratedPassword(dec); err != nil {
-		return err
-	}
-	dec.DbCacheMB = recommendedDbCache()
-	return nil
-}
-
+// fillGeneratedPassword prepares the password of an unattended install. Its
+// delivery follows the applied/pending-marker contract.
 func fillGeneratedPassword(dec *InstallDecisions) error {
 	gen := generateAdminPassword()
 	pw, err := loginpassword.New(gen)
@@ -524,8 +399,7 @@ func fillGeneratedPassword(dec *InstallDecisions) error {
 // The package upgrade step calls these through variables so that a test can
 // stand in for apt and for Tor. After an upgrade only Tor's own readiness is
 // asked again. The exit probe of the Tor gate is not repeated, because a
-// restart of Tor does not change whether torsocks intercepts, and the next
-// download refuses to run without Tor in any case.
+// restart of Tor does not change whether torsocks intercepts.
 var (
 	upgradeDebian         = host.UpgradeDebian
 	verifyTorAfterUpgrade = func() error {
@@ -534,29 +408,15 @@ var (
 )
 
 // buildInstallSteps returns the initial install step list. Every step
-// carries a stable Key, its identity in the ledger without a version, a Kind
-// (gates run again on every pass) and a Group where steps hand temporary
-// material to each other (see engine.go).
+// carries a stable Key, its identity in the ledger without a version, and a
+// Kind (gates run again on every pass, see engine.go).
 //
 // The firewall step comes right after the single apt operation outside Tor,
 // so denying incoming traffic is in place before anything else. Outgoing
 // traffic stays allowed so Tor can start behind it, and `ufw enable` does not
 // break established SSH sessions. The base upgrade, a large download on an
 // old image, waits until apt goes through Tor.
-func buildInstallSteps(
-	cfg *config.AppConfig, dec *InstallDecisions, work string,
-	holdRestarts func() error,
-) []InstallStep {
-	// Pipeline working directories are created in each pipeline's first
-	// step inside the run's folder, captured by closures and removed in the
-	// final step, or with the run's folder when the run ends. Random paths
-	// from os.MkdirTemp prevent symlink attacks. These closures are why the
-	// btc and lnd triplets are Groups that resume as a whole. The workdir
-	// path lives only in this process, so a resumed process can never enter
-	// a pipeline midway.
-	var btcWork, lndWork, btcFrom, lndFrom string
-	lndVersion := strings.TrimSuffix(component.LNDVersion, "-beta")
-
+func buildInstallSteps(dec *InstallDecisions, holdRestarts func() error) []InstallStep {
 	return []InstallStep{
 		{Key: "binary.install",
 			Name: "Installing the vpn program",
@@ -585,25 +445,21 @@ func buildInstallSteps(
 			}},
 		{Key: "ipv6.disable", Name: "Turning off IPv6",
 			Fn: host.DisableIPv6},
-		// Before any program listens. LND and Syncthing are Go programs,
-		// which listen with Multipath TCP by default.
 		{Key: "mptcp.disable", Name: "Turning off Multipath TCP",
 			Fn: host.DisableMPTCP},
-		{Key: "tor.configure", Name: "Setting up Tor and your onion addresses",
+		{Key: "tor.configure", Name: "Setting up Tor",
 			Fn: func() error {
-				if err := host.WriteTorConfig(cfg); err != nil {
+				if err := host.WriteTorConfig(); err != nil {
 					return err
 				}
 				return host.EnableAndRestartTor()
 			}},
-		// Hard gate. No network step below that depends on Tor, apt over
-		// the socks5h proxy or any DownloadRequireTor, runs unless Tor
-		// routing is verified. See torgate.go. As a StepGate it is checked
-		// again on every pass, resumes included, so no download runs in a
-		// pass whose Tor routing was not verified in that same pass. The
-		// check that torsocks is present moved here from preflight and
-		// runs inside this step, after Tor is installed and before the
-		// first download.
+		// Hard gate. No step below that sends apt through Tor runs unless
+		// Tor routing is verified. See torgate.go. As a StepGate it is
+		// checked again on every pass, resumes included, so no package comes
+		// through Tor in a pass whose Tor routing was not verified in that
+		// same pass. The check that torsocks is present runs inside this
+		// step, after Tor is installed.
 		{Key: "tor.gate", Name: "Verifying the Tor connection",
 			Kind: StepGate, Fn: verifyTorRouting},
 		{Key: "apt.tor", Name: "Sending apt package downloads through Tor",
@@ -613,7 +469,7 @@ func buildInstallSteps(
 		// update runs, and its nightly job is turned on. An upgrade can
 		// restart Tor, for example with a library Tor uses, so the step
 		// reports done only once Tor is ready again. The next step
-		// downloads through it.
+		// installs a package through it.
 		{Key: "base.upgrade",
 			Name: "Updating Debian and turning on its security updates",
 			Fn: func() error {
@@ -631,102 +487,10 @@ func buildInstallSteps(
 				}
 				return host.ConfigureFail2ban()
 			}},
-		// Debian's zram package, so it comes after apt uses Tor, and before
-		// Bitcoin Core's first sync, when memory is shortest.
+		// Debian's zram package, so it comes after apt uses Tor.
 		{Key: "swap.zram", Name: "Setting up compressed swap",
 			Fn: host.SetUpCompressedSwap},
 
-		// ── Bitcoin Core and LND ─────────────────
-		// The programs the install record's bitcoin and lightning fields
-		// name. Tor's configuration above already lists LND's onion
-		// services, since the record names LND.
-		{Key: "service-identities.v1",
-			Name: "Creating separate users for Bitcoin Core and LND",
-			Fn: func() error {
-				return createBaseServiceIdentities()
-			}},
-		// The owner may bring the exact archive in /root/releases. Its name
-		// is decided now, the file is taken or downloaded when the step runs.
-		{Key: "btc.download", Group: "btc",
-			Name: takeOrDownload(protocol.Bitcoin, component.BitcoinCoreVersion, component.BitcoinCoreVersion),
-			Fn: func() error {
-				var err error
-				btcWork, err = os.MkdirTemp(work, "btc-")
-				if err != nil {
-					return fmt.Errorf("create work dir: %w", err)
-				}
-				btcFrom, err = host.TakeArchive(protocol.Bitcoin, component.BitcoinCoreVersion, paths.InstallReleasesFolder, btcWork)
-				return err
-			}},
-		{Key: "btc.verify", Group: "btc",
-			Name: "Checking Bitcoin Core against the pinned hash",
-			Fn: func() error {
-				return host.CheckPinnedArchive(protocol.Bitcoin, btcWork, btcFrom)
-			}},
-		// Also writes lnd.conf. LND's Bitcoin Core password is created here
-		// with bitcoin.conf and lnd.conf is where it is kept. The onion
-		// addresses the two files name were made by Tor in the
-		// tor.configure step.
-		{Key: "btc.install", Group: "btc",
-			Name: "Installing and configuring Bitcoin Core",
-			Fn: func() error {
-				if err := host.InstallPinnedPrograms(protocol.Bitcoin, btcWork); err != nil {
-					return err
-				}
-				os.RemoveAll(btcWork)
-				if err := host.WriteInitialNodeRPCConfig(cfg); err != nil {
-					return err
-				}
-				return host.WriteBitcoindService()
-			}},
-		{Key: "btc.start", Name: "Starting Bitcoin Core",
-			Fn: func() error { return host.EnableAndRestartBitcoind(cfg) }},
-		{Key: "lnd.download", Group: "lnd",
-			Name: takeOrDownload(protocol.LND, component.LNDVersion, lndVersion),
-			Fn: func() error {
-				var err error
-				lndWork, err = os.MkdirTemp(work, "lnd-")
-				if err != nil {
-					return fmt.Errorf("create work dir: %w", err)
-				}
-				lndFrom, err = host.TakeArchive(protocol.LND, component.LNDVersion, paths.InstallReleasesFolder, lndWork)
-				return err
-			}},
-		{Key: "lnd.verify", Group: "lnd",
-			Name: "Checking LND against the pinned hash",
-			Fn: func() error {
-				return host.CheckPinnedArchive(protocol.LND, lndWork, lndFrom)
-			}},
-		{Key: "lnd.install", Group: "lnd",
-			Name: "Installing LND",
-			Fn: func() error {
-				if err := host.InstallPinnedPrograms(protocol.LND, lndWork); err != nil {
-					return err
-				}
-				os.RemoveAll(lndWork)
-				return host.WriteLNDService()
-			}},
-		// Recorded only once LND's TLS pair is complete and on disk. A rerun
-		// starts LND from no TLS files, see StartLNDWithNewTLSFiles.
-		{Key: "lnd.start", Name: "Starting LND", Fn: host.StartLNDWithNewTLSFiles},
-		{Key: "lnd.tls-san", Kind: StepGate,
-			Name: "Checking LND's certificate",
-			Fn:   host.VerifyLNDTLSOnionSAN},
-		// LND owns its TLS certificate lifecycle. At startup it
-		// replaces an expired certificate, and tlsautorefresh
-		// also replaces one whose configured SAN inputs changed.
-		// No TUI operation necessarily requested that startup.
-		// This watch re-stages the TUI's copy within seconds of any
-		// rewrite. After lnd.start so an installation or resume arms it
-		// on the certificate LND is actually serving.
-		{Key: "lnd.certwatch",
-			Name: "Watching LND's certificate for changes",
-			Fn:   host.InstallLNDCertWatch},
-		{Key: "lnd.tls-stage",
-			Name: "Copying LND's certificate for the TUI",
-			Fn:   stageBoard},
-
-		// ── The last host steps ──────────────────
 		// Checks the owner's sudo first, then turns root's SSH login off and
 		// the owner's password login on. The root session running the
 		// install stays open, so the later steps run in it.
@@ -743,26 +507,8 @@ func buildInstallSteps(
 		{Key: "helper.enable",
 			Name: "Starting vpnd, the node's root service",
 			Fn:   host.InstallVPNDUnits},
-		// Once a special case after the TUI that warned but completed
-		// anyway. As a real step it gets the ledger, the completion gate,
-		// failure logging and resume, and the special case is gone.
-		{Key: "shellenv", Name: "Adding bitcoin-cli and lncli shortcuts",
-			Fn: func() error {
-				return host.SetupNodeCLI(cfg)
-			}},
-		// Last, beside the shortcuts, which also set up the owner's home.
+		// Last. It makes a folder in the owner's home.
 		{Key: "releases.folder", Name: "Creating the releases folder",
 			Fn: host.CreateReleasesFolder},
 	}
-}
-
-// takeOrDownload names a download step by where the archive will come from.
-// The owner may change /root/releases while the install runs: the step then
-// does what it finds at its own start, and its log line says which.
-// shown is the version as the step shows it.
-func takeOrDownload(c protocol.Component, version, shown string) string {
-	if host.ArchiveInFolder(c, version, paths.InstallReleasesFolder) {
-		return "Taking " + component.Name(c) + " " + shown + " from " + paths.InstallReleasesFolder
-	}
-	return "Downloading " + component.Name(c) + " " + shown + " through Tor"
 }

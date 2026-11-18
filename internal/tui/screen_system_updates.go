@@ -97,7 +97,7 @@ func (s *UpdatesScreen) View(w, _ int) string {
 	p.title(theme.Header, "Updates")
 	p.buttons(s.labels(), s.button, s.ctx.ContentFocused && !s.confirm)
 	p.blank()
-	p.field("Node Updates: ", "new releases of vpn and the node software.")
+	p.field("Node Updates: ", "new releases of vpn.")
 	p.blank()
 	p.field("Update Packages: ", "Debian's updates, installed now.")
 	if s.confirm {

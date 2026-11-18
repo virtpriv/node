@@ -9,30 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/virtpriv/node/internal/component"
-	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/update/files"
-	"github.com/virtpriv/node/internal/update/protocol"
 )
-
-func UpdateArchive(c protocol.Component, version string) (string, map[string]string, error) {
-	if !protocol.ValidVersion(c, version) {
-		return "", nil, errors.New("invalid component version")
-	}
-	name := component.ArchiveName(c, version)
-	switch c {
-	case protocol.Bitcoin:
-		prefix := "bitcoin-" + version + "/bin/"
-		return name, map[string]string{prefix + "bitcoind": "bitcoind", prefix + "bitcoin-cli": "bitcoin-cli"}, nil
-	case protocol.LND:
-		prefix := "lnd-linux-amd64-v" + version + "/"
-		return name, map[string]string{prefix + "lnd": "lnd", prefix + "lncli": "lncli"}, nil
-	case protocol.Syncthing:
-		prefix := "syncthing-linux-amd64-v" + version + "/"
-		return name, map[string]string{prefix + "syncthing": "syncthing"}, nil
-	}
-	return "", nil, errors.New("unsupported component")
-}
 
 // ExtractUpdateArchive only copies explicitly selected regular members. Tar
 // paths, symlinks, ownership and permissions never select host destinations.
@@ -79,87 +57,6 @@ func ExtractUpdateArchive(archive, dest string, members map[string]string) error
 	}
 	if len(seen) != len(members) {
 		return errors.New("release archive is missing a required file")
-	}
-	return nil
-}
-
-// programDir holds the component programs vpn installs and updates.
-const programDir = "/usr/local/bin"
-
-// installPrograms unpacks the programs of a verified component archive and
-// places each in /usr/local/bin, the way a managed update does, so that a
-// power cut leaves the old program or the whole new one. Archive owners and
-// modes are ignored. Each program ends root owned with mode 0755.
-func installPrograms(c protocol.Component, version, workDir string) error {
-	archive, members, err := UpdateArchive(c, version)
-	if err != nil {
-		return err
-	}
-	staged := filepath.Join(workDir, "bin")
-	if err := ExtractUpdateArchive(filepath.Join(workDir, archive), staged, members); err != nil {
-		return err
-	}
-	for _, name := range members {
-		if err := files.Copy(filepath.Join(staged, name), filepath.Join(programDir, name), 0755); err != nil {
-			return fmt.Errorf("install %s: %w", name, err)
-		}
-	}
-	return nil
-}
-
-func StageUpdateComponent(c protocol.Component, a protocol.Artifact, dir string) (map[string]string, error) {
-	if err := files.Directory(dir, 0700); err != nil {
-		return nil, err
-	}
-	archive, members, err := UpdateArchive(c, a.Version)
-	if err != nil {
-		return nil, err
-	}
-	if c == protocol.Bitcoin {
-		// Earlier installers copied the entire Core bin directory. Keep any
-		// already installed companion tools on the same release, without
-		// introducing tools that are absent from this node.
-		for _, name := range []string{"bitcoin-tx", "bitcoin-wallet", "bitcoin-util", "bitcoin-qt"} {
-			if err := files.Check(filepath.Join(programDir, name), false); err == nil {
-				members["bitcoin-"+a.Version+"/bin/"+name] = name
-			} else if !os.IsNotExist(err) {
-				return nil, err
-			}
-		}
-	}
-	// The new release's worker runs this, and update.ValidateBuild already
-	// required the plan's versions and hashes to be its pins.
-	from, err := TakeArchive(c, a.Version, paths.ReleasesFolder, dir)
-	if err != nil {
-		return nil, err
-	}
-	if err := CheckArchive(c, a.Version, a.SHA256, dir, from); err != nil {
-		return nil, err
-	}
-	if err := ExtractUpdateArchive(filepath.Join(dir, archive), filepath.Join(dir, "bin"), members); err != nil {
-		return nil, err
-	}
-	hashes := map[string]string{}
-	for _, name := range members {
-		hash, err := files.Hash(filepath.Join(dir, "bin", name))
-		if err != nil {
-			return nil, err
-		}
-		hashes[name] = hash
-	}
-	return hashes, nil
-}
-
-// UpdateBinaryNames is a closed destination allowlist, including companion
-// tools retained by older Core installations.
-func UpdateBinaryNames(c protocol.Component) []string {
-	switch c {
-	case protocol.Bitcoin:
-		return []string{"bitcoind", "bitcoin-cli", "bitcoin-tx", "bitcoin-wallet", "bitcoin-util", "bitcoin-qt"}
-	case protocol.LND:
-		return []string{"lnd", "lncli"}
-	case protocol.Syncthing:
-		return []string{"syncthing"}
 	}
 	return nil
 }

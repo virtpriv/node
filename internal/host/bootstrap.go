@@ -144,10 +144,10 @@ net.ipv6.conf.lo.disable_ipv6 = 1
 	return system.RunRootSilent("sysctl", "--system")
 }
 
-// DisableMPTCP turns Multipath TCP off for the whole machine, as LND advises
-// Linux operators since v0.21.6. The published attack on CVE-2026-98432 needs
-// an MPTCP listener, and Go programs such as LND and Syncthing open one by
-// default. This closes that attack only. The kernel update is the fix.
+// DisableMPTCP turns Multipath TCP off for the whole machine. The published
+// attack on CVE-2026-98432 needs an MPTCP listener, and a Go program that
+// listens on TCP opens one by default. This closes that attack only. The
+// kernel update is the fix.
 func DisableMPTCP() error {
 	content := `# Virtual Private Node turns Multipath TCP off.
 net.mptcp.enabled = 0

@@ -21,9 +21,7 @@ var (
 )
 
 // ConfigureInitialFirewall establishes the node's global UFW baseline during
-// initial installation. It opens only the SSH ports. Later features, such as
-// the Hybrid upgrade and the Syncthing add-on, add and verify only the rules
-// they own through the additive host operations and never call it.
+// initial installation. It opens only the SSH ports.
 //
 // The step observes sshd right before the rewrite and opens the ports it
 // listens on. Observation failure refuses the rewrite. There is no

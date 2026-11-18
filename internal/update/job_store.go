@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"time"
 
 	"github.com/virtpriv/node/internal/paths"
@@ -20,16 +19,19 @@ const Root = paths.PrivateDir + "/updates"
 const LockPath = paths.OperationsLock
 const Service = protocol.WorkerUnit
 
-// A record is the part of current.json that the installed helper and the
+// jobSchema is the number of the update's record, current.json. Number 1 was
+// the record of an update of the Bitcoin and Lightning node.
+const jobSchema = 2
+
+// A record is the part of current.json that the installed side and the
 // retained launcher depend on. Both stay in service for every later release
 // that admits this one, and that release's worker may add fields, phases and
-// components. So they read only these fields, treat every phase other than
-// failed, complete, canceled and waiting-unlock as work in progress, and keep
-// the rest of the file when they write. Removing or redefining one of these
-// fields breaks nodes that are already installed. Steps, StepNumber,
-// StepStarts, StepEnds, Failure, Next and Advice are only for the screen, so
-// they are kept undecoded here and a value of another shape is ignored
-// instead of making the record unreadable.
+// steps. So they read only these fields, treat every phase other than failed,
+// complete and canceled as work in progress, and keep the rest of the file
+// when they write. Removing or redefining one of these fields breaks nodes
+// that are already installed. Steps, StepNumber, StepStarts, StepEnds, Next
+// and Advice are only for the screen, so they are kept undecoded here and a
+// value of another shape is ignored instead of making the record unreadable.
 type record struct {
 	Schema int `json:"schema"`
 	Review struct {
@@ -37,7 +39,6 @@ type record struct {
 		Manifest struct {
 			Version string `json:"version"`
 		} `json:"manifest"`
-		Network string `json:"network"`
 	} `json:"review"`
 	// JobID is the Node Update's job ID in the vpn API, saved at Start.
 	JobID       string          `json:"job_id"`
@@ -50,7 +51,6 @@ type record struct {
 	StepStarts  json.RawMessage `json:"step_starts"`
 	StepEnds    json.RawMessage `json:"step_ends"`
 	Error       string          `json:"error"`
-	Failure     json.RawMessage `json:"failure"`
 	Next        json.RawMessage `json:"next"`
 	Advice      json.RawMessage `json:"advice"`
 	HostChanges bool            `json:"host_changes_begun"`
@@ -75,7 +75,7 @@ func loadRecord(root string) (*record, error) {
 	if err := json.Unmarshal(b, &r); err != nil {
 		return nil, err
 	}
-	if r.Schema != 1 || r.Phase == "" || !protocol.ValidDigest(r.Review.Digest) || !protocol.ValidDigest(r.WorkerHash) || !protocol.ValidDigest(r.ConfigHash) || !release.ValidVersion(r.Review.Manifest.Version) {
+	if r.Schema != jobSchema || r.Phase == "" || !protocol.ValidDigest(r.Review.Digest) || !protocol.ValidDigest(r.WorkerHash) || !protocol.ValidDigest(r.ConfigHash) || !release.ValidVersion(r.Review.Manifest.Version) {
 		return nil, errors.New("unsupported or invalid update record")
 	}
 	return &r, nil
@@ -108,10 +108,11 @@ func amendRecord(root string, set map[string]any) error {
 	return writeJSON(path, raw)
 }
 
-// A job is the worker's full view of the same record. It records intent before
-// each side effect. Completed is advisory: live files and service invocations
-// are verified again after an interruption.
+// A job is the worker's full view of the same record. It records intent
+// before the program is replaced.
 type job struct {
+	// Previous is the failed update a repair release follows. The installed
+	// side keeps that update's record as result.json in its folder.
 	Previous string `json:"previous,omitempty"`
 	Schema   int    `json:"schema"`
 	// JobID, Accepted and Ended are the Node Update as a job of the vpn API:
@@ -128,28 +129,19 @@ type job struct {
 	// Steps is the list Node Updates draws, written by the worker at the start
 	// of each run. StepNumber counts from 1 and names the step in progress.
 	// StepStarts and StepEnds hold when each step began and when it finished
-	// or failed, a Retry keeping those of the steps it does not redo. Failure
-	// is the code of a known failure and Next and Advice the screen's next
-	// step and words for it, these three saved and cleared with Error.
-	Steps         []string                    `json:"steps,omitempty"`
-	StepNumber    int                         `json:"step_number,omitempty"`
-	StepStarts    []time.Time                 `json:"step_starts,omitempty"`
-	StepEnds      []time.Time                 `json:"step_ends,omitempty"`
-	Error         string                      `json:"error,omitempty"`
-	Failure       *protocol.Failure           `json:"failure,omitempty"`
-	Next          protocol.Next               `json:"next,omitempty"`
-	Advice        string                      `json:"advice,omitempty"`
-	Updated       time.Time                   `json:"updated"`
-	WalletPresent bool                        `json:"wallet_present"`
-	SyncthingID   string                      `json:"syncthing_id,omitempty"`
-	ConfigHash    string                      `json:"config_hash"`
-	Started       map[protocol.Component]bool `json:"started"`
-	MayHaveRun    map[protocol.Component]bool `json:"may_have_run"`
-	Affected      []protocol.Component        `json:"affected"`
-	Completed     map[string]bool             `json:"completed"`
-	BinaryHashes  map[string]string           `json:"binary_hashes"`
-	// HostChanges is saved before the first service guard and never cleared.
-	// The installed helper refuses Cancel once it is set.
+	// or failed. Next and Advice are the screen's next step and words for a
+	// failure, saved and cleared with Error.
+	Steps      []string      `json:"steps,omitempty"`
+	StepNumber int           `json:"step_number,omitempty"`
+	StepStarts []time.Time   `json:"step_starts,omitempty"`
+	StepEnds   []time.Time   `json:"step_ends,omitempty"`
+	Error      string        `json:"error,omitempty"`
+	Next       protocol.Next `json:"next,omitempty"`
+	Advice     string        `json:"advice,omitempty"`
+	Updated    time.Time     `json:"updated"`
+	ConfigHash string        `json:"config_hash"`
+	// HostChanges is saved before the program is replaced and never cleared.
+	// The installed side refuses Cancel once it is set.
 	HostChanges bool `json:"host_changes_begun"`
 }
 
@@ -222,26 +214,14 @@ func loadJob(root string) (*job, error) {
 	if err != nil {
 		return nil, err
 	}
-	if j.Schema != 1 || !protocol.ValidDigest(j.Review.Digest) || !protocol.ValidDigest(j.WorkerHash) || !protocol.ValidDigest(j.PlanHash) || j.Review.Manifest.Validate() != nil || j.Started == nil || j.MayHaveRun == nil || j.Completed == nil || j.BinaryHashes == nil {
+	if j.Schema != jobSchema || !protocol.ValidDigest(j.Review.Digest) || !protocol.ValidDigest(j.WorkerHash) || !protocol.ValidDigest(j.PlanHash) || j.Review.Manifest.Validate() != nil {
 		return nil, errors.New("unsupported or invalid update record")
 	}
-	if !protocol.ValidDigest(j.ConfigHash) || j.Review.Manifest.Admit(j.Review.Source, j.Review.Network, "") != nil {
+	if !protocol.ValidDigest(j.ConfigHash) || j.Review.Manifest.Admit(j.Review.Source, "") != nil {
 		return nil, errors.New("invalid update source or configuration record")
 	}
-	seen := map[protocol.Component]bool{}
-	for _, c := range j.Affected {
-		if !slices.Contains(protocol.Components, c) || seen[c] || (c == protocol.Syncthing && j.Review.Source.Syncthing == "") {
-			return nil, errors.New("invalid affected component record")
-		}
-		seen[c] = true
-	}
-	for _, c := range j.Review.Manifest.Affected(j.Review.Source) {
-		if !seen[c] {
-			return nil, errors.New("update record omits an affected component")
-		}
-	}
 	switch j.Phase {
-	case "accepted", "retry", "staging", "installing", "starting", "checking", "waiting-unlock", "committing", "complete", "failed", "canceled":
+	case "accepted", "retry", "committing", "complete", "failed", "canceled":
 	default:
 		return nil, errors.New("unknown update phase")
 	}

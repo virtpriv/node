@@ -126,19 +126,6 @@ func TestDiskUsageIsReadInBytes(t *testing.T) {
 	}
 }
 
-// du -s -B1 prints the bytes used, a tab and the path. Anything else is
-// unknown.
-func TestDirectorySizeIsReadInBytes(t *testing.T) {
-	if got, ok := parseDu("108003328\t/var/lib/lnd\n"); !ok || got != 108_003_328 {
-		t.Fatalf("got %d %v", got, ok)
-	}
-	for _, bad := range []string{"", "108M\t/var/lib/lnd", "\t/var/lib/lnd"} {
-		if _, ok := parseDu(bad); ok {
-			t.Errorf("unreadable du output accepted: %q", bad)
-		}
-	}
-}
-
 func TestServiceReadDistinguishesInactiveAndFailedQuery(t *testing.T) {
 	dir := t.TempDir()
 	// Deliberately return a plausible state with a failed process exit as well
@@ -157,7 +144,7 @@ func TestServiceReadDistinguishesInactiveAndFailedQuery(t *testing.T) {
 	} {
 		t.Setenv("STATUS_TEST_OUTPUT", tc.output)
 		t.Setenv("STATUS_TEST_EXIT", tc.exit)
-		active, err := ReadServiceActive(t.Context(), "lnd")
+		active, err := ReadServiceActive(t.Context(), "tor")
 		if active != tc.active || (err != nil) != tc.failed {
 			t.Fatalf("output=%q exit=%s: active=%v err=%v", tc.output, tc.exit, active, err)
 		}

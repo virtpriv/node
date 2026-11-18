@@ -12,11 +12,8 @@ import (
 
 // StartUnit starts a job's own systemd service through systemd-run, and
 // returns once its program runs. The service has no file on disk and is
-// removed when it ends, failed or not. Its sandbox is the one the root helper
-// had (ADR-0016's lists amendment, decision 5), tightened later kind by kind.
-// credential is a root-only file systemd copies into the job's private
-// credential folder, or empty.
-func StartUnit(id, title, credential string) error {
+// removed when it ends, failed or not.
+func StartUnit(id, title string) error {
 	args := []string{
 		"--unit=" + UnitName(id), "--collect", "--quiet",
 		"--description=vpn job: " + title,
@@ -24,9 +21,6 @@ func StartUnit(id, title, credential string) error {
 		"--property=PrivateTmp=yes",
 		"--property=ProtectHome=read-only",
 		"--property=SyslogIdentifier=vpnd",
-	}
-	if credential != "" {
-		args = append(args, "--property=LoadCredential="+credentialName+":"+credential)
 	}
 	args = append(args, "--", paths.BinaryPath, "run-job", id)
 	// The error names only the cause. The command line holds nothing beyond

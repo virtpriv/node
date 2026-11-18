@@ -13,8 +13,8 @@ import (
 )
 
 // ControlService completes independently of the requesting terminal. The bound
-// covers LND's five-minute stop and twenty-minute notified start. Terminating
-// systemctl observation cannot roll back a job already accepted by systemd.
+// is far longer than a start or stop of Tor takes. Terminating systemctl
+// observation cannot roll back a job already accepted by systemd.
 func ControlService(request servicecontrol.Request) (servicecontrol.Completion, error) {
 	if os.Geteuid() != 0 {
 		return servicecontrol.Completion{}, errors.New("service control requires root")

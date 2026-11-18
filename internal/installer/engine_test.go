@@ -10,10 +10,10 @@ import (
 )
 
 // testSteps builds a miniature install list with the shapes
-// that matter: plain mutations, a gate, and a 3-member
-// pipeline group. Fns count executions into calls. The keys are
-// the first seven of the real install, in its order, because the
-// ledger accepts only step sets a real install can reach.
+// that matter: plain mutations and a gate. Fns count executions
+// into calls. The keys are the first seven of the real install,
+// in its order, because the ledger accepts only step sets a real
+// install can reach.
 func testSteps(calls map[string]int) []InstallStep {
 	fn := func(key string) func() error {
 		return func() error {
@@ -28,26 +28,15 @@ func testSteps(calls map[string]int) []InstallStep {
 			Fn: fn("apt.base")},
 		{Key: "firewall", Name: "Verifying firewall",
 			Kind: StepGate, Fn: fn("firewall")},
-		{Key: "host.prep", Group: "pipeline", Name: "Downloading",
+		{Key: "host.prep", Name: "Preparing",
 			Fn: fn("host.prep")},
-		{Key: "identity.access", Group: "pipeline", Name: "Verifying",
+		{Key: "identity.access", Name: "Creating the account",
 			Fn: fn("identity.access")},
-		{Key: "ipv6.disable", Group: "pipeline", Name: "Installing",
+		{Key: "ipv6.disable", Name: "Disabling IPv6",
 			Fn: fn("ipv6.disable")},
 		{Key: "mptcp.disable", Name: "Disabling MPTCP",
 			Fn: fn("mptcp.disable")},
 	}
-}
-
-func testLedger() *installLedger {
-	db := 512
-	ctx := newInstallContext("mainnet")
-	ctx.DbCacheMB = &db
-	l, err := newLedger(ctx)
-	if err != nil {
-		panic(err)
-	}
-	return l
 }
 
 func mustReadLedger(t *testing.T, path string) *installLedger {
@@ -127,23 +116,10 @@ func TestPlanScenarios(t *testing.T) {
 				"identity.access", "ipv6.disable", "mptcp.disable"},
 		},
 		{
-			// THE group test: download+verify recorded but the
-			// terminal (ipv6.disable) is not, so the whole
-			// group re-runs (the workdir died with the old process).
-			name: "incomplete group re-runs whole",
+			name: "resume after step 5: recorded steps stay done",
 			done: []string{"binary.install", "apt.base",
 				"firewall", "host.prep", "identity.access"},
-			wantRun: []string{"firewall", "host.prep",
-				"identity.access", "ipv6.disable", "mptcp.disable"},
-		},
-		{
-			// Terminal recorded: the group is complete even if
-			// member entries are absent (only the terminal is
-			// consulted for group members).
-			name: "group judged by terminal only",
-			done: []string{"binary.install", "apt.base",
-				"firewall", "ipv6.disable"},
-			wantRun: []string{"firewall", "mptcp.disable"},
+			wantRun: []string{"firewall", "ipv6.disable", "mptcp.disable"},
 		},
 		{
 			name: "unknown ledger keys ignored",
@@ -157,7 +133,7 @@ func TestPlanScenarios(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			led := testLedger()
+			led := newLedger()
 			for _, k := range c.done {
 				if baseStepKeySet()[k] {
 					if err := led.markDone(k, "0.6.3"); err != nil {
@@ -182,7 +158,7 @@ func TestPlanScenarios(t *testing.T) {
 // recorded gate means "it held on some earlier pass", which is
 // exactly what a gate must never rely on.
 func TestPlanGateIgnoresOwnLedgerEntry(t *testing.T) {
-	led := testLedger()
+	led := newLedger()
 	if err := led.markDone("firewall", "0.6.3"); err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +171,7 @@ func TestPlanGateIgnoresOwnLedgerEntry(t *testing.T) {
 
 func TestRunnerSkipDoesNotExecute(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
-	led := testLedger()
+	led := newLedger()
 	if err := led.markDone("binary.install", "0.6.3"); err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +203,7 @@ func TestRunnerRecordsAfterSuccessOnly(t *testing.T) {
 	boom := errors.New("boom")
 	steps[1].Fn = func() error { return boom }
 
-	led := testLedger()
+	led := newLedger()
 	r, err := newStepRunner(steps, "0.6.3", led, path)
 	if err != nil {
 		t.Fatal(err)
@@ -262,12 +238,12 @@ func TestClassifyRun(t *testing.T) {
 
 	failed := testSteps(map[string]int{})
 	failed[3].Status = StepFailed
-	failed[3].Err = errors.New("download failed")
+	failed[3].Err = errors.New("preparation failed")
 	res = classifyRun(failed, true, true, 3)
 	if res.Outcome != RunFailed {
 		t.Errorf("failed run classified %v", res.Outcome)
 	}
-	if res.StepNum != 4 || res.StepName != "Downloading" {
+	if res.StepNum != 4 || res.StepName != "Preparing" {
 		t.Errorf("failure attributed to %d/%q",
 			res.StepNum, res.StepName)
 	}
@@ -299,7 +275,7 @@ func TestRunInstallUnattendedCompleteAndResume(t *testing.T) {
 
 	// First pass: everything runs, outcome complete.
 	calls := map[string]int{}
-	led := testLedger()
+	led := newLedger()
 	res, err := RunInstallUnattended(
 		testSteps(calls), "0.6.3", led, path)
 	if err != nil {
@@ -346,7 +322,7 @@ func TestRunInstallUnattendedFailureStops(t *testing.T) {
 		return fmt.Errorf("tor not routing")
 	}
 
-	led := testLedger()
+	led := newLedger()
 	res, err := RunInstallUnattended(steps, "0.6.3", led, path)
 	if err != nil {
 		t.Fatal(err)
@@ -380,21 +356,21 @@ func TestWillRun(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/ledger.json"
 	steps := []InstallStep{
-		{Key: "service-identities.v1", Name: "a", Fn: func() error { return nil }},
-		{Key: "btc.install", Name: "b", Fn: func() error { return nil }},
+		{Key: "binary.install", Name: "a", Fn: func() error { return nil }},
+		{Key: "apt.base", Name: "b", Fn: func() error { return nil }},
 	}
-	led := testLedger()
-	if err := led.markDone("service-identities.v1", "1.0"); err != nil {
+	led := newLedger()
+	if err := led.markDone("binary.install", "1.0"); err != nil {
 		t.Fatal(err)
 	}
 	r, err := newStepRunner(steps, "1.0", led, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.willRun("service-identities.v1") {
+	if r.willRun("binary.install") {
 		t.Error("recorded step reported as will-run")
 	}
-	if !r.willRun("btc.install") {
+	if !r.willRun("apt.base") {
 		t.Error("unrecorded step reported as skip")
 	}
 	// Unknown key: conservative side is "will run" (screen shows).

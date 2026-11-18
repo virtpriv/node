@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -37,21 +38,8 @@ func newLifecycleFixture(t *testing.T) *lifecycleFixture {
 		ledger:          filepath.Join(private, "install-state.json"),
 		passwordMarker:  filepath.Join(private, "password-pending"),
 		bootstrapPrefix: filepath.Join(root, "bootstrap-"),
-		bootstraps: []lifecycleBootstrapState{
-			{
-				path:    filepath.Join(root, "bootstrap-mainnet-tor"),
-				context: newInstallContext("mainnet"),
-			},
-			{
-				path:    filepath.Join(root, "bootstrap-testnet4-tor"),
-				context: newInstallContext("testnet4"),
-			},
-			{
-				path:    filepath.Join(root, "bootstrap-public-signet-tor"),
-				context: newInstallContext("public-signet"),
-			},
-		},
-		ancestors: []lifecycleDir{{path: root, mode: rootInfo.Mode().Perm()}},
+		bootstrap:       filepath.Join(root, "bootstrap-layout-2"),
+		ancestors:       []lifecycleDir{{path: root, mode: rootInfo.Mode().Perm()}},
 		unmarkedPaths: []string{
 			filepath.Join(root, "var-lib-vpn"),
 			filepath.Join(root, "etc-vpn"),
@@ -85,16 +73,16 @@ func (f *lifecycleFixture) classify() (lifecycleState, error) {
 
 func (f *lifecycleFixture) initialize(t *testing.T) *installLedger {
 	t.Helper()
-	l, err := initializeLifecycle(f.fs, f.lookup, newInstallContext("testnet4"))
+	l, err := initializeLifecycle(f.fs, f.lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return l
 }
 
-func (f *lifecycleFixture) seedBootstrap(t *testing.T, index int) string {
+func (f *lifecycleFixture) seedBootstrap(t *testing.T) string {
 	t.Helper()
-	path := f.fs.bootstraps[index].path
+	path := f.fs.bootstrap
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -109,9 +97,6 @@ func TestRootLifecyclePristineInitializeAndResume(t *testing.T) {
 		t.Fatalf("pristine classification: %+v, %v", state, err)
 	}
 	l := f.initialize(t)
-	if err := l.setDbCache(1024); err != nil {
-		t.Fatal(err)
-	}
 	if err := l.markDone("binary.install", "0.7.0"); err != nil {
 		t.Fatal(err)
 	}
@@ -122,8 +107,8 @@ func TestRootLifecyclePristineInitializeAndResume(t *testing.T) {
 	if err != nil || state.Disposition != lifecycleResumable {
 		t.Fatalf("resume classification: %+v, %v", state, err)
 	}
-	if state.Ledger.Context.Network != "testnet4" {
-		t.Fatalf("resume lost network: %+v", state.Ledger.Context)
+	if !state.Ledger.done("binary.install") {
+		t.Fatalf("resume lost the recorded step: %+v", state.Ledger)
 	}
 	for path, mode := range map[string]os.FileMode{
 		f.fs.varLibVPN: 0o755, f.fs.privateDir: 0o700,
@@ -161,7 +146,7 @@ func TestRootLifecyclePristineInitializeAndResume(t *testing.T) {
 			interrupted := errors.New("simulated process death")
 			reached := false
 			_, err := initializeLifecycleWithHook(
-				f.fs, f.lookup, newInstallContext("testnet4"), func(got lifecycleInitBoundary) error {
+				f.fs, f.lookup, func(got lifecycleInitBoundary) error {
 					if got != boundary {
 						return nil
 					}
@@ -183,13 +168,12 @@ func TestRootLifecyclePristineInitializeAndResume(t *testing.T) {
 						state.Disposition)
 				}
 			} else {
-				if state.Disposition != lifecycleBootstrap ||
-					state.BootstrapContext == nil {
+				if state.Disposition != lifecycleBootstrap {
 					t.Fatalf("interrupted state=%+v, want bootstrap",
 						state)
 				}
 				if _, err := resumeLifecycleBootstrap(
-					f.fs, f.lookup, *state.BootstrapContext); err != nil {
+					f.fs, f.lookup); err != nil {
 					t.Fatalf("resume bootstrap: %v", err)
 				}
 			}
@@ -201,8 +185,7 @@ func TestRootLifecyclePristineInitializeAndResume(t *testing.T) {
 			for _, path := range []string{
 				f.fs.ledger + ledgerBootstrapSuffix,
 				f.fs.layoutVersion + layoutBootstrapSuffix,
-				f.fs.bootstraps[0].path,
-				f.fs.bootstraps[1].path,
+				f.fs.bootstrap,
 			} {
 				if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
 					t.Errorf("bootstrap residue %s: %v", path, err)
@@ -216,9 +199,6 @@ func TestRootLifecycleCompletionPendingThenCompleted(t *testing.T) {
 	requireRootTestEnvironment(t)
 	f := newLifecycleFixture(t)
 	l := f.initialize(t)
-	if err := l.setDbCache(1024); err != nil {
-		t.Fatal(err)
-	}
 	for _, key := range baseInstallStepKeys {
 		if err := l.markDone(key, "0.7.0"); err != nil {
 			t.Fatal(err)
@@ -247,9 +227,6 @@ func TestRootLifecycleCompletedWithPasswordPendingRefuses(t *testing.T) {
 	requireRootTestEnvironment(t)
 	f := newLifecycleFixture(t)
 	l := f.initialize(t)
-	if err := l.setDbCache(512); err != nil {
-		t.Fatal(err)
-	}
 	for _, key := range baseInstallStepKeys {
 		if err := l.markDone(key, "0.7.0"); err != nil {
 			t.Fatal(err)
@@ -290,20 +267,8 @@ func TestRootLifecycleUnmarkedEvidenceRefuses(t *testing.T) {
 		{"vpn user", func(_ *testing.T, f *lifecycleFixture) {
 			f.users["vpn"] = true
 		}},
-		{"bitcoin user", func(_ *testing.T, f *lifecycleFixture) {
-			f.users[bitcoinUser] = true
-		}},
-		{"lnd user", func(_ *testing.T, f *lifecycleFixture) {
-			f.users[lndUser] = true
-		}},
-		{"syncthing user", func(_ *testing.T, f *lifecycleFixture) {
-			f.users[syncthingUser] = true
-		}},
 		{"rlvpn user", func(_ *testing.T, f *lifecycleFixture) {
 			f.users["ripsline"] = true
-		}},
-		{"backup group", func(_ *testing.T, f *lifecycleFixture) {
-			f.groups[backupGroup] = true
 		}},
 		{"vpn group", func(_ *testing.T, f *lifecycleFixture) {
 			f.groups[paths.AdminUser] = true
@@ -317,81 +282,66 @@ func TestRootLifecycleUnmarkedEvidenceRefuses(t *testing.T) {
 			f := newLifecycleFixture(t)
 			tt.seed(t, f)
 			if _, err := f.classify(); err == nil ||
-				!strings.Contains(err.Error(), "unmarked") {
+				!strings.Contains(err.Error(), "installs only on a fresh machine") {
 				t.Fatalf("unmarked evidence accepted: %v", err)
 			}
 		})
 	}
 }
 
+// vpn looks for its own traces and for those of its earlier name, never for
+// other software. An account of a program vpn once installed may be anyone's.
+func TestLifecycleIgnoresAccountsThatAreNotItsOwn(t *testing.T) {
+	requireRootTestEnvironment(t)
+	f := newLifecycleFixture(t)
+	for _, name := range []string{"bitcoin", "lnd", "syncthing", "vpn-lnd-backup"} {
+		f.users[name], f.groups[name] = true, true
+	}
+	if state, err := f.classify(); err != nil || state.Disposition != lifecyclePristine {
+		t.Fatalf("a machine with other software's accounts: %+v, %v", state, err)
+	}
+}
+
+// The first fifteen are what this installer writes. The last four are what
+// v0.6.x left on a machine under its earlier name. The program and its log
+// are left out, since they exist before a fresh install starts.
 func TestProductionLifecycleEvidenceInventory(t *testing.T) {
 	fs := productionLifecycleFS()
-	present := make(map[string]bool, len(fs.unmarkedPaths))
-	for _, path := range fs.unmarkedPaths {
-		present[path] = true
-	}
-	for _, path := range []string{
+	want := []string{
 		paths.VarLibVPN,
 		paths.ConfigDir,
 		paths.SSHDDropIn,
 		paths.AdminSudoers,
 		paths.AptTor,
 		paths.AptSources,
+		paths.AptRebootCheck,
+		paths.DisableIPv6Conf,
+		paths.DisableMPTCPConf,
 		paths.JournaldDropIn,
-		paths.BitcoinDir,
-		paths.BitcoinDataDir,
-		paths.BitcoindService,
-		paths.LNDDir,
-		paths.LNDDataDir,
-		paths.LNDService,
-		paths.TorBitcoinP2P,
-		paths.TorLNDGRPC,
-		paths.TorLNDREST,
+		paths.LogRotate,
+		paths.Fail2banJail,
 		paths.TorrcDistrib,
-		paths.SyncthingDir,
-		paths.SyncthingDataDir,
-		paths.SyncthingService,
-		paths.StateDir,
-		paths.ExportDir,
-		paths.BackupWatchPath,
-		paths.BackupExportService,
-		paths.BackupCheckTimer,
-		paths.LNDCertWatchPath,
-		paths.LNDCertStageService,
 		paths.VPNDSocketUnit,
 		paths.VPNDServiceUnit,
 		paths.OldSSHDDropIn,
-		paths.OldInstallStateFile,
-		paths.OldPasswordPending,
-		paths.OldServiceLayoutMark,
-	} {
-		if !present[path] {
-			t.Errorf("project lifecycle evidence missing from classifier: %s", path)
-		}
+		"/etc/rlvpn",
+		"/usr/local/bin/rlvpn",
+		"/var/log/rlvpn.log",
+	}
+	if !slices.Equal(fs.unmarkedPaths, want) {
+		t.Errorf("the classifier looks for %v, want %v", fs.unmarkedPaths, want)
+	}
+	if !slices.Equal(fs.conflictPaths, want[15:]) {
+		t.Errorf("a marked install conflicts with %v, want %v", fs.conflictPaths, want[15:])
 	}
 	for _, allowed := range []string{paths.BinaryPath, paths.LogFile} {
-		if present[allowed] {
+		if slices.Contains(fs.unmarkedPaths, allowed) {
 			t.Errorf("bootstrap/diagnostic path would make fresh install impossible: %s", allowed)
 		}
 	}
-	if len(fs.bootstraps) != 3 {
-		t.Fatalf("production bootstrap contexts=%d, want 3", len(fs.bootstraps))
-	}
-	wantBootstrap := map[string]string{
-		"mainnet":       paths.InstallBootstrapMainnet,
-		"testnet4":      paths.InstallBootstrapTestnet4,
-		"public-signet": paths.InstallBootstrapPublicSignet,
-	}
-	for _, bootstrap := range fs.bootstraps {
-		if got := wantBootstrap[bootstrap.context.Network]; got != bootstrap.path {
-			t.Errorf("%s bootstrap=%q, want %q",
-				bootstrap.context.Network, bootstrap.path, got)
-		}
-		if !strings.Contains(bootstrap.path, "service-layout-1") ||
-			layoutVersionContent != "service-layout=1\n" {
-			t.Errorf("bootstrap path %q and layout content %q disagree",
-				bootstrap.path, layoutVersionContent)
-		}
+	if fs.bootstrap != paths.InstallBootstrap || !strings.HasPrefix(fs.bootstrap, fs.bootstrapPrefix) ||
+		!strings.HasSuffix(fs.bootstrap, "service-layout-2") || layoutVersionContent != "service-layout=2\n" {
+		t.Errorf("bootstrap path %q and layout content %q disagree", fs.bootstrap, layoutVersionContent)
 	}
 }
 
@@ -434,51 +384,56 @@ func TestRootLifecycleUnsafeAndMalformedStateRefuses(t *testing.T) {
 		seed func(*testing.T, *lifecycleFixture)
 	}{
 		{"nonempty bootstrap", func(t *testing.T, f *lifecycleFixture) {
-			path := f.seedBootstrap(t, 1)
+			path := f.seedBootstrap(t)
 			if err := os.WriteFile(path, []byte("unexpected"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}},
 		{"bootstrap mode", func(t *testing.T, f *lifecycleFixture) {
-			path := f.seedBootstrap(t, 1)
+			path := f.seedBootstrap(t)
 			if err := os.Chmod(path, 0o640); err != nil {
 				t.Fatal(err)
 			}
 		}},
 		{"bootstrap symlink", func(t *testing.T, f *lifecycleFixture) {
-			if err := os.Symlink("missing", f.fs.bootstraps[1].path); err != nil {
+			if err := os.Symlink("missing", f.fs.bootstrap); err != nil {
 				t.Fatal(err)
 			}
 		}},
 		{"bootstrap hardlink", func(t *testing.T, f *lifecycleFixture) {
-			path := f.seedBootstrap(t, 1)
+			path := f.seedBootstrap(t)
 			if err := os.Link(path, path+"-link"); err != nil {
 				t.Fatal(err)
 			}
 		}},
-		{"multiple bootstrap contexts", func(t *testing.T, f *lifecycleFixture) {
-			f.seedBootstrap(t, 0)
-			f.seedBootstrap(t, 1)
-		}},
-		{"unknown bootstrap context", func(t *testing.T, f *lifecycleFixture) {
+		{"a later layout's bootstrap", func(t *testing.T, f *lifecycleFixture) {
 			if err := os.WriteFile(f.fs.bootstrapPrefix+"future-layout",
 				nil, 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}},
+		// The name an interrupted install of the Bitcoin and Lightning node
+		// left, here beside this installer's own.
+		{"an earlier layout's bootstrap", func(t *testing.T, f *lifecycleFixture) {
+			f.seedBootstrap(t)
+			if err := os.WriteFile(f.fs.bootstrapPrefix+"service-layout-1-mainnet-tor",
+				nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
 		{"bootstrap with external project state", func(t *testing.T, f *lifecycleFixture) {
-			f.seedBootstrap(t, 1)
+			f.seedBootstrap(t)
 			if err := os.WriteFile(
 				f.fs.unmarkedPaths[1], []byte("existing"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}},
 		{"bootstrap with project identity", func(t *testing.T, f *lifecycleFixture) {
-			f.seedBootstrap(t, 1)
+			f.seedBootstrap(t)
 			f.users[paths.AdminUser] = true
 		}},
 		{"bootstrap with unexpected tree object", func(t *testing.T, f *lifecycleFixture) {
-			f.seedBootstrap(t, 1)
+			f.seedBootstrap(t)
 			if err := os.Mkdir(f.fs.varLibVPN, 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -488,13 +443,13 @@ func TestRootLifecycleUnsafeAndMalformedStateRefuses(t *testing.T) {
 			}
 		}},
 		{"bootstrap with unsafe tree mode", func(t *testing.T, f *lifecycleFixture) {
-			f.seedBootstrap(t, 1)
+			f.seedBootstrap(t)
 			if err := os.Mkdir(f.fs.varLibVPN, 0o750); err != nil {
 				t.Fatal(err)
 			}
 		}},
 		{"bootstrap with unsafe staging object", func(t *testing.T, f *lifecycleFixture) {
-			f.seedBootstrap(t, 1)
+			f.seedBootstrap(t)
 			if err := os.Mkdir(f.fs.varLibVPN, 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -507,7 +462,7 @@ func TestRootLifecycleUnsafeAndMalformedStateRefuses(t *testing.T) {
 			}
 		}},
 		{"bootstrap with invalid ledger", func(t *testing.T, f *lifecycleFixture) {
-			f.seedBootstrap(t, 1)
+			f.seedBootstrap(t)
 			if err := os.Mkdir(f.fs.varLibVPN, 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -518,16 +473,16 @@ func TestRootLifecycleUnsafeAndMalformedStateRefuses(t *testing.T) {
 				t.Fatal(err)
 			}
 		}},
-		{"bootstrap with wrong-context ledger", func(t *testing.T, f *lifecycleFixture) {
-			f.seedBootstrap(t, 1)
+		{"bootstrap with a ledger that holds a step", func(t *testing.T, f *lifecycleFixture) {
+			f.seedBootstrap(t)
 			if err := os.Mkdir(f.fs.varLibVPN, 0o700); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.Mkdir(f.fs.privateDir, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			ledger, err := newLedger(newInstallContext("mainnet"))
-			if err != nil {
+			ledger := newLedger()
+			if err := ledger.markDone("binary.install", "0.7.0"); err != nil {
 				t.Fatal(err)
 			}
 			if err := ledger.save(f.fs.ledger); err != nil {
@@ -535,7 +490,7 @@ func TestRootLifecycleUnsafeAndMalformedStateRefuses(t *testing.T) {
 			}
 		}},
 		{"bootstrap layout without ledger", func(t *testing.T, f *lifecycleFixture) {
-			f.seedBootstrap(t, 1)
+			f.seedBootstrap(t)
 			if err := os.Mkdir(f.fs.varLibVPN, 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -562,8 +517,14 @@ func TestRootLifecycleUnsafeAndMalformedStateRefuses(t *testing.T) {
 		name   string
 		mutate func(*testing.T, *lifecycleFixture)
 	}{
-		{"marker content", func(t *testing.T, f *lifecycleFixture) {
-			if err := os.WriteFile(f.fs.layoutVersion, []byte("service-layout=2\n"), 0o600); err != nil {
+		// The marker of a Bitcoin and Lightning node.
+		{"an earlier layout's marker", func(t *testing.T, f *lifecycleFixture) {
+			if err := os.WriteFile(f.fs.layoutVersion, []byte("service-layout=1\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"a later layout's marker", func(t *testing.T, f *lifecycleFixture) {
+			if err := os.WriteFile(f.fs.layoutVersion, []byte("service-layout=3\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -737,7 +698,7 @@ func TestRootLifecycleRefusalDoesNotMutateEvidence(t *testing.T) {
 
 	t.Run("bootstrap conflict", func(t *testing.T) {
 		f := newLifecycleFixture(t)
-		bootstrap := f.seedBootstrap(t, 1)
+		bootstrap := f.seedBootstrap(t)
 		conflict := f.fs.unmarkedPaths[1]
 		if err := os.WriteFile(conflict, []byte("preserve me"), 0o600); err != nil {
 			t.Fatal(err)

@@ -54,7 +54,6 @@ if [ -n "$SSH_CONNECTION" ] && [ -t 0 ]; then
     printf '\033]110\a\033]111\a'
 fi
 
-# The bitcoin-cli and lncli shortcuts are in .bashrc.
 [ -f ~/.bashrc ] && source ~/.bashrc
 `
 	if err := system.WriteFileRootOwned(paths.AdminBashProfile, []byte(profile), 0644, paths.AdminUser, paths.AdminUser); err != nil {

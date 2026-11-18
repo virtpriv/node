@@ -29,13 +29,8 @@ import (
 //     trusted. The ledger records that a step finished, not that its result
 //     is still in place, see the ledger.go header.
 //   - A check (a gate) runs on every pass, because it checks the machine as
-//     it is now. So no download can run in a pass that did not check Tor's
-//     routing itself, whatever the order of the steps.
-//   - A group (download, check, install) hands files over through a folder
-//     made with MkdirTemp and kept only in this process. A group counts as
-//     done only when its last member is recorded. Otherwise every member runs
-//     again, and the archive, taken or downloaded again, is checked again
-//     against the pinned hash.
+//     it is now. So no package can come through Tor in a pass that did not
+//     check Tor's routing itself.
 
 // StepKind classifies a step for resume.
 type StepKind int
@@ -62,15 +57,14 @@ const (
 )
 
 type InstallStep struct {
-	// Key is the stable, versionless ledger key ("tor.install",
-	// "btc.download"). Names carry versions and copy edits. Keys
-	// identify the step across binary versions.
+	// Key is the stable, versionless ledger key ("tor.configure",
+	// "apt.base"). Names carry copy edits. Keys identify the step across
+	// binary versions.
 	Key string
 	// Name is display-only.
-	Name  string
-	Fn    func() error
-	Kind  StepKind
-	Group string // steps that rerun together, "" for a step on its own
+	Name string
+	Fn   func() error
+	Kind StepKind
 
 	Status StepStatus
 	Err    error
@@ -105,32 +99,12 @@ type stepPlan struct {
 // planRun decides, for every step, run or skip. It holds every resume
 // decision as one function with no I/O and no clock, tested per scenario.
 func planRun(steps []InstallStep, led *installLedger) []stepPlan {
-	// The last member of each group, in list order, by group.
-	terminal := map[string]string{}
-	for _, s := range steps {
-		if s.Group != "" {
-			terminal[s.Group] = s.Key
-		}
-	}
-
 	plan := make([]stepPlan, len(steps))
 	for i, s := range steps {
 		switch {
 		case s.Kind == StepGate:
 			plan[i] = stepPlan{Run: true,
 				Reason: "gate: re-verified every pass"}
-		case s.Group != "":
-			tk := terminal[s.Group]
-			if led.done(tk) {
-				e := led.Steps[tk]
-				plan[i] = stepPlan{Run: false, Reason: fmt.Sprintf(
-					"group %q complete (terminal %s done by v%s at %s)",
-					s.Group, tk, e.Version, e.CompletedAt)}
-			} else {
-				plan[i] = stepPlan{Run: true, Reason: fmt.Sprintf(
-					"group %q incomplete: re-runs whole "+
-						"(ephemeral workdir)", s.Group)}
-			}
 		case led.done(s.Key):
 			e := led.Steps[s.Key]
 			plan[i] = stepPlan{Run: false, Reason: fmt.Sprintf(
@@ -249,8 +223,7 @@ const RootLoginMayBeOffNotice = "Root's SSH login may already be off, so keep th
 // StopError reports an install that did not finish. NotStarted means no step
 // was ever recorded. Paused means it stopped between steps with no step
 // failed. DoneNum and DoneName name the last step recorded, and the step
-// named is the one the next run does, an earlier one when a download is done
-// again.
+// named is the one the next run does.
 // Otherwise the step named failed with Err, or, with no step named,
 // finishing the install failed. StartErr is why the last start was refused
 // when the owner then left. RootLoginOff is set once root's SSH login is
@@ -319,10 +292,6 @@ func (e *StopError) Lines() []string {
 	case e.Paused:
 		out = append(out, fmt.Sprintf("Install paused after step %d of %d (%s).", e.DoneNum, e.Total, e.DoneName))
 		run = fmt.Sprintf("To continue with step %d (%s), run:", e.StepNum, e.StepName)
-		if e.StepNum <= e.DoneNum {
-			out = append(out, fmt.Sprintf("For safety, the next run starts again at step %d (%s).", e.StepNum, e.StepName))
-			run = "To continue, run:"
-		}
 	default:
 		out = append(out, "Failed: "+e.Error())
 	}
@@ -351,9 +320,8 @@ func PrintStop(err error) {
 
 // nextStep returns the step the next run of steps against led starts with:
 // the first step the planner would run, leaving out a gate that already
-// passed, since gates run again on every pass anyway. A group whose last
-// member is not recorded runs again from its first member. ok is false when
-// every step is recorded.
+// passed, since gates run again on every pass anyway. ok is false when every
+// step is recorded.
 func nextStep(steps []InstallStep, led *installLedger) (int, bool) {
 	for i, p := range planRun(steps, led) {
 		if p.Run && (steps[i].Kind != StepGate || !led.done(steps[i].Key)) {
@@ -449,7 +417,7 @@ func RunInstallUnattended(
 	return classifyRun(steps, true, false, total), nil
 }
 
-// willRun suppresses a decision screen only when the planner proves its
+// willRun suppresses the password screen only when the planner proves its
 // step will be skipped. An absent key conservatively keeps the screen.
 func (r *stepRunner) willRun(key string) bool {
 	for i, s := range r.steps {

@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/virtpriv/node/internal/p2p"
 	"github.com/virtpriv/node/internal/paths"
 )
 
@@ -22,32 +21,19 @@ const (
 	DefaultDir  = paths.ConfigDir
 	DefaultPath = paths.ConfigFile
 
-	SystemSchema = 1
-)
-
-// The programs of the Bitcoin and Lightning steps. This release installs
-// Bitcoin Core and LND every time, so they are the only values it accepts. A
-// later release that makes them optional or adds another program adds
-// values, which this release refuses.
-const (
-	BitcoinCore  = "core"
-	LightningLND = "lnd"
+	// SystemSchema is 2 since Bitcoin Core and LND left. A file with the
+	// number 1 belongs to a Bitcoin and Lightning node and is refused.
+	SystemSchema = 2
 )
 
 // AppConfig is the root-owned, non-secret desired system configuration.
 // It deliberately contains no live daemon observations, credentials,
 // installer lifecycle state, security-workflow markers, or TUI preferences.
+// This release has nothing to configure, so the file holds its schema
+// number alone. The install writes it once every step is recorded, which is
+// how the TUI and the update tell a finished install.
 type AppConfig struct {
-	Schema           int    `json:"schema"`
-	Network          string `json:"network"`
-	Bitcoin          string `json:"bitcoin"`
-	Lightning        string `json:"lightning"`
-	PruneSize        int    `json:"prune_size_gb"`
-	DbCache          int    `json:"db_cache_mb"`
-	P2PMode          string `json:"p2p_mode"`
-	P2PAddress       string `json:"p2p_address"`
-	AutoUnlock       bool   `json:"auto_unlock_enabled"`
-	SyncthingEnabled bool   `json:"syncthing_enabled"`
+	Schema int `json:"schema"`
 }
 
 // Store reads and atomically publishes one system-configuration file. The
@@ -73,15 +59,7 @@ func DefaultStore() *Store {
 }
 
 func Default() *AppConfig {
-	return &AppConfig{
-		Schema:    SystemSchema,
-		Network:   "mainnet",
-		Bitcoin:   BitcoinCore,
-		Lightning: LightningLND,
-		PruneSize: 25,
-		DbCache:   512,
-		P2PMode:   "tor",
-	}
+	return &AppConfig{Schema: SystemSchema}
 }
 
 func (s *Store) ownership() (int, int, error) {
@@ -141,16 +119,7 @@ func validateObject(path string, wantDir bool, mode os.FileMode, uid, gid int) e
 // code must obey raises the schema number instead, and older code refuses the
 // file.
 var systemFields = map[string]bool{
-	"schema":              true,
-	"network":             true,
-	"bitcoin":             true,
-	"lightning":           true,
-	"prune_size_gb":       true,
-	"db_cache_mb":         true,
-	"p2p_mode":            true,
-	"p2p_address":         true,
-	"auto_unlock_enabled": true,
-	"syncthing_enabled":   true,
+	"schema": true,
 }
 
 // decodeObject reads one JSON object whose known fields are all present,
@@ -218,7 +187,7 @@ func decodeSystem(data []byte) (*AppConfig, error) {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	// Decode the known fields only. Go matches names without regard to case,
-	// so a later name such as "P2P_Mode" would otherwise set p2p_mode.
+	// so a later name such as "Schema" would otherwise set schema.
 	known, err := json.Marshal(fields)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
@@ -236,37 +205,6 @@ func decodeSystem(data []byte) (*AppConfig, error) {
 func (c *AppConfig) Validate() error {
 	if c.Schema != SystemSchema {
 		return fmt.Errorf("unsupported schema %d", c.Schema)
-	}
-	if err := ValidateNetwork(c.Network); err != nil {
-		return err
-	}
-	if err := ValidateBitcoin(c.Bitcoin); err != nil {
-		return err
-	}
-	if err := ValidateLightning(c.Lightning); err != nil {
-		return err
-	}
-	if c.PruneSize < 1 || c.PruneSize > 10_000 {
-		return fmt.Errorf("prune size %d GB is outside 1..10000", c.PruneSize)
-	}
-	switch c.DbCache {
-	case 512, 1024, 2048:
-	default:
-		return fmt.Errorf("db cache %d MB is not one of 512, 1024, 2048", c.DbCache)
-	}
-	switch c.P2PMode {
-	case "tor":
-		if c.P2PAddress != "" {
-			return errors.New("P2P address must be empty in Tor mode")
-		}
-	case "hybrid":
-		// The address the owner reviewed at the Hybrid upgrade, by the same
-		// rule that upgrade applies.
-		if _, err := p2p.NewUpgradeRequest(c.P2PAddress); err != nil {
-			return fmt.Errorf("hybrid P2P needs a public IPv4 address, got %q", c.P2PAddress)
-		}
-	default:
-		return fmt.Errorf("unknown P2P mode %q", c.P2PMode)
 	}
 	return nil
 }
@@ -399,28 +337,3 @@ func (s *Store) Save(cfg *AppConfig) error {
 
 func Load() (*AppConfig, error) { return DefaultStore().Load() }
 func Save(cfg *AppConfig) error { return DefaultStore().Save(cfg) }
-
-// ValidateBitcoin checks the Bitcoin program the node is set up with.
-func ValidateBitcoin(v string) error {
-	if v != BitcoinCore {
-		return fmt.Errorf("unknown Bitcoin part %q", v)
-	}
-	return nil
-}
-
-// ValidateLightning checks the Lightning program the node is set up with.
-func ValidateLightning(v string) error {
-	if v != LightningLND {
-		return fmt.Errorf("unknown Lightning part %q", v)
-	}
-	return nil
-}
-
-// HasLND reports whether the node is set up with LND.
-func (c *AppConfig) HasLND() bool { return c.Lightning == LightningLND }
-
-func (c *AppConfig) DbCacheMB() int { return c.DbCache }
-
-func (c *AppConfig) NetworkConfig() (*NetworkConfig, error) {
-	return NetworkConfigFromName(c.Network)
-}

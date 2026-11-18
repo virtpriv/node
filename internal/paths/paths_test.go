@@ -3,42 +3,9 @@
 package paths
 
 import (
-	"net"
 	"strings"
 	"testing"
 )
-
-// The loopback endpoints must be literal IPv4 addresses — never
-// a host name. The node disables IPv6 while /etc/hosts (a file
-// we do not own) still maps localhost to ::1, so an endpoint
-// that regressed to a name could resolve to an address the box
-// cannot use. Pinning the literal here keeps that regression
-// impossible for every consumer at once.
-func TestLoopbackEndpointsAreLiteralIPv4(t *testing.T) {
-	endpoints := map[string]string{
-		"LNDGRPCEndpoint": LNDGRPCEndpoint,
-		"LNDRESTEndpoint": LNDRESTEndpoint,
-		"LNDP2PBind":      LNDP2PBind,
-	}
-	for name, ep := range endpoints {
-		host, port, err := net.SplitHostPort(ep)
-		if err != nil {
-			t.Errorf("%s = %q: not host:port: %v", name, ep, err)
-			continue
-		}
-		if host != "127.0.0.1" {
-			t.Errorf("%s = %q: host is %q, want the literal "+
-				"IPv4 loopback address 127.0.0.1", name, ep, host)
-		}
-		if ip := net.ParseIP(host); ip == nil || ip.To4() == nil {
-			t.Errorf("%s = %q: host %q is not a literal IPv4 "+
-				"address", name, ep, host)
-		}
-		if port == "" {
-			t.Errorf("%s = %q: missing port", name, ep)
-		}
-	}
-}
 
 func TestLifecycleStateUsesPrivateBoundary(t *testing.T) {
 	for name, path := range map[string]string{
@@ -59,64 +26,9 @@ func TestLifecycleStateUsesPrivateBoundary(t *testing.T) {
 	if InstallLock == InstallStateFile {
 		t.Error("stable lock and replaceable ledger share a path")
 	}
-	for network, path := range map[string]string{
-		"mainnet":       InstallBootstrapMainnet,
-		"testnet4":      InstallBootstrapTestnet4,
-		"public-signet": InstallBootstrapPublicSignet,
-	} {
-		if !strings.HasPrefix(path, InstallBootstrapPrefix) {
-			t.Errorf("%s bootstrap path %q is outside /var/lib", network, path)
-		}
-		if strings.HasPrefix(path, VarLibVPN+"/") {
-			t.Errorf("%s bootstrap path %q is below the tree it precedes",
-				network, path)
-		}
-		if !strings.Contains(path, "-"+network+"-") {
-			t.Errorf("%s bootstrap path %q does not encode its network",
-				network, path)
-		}
-	}
-	if InstallBootstrapMainnet == InstallBootstrapTestnet4 ||
-		InstallBootstrapMainnet == InstallBootstrapPublicSignet ||
-		InstallBootstrapTestnet4 == InstallBootstrapPublicSignet {
-		t.Error("network profiles share a bootstrap path")
-	}
-	if InstallBootstrapPrefix != "/var/lib/vpn-install-bootstrap-" {
-		t.Errorf("bootstrap prefix is %q", InstallBootstrapPrefix)
-	}
-}
-
-func TestLNDBackupUsesProjectOwnedExportBoundary(t *testing.T) {
-	for name, got := range map[string]string{
-		"stage":  LNDBackupStage,
-		"export": LNDBackupExport,
-	} {
-		if !strings.HasPrefix(got, ExportDir+"/") {
-			t.Errorf("%s path %q is not below export boundary %q",
-				name, got, ExportDir)
-		}
-		if strings.HasPrefix(got, SyncthingDataDir+"/") {
-			t.Errorf("%s path %q is below Syncthing private state",
-				name, got)
-		}
-	}
-	if pathDir := strings.TrimSuffix(
-		LNDBackupStage, "/lnd-backup-stage"); pathDir != ExportDir {
-		t.Errorf("stage and export boundary disagree: %q, %q",
-			pathDir, ExportDir)
-	}
-	if BackupExportService !=
-		"/etc/systemd/system/lnd-backup-export.service" {
-		t.Errorf("backup export service path is %q",
-			BackupExportService)
-	}
-	if ExportReadyMarkerName != ".vpn-export-ready" {
-		t.Errorf("export marker convention is %q",
-			ExportReadyMarkerName)
-	}
-	if LNDBackupExportMarker !=
-		LNDBackupExport+"/"+ExportReadyMarkerName {
-		t.Errorf("LND backup export marker path is %q",
-			LNDBackupExportMarker)
+	// The bootstrap file exists before the tree it announces, so it lives
+	// beside that tree.
+	if strings.HasPrefix(InstallBootstrap, VarLibVPN+"/") {
+		t.Errorf("bootstrap path %q is below the tree it precedes", InstallBootstrap)
 	}
 }

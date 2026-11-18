@@ -16,29 +16,22 @@ import (
 
 // Version is the API number this release speaks. MinVersion is the oldest
 // number its vpnd still serves, so a TUI left open across an update keeps
-// working.
+// working. Number 1 was the API of the Bitcoin and Lightning node. Requests
+// were removed after it, so it is not served.
 const (
-	Version    = 1
-	MinVersion = 1
+	Version    = 2
+	MinVersion = 2
 )
 
 // Requests. vpnd serves this fixed menu and nothing else. No request runs a
 // caller-supplied command or returns a caller-chosen file.
 const (
 	// Reads, answered at once, also while a job runs.
-	VerbReadAccounts      = "read-accounts"
-	VerbReadAccount       = "read-account"
-	VerbReadNodeAddresses = "read-node-addresses"
-	VerbReadSSHAuth       = "read-ssh-auth"
-	VerbReadWalletState   = "read-wallet-state"
-	VerbDirSize           = "dir-size"
-	VerbJobStatus         = "job-status"
-	VerbVersion           = "version"
-
-	// Credential copies: vpnd copies LND's own files to the staging board.
-	// They keep no record and are never refused as busy.
-	VerbStageLNDCredentials = "stage-lnd-credentials"
-	VerbStageLNDMacaroon    = "stage-lnd-macaroon"
+	VerbReadAccounts = "read-accounts"
+	VerbReadAccount  = "read-account"
+	VerbReadSSHAuth  = "read-ssh-auth"
+	VerbJobStatus    = "job-status"
+	VerbVersion      = "version"
 
 	// VerbStartJob starts a change. The answer names the job.
 	VerbStartJob = "start-job"
@@ -54,10 +47,6 @@ const (
 	KindPackageUpdate    = "package-update"
 	KindPrepareUpdate    = "prepare-update"
 	KindServiceAction    = "service-action"
-	KindSyncthingInstall = "syncthing-install"
-	KindP2PUpgrade       = "p2p-upgrade"
-	KindAutoUnlockOn     = "auto-unlock-on"
-	KindAutoUnlockOff    = "auto-unlock-off"
 	KindReboot           = "reboot"
 	KindSSHPasswordLogin = "ssh-password-login"
 
@@ -187,23 +176,6 @@ type RebootResult struct {
 	Accepted bool `json:"accepted"`
 }
 
-// DirSizeParams: which data folder to measure. "lnd" is the only value.
-// Bitcoin Core reports its own size over RPC.
-type DirSizeParams struct {
-	Which string `json:"which"`
-}
-
-// DirSizeResult carries the measured size in bytes.
-type DirSizeResult struct {
-	Bytes uint64 `json:"bytes"`
-}
-
-// AutoUnlockOnParams carries the wallet password the owner typed. vpnd hands
-// it to the job through systemd's credential copy and never records it.
-type AutoUnlockOnParams struct {
-	Password string `json:"password"`
-}
-
 // SSHPasswordLoginParams: rewrite the SSH hardening drop-in. The template
 // lives on the root side. The only caller-chosen value is this flag.
 type SSHPasswordLoginParams struct {
@@ -226,34 +198,11 @@ type UpdateResumeParams struct {
 	ID string `json:"id"`
 }
 
-// UpgradeP2PParams carries the reviewed address only as a precondition.
-// The root operation derives the address it advertises on its own.
-type UpgradeP2PParams struct {
-	ExpectedIPv4 string `json:"expected_ipv4"`
-}
-
-// NodeAddressesResult is the read-node-addresses answer, the node's onion
-// hostnames and its Syncthing device ID, read from their sources at the
-// moment of the request. An empty field means the observation is
-// unavailable. It does not prove the service is unconfigured or that an
-// observed address is reachable.
-type NodeAddressesResult struct {
-	LNDGRPCOnion      string `json:"lnd_grpc_onion"`
-	LNDRESTOnion      string `json:"lnd_rest_onion"`
-	SyncthingOnion    string `json:"syncthing_onion"`
-	SyncthingDeviceID string `json:"syncthing_device_id"`
-}
-
 // SSHAuthResult is whether sshd's effective configuration permits password
 // login for the admin user, asked of sshd itself. It gates removing the last
 // SSH key, so callers treat an error as unavailable and refuse that action.
 type SSHAuthResult struct {
 	PasswordAuthEnabled bool `json:"password_auth_enabled"`
-}
-
-// WalletStateResult is the live wallet observation.
-type WalletStateResult struct {
-	WalletExists bool `json:"wallet_exists"`
 }
 
 // ── Step lists ───────────────────────────────────────────
@@ -266,37 +215,5 @@ func PackageUpdateStepNames() []string {
 	return []string{
 		"Refreshing package lists",
 		"Upgrading packages",
-	}
-}
-
-// UpgradeP2PToHybridStepNames are the one-way P2P switch's steps.
-func UpgradeP2PToHybridStepNames() []string {
-	return []string{
-		"Checking active firewall",
-		"Updating LND config",
-		"Adding hybrid P2P firewall rules",
-		"Restarting LND",
-		"Verifying LND TLS IP certificate",
-		"Restaging LND TLS certificate",
-		"Publishing node configuration",
-	}
-}
-
-// SyncthingInstallStepNames are the Syncthing install's steps.
-func SyncthingInstallStepNames(version string) []string {
-	return []string{
-		"Getting Syncthing " + version,
-		"Checking Syncthing against the pinned hash",
-		"Installing Syncthing",
-		"Creating Syncthing directories",
-		"Creating Syncthing service",
-		"Configuring Syncthing authentication",
-		"Adding Syncthing firewall rule",
-		"Reloading Tor configuration",
-		"Starting Syncthing",
-		"Registering backup folder",
-		"Setting up channel backup watcher",
-		"Staging Syncthing facts",
-		"Publishing node configuration",
 	}
 }

@@ -30,8 +30,6 @@ func Unit(service string) string {
 	switch service {
 	case "tor":
 		return "tor@default.service"
-	case "bitcoind", "lnd", "syncthing":
-		return service + ".service"
 	default:
 		return ""
 	}

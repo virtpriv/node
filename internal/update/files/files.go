@@ -32,7 +32,7 @@ func Check(path string, directory bool) error {
 }
 
 // Directory checks ancestors before creating anything. Root-owned sticky
-// parents such as /tmp are permitted, where the install and tests stage files.
+// parents such as /tmp are permitted, where tests stage files.
 func Directory(path string, mode os.FileMode) error {
 	parent := filepath.Dir(path)
 	if path != parent {
@@ -129,18 +129,6 @@ func Copy(source, dest string, mode os.FileMode) error {
 	}
 	defer f.Close()
 	return Replace(dest, mode, func(w io.Writer) error { _, err := io.Copy(w, f); return err })
-}
-
-func Remove(path string) error {
-	if err := Check(path, false); os.IsNotExist(err) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	if err := os.Remove(path); err != nil {
-		return err
-	}
-	return Sync(filepath.Dir(path))
 }
 
 func Hash(path string) (string, error) {

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -13,9 +12,9 @@ import (
 	"github.com/virtpriv/node/internal/app"
 )
 
-// jobVisible is decision 3 of ADR-0016's lists amendment: a running job
-// always shows on the screen of its kind, a completed one for 24 hours after
-// it ended, a failed or unknown one until a newer job of its kind.
+// jobVisible says how long a job shows on the screen of its kind: a running
+// job always, a completed one for 24 hours after it ended, a failed or
+// unknown one until a newer job of its kind.
 func jobVisible(j api.Job, now time.Time) bool {
 	if !j.Finished() {
 		return true
@@ -94,7 +93,7 @@ type restoredJobsMsg struct {
 }
 
 // restoreSystemJobsCmd reads the newest Update Packages, Reboot and service
-// job, so a TUI opened during or after one shows it (S2).
+// job, so a TUI opened during or after one shows it.
 func restoreSystemJobsCmd(c *ScreenContext) tea.Cmd {
 	runner := c.jobs()
 	return func() tea.Msg {
@@ -135,8 +134,7 @@ func (m *Model) restoreSystemJobs(msg restoredJobsMsg) tea.Cmd {
 		}
 	}
 	if j, ok := msg.jobs[api.KindServiceAction]; ok && s.svcPending == nil && s.svcResult == "" {
-		// A job for a service System does not list has no row to show on.
-		if request, err := app.ServiceRequestOf(j); err == nil && slices.Contains(app.StatusServices(), request.Service()) {
+		if request, err := app.ServiceRequestOf(j); err == nil {
 			if j.Finished() {
 				s.svcResult = serviceResultText(request, app.VerifyServiceAction(request, finalUpdate(j)))
 			} else {

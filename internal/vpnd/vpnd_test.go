@@ -60,10 +60,8 @@ func TestActivationListenerRefusals(t *testing.T) {
 // must be a deliberate act that updates this list too.
 func TestMenuIsExactlyTheRuledSet(t *testing.T) {
 	want := []string{
-		api.VerbReadAccounts, api.VerbReadAccount, api.VerbReadNodeAddresses,
-		api.VerbReadSSHAuth, api.VerbReadWalletState, api.VerbDirSize,
+		api.VerbReadAccounts, api.VerbReadAccount, api.VerbReadSSHAuth,
 		api.VerbJobStatus, api.VerbVersion,
-		api.VerbStageLNDCredentials, api.VerbStageLNDMacaroon,
 		api.VerbStartJob,
 		api.VerbStartUpdate, api.VerbResumeUpdate, api.VerbCancelUpdate,
 	}
@@ -79,18 +77,13 @@ func TestMenuIsExactlyTheRuledSet(t *testing.T) {
 			t.Errorf("%s has no deadline or handler", v)
 		}
 	}
-	for fact, verb := range liveReadFacts {
-		if _, ok := m[verb]; !ok {
-			t.Errorf("live-read fact %q names %s, which is not on the menu", fact, verb)
-		}
-	}
 }
 
 // A failure tells the client that nothing changed only when that is
 // certain. vpnd's words reach the client unchanged either way.
 func TestFailureCarriesTheCodeOnlyWhenNothingChanged(t *testing.T) {
-	marked := fmt.Errorf("Syncthing installation refused: Tor is not active: %w", host.ErrNothingChanged)
-	plain := errors.New("Installing Syncthing: extract failed")
+	marked := fmt.Errorf("the change was refused: %w", host.ErrNothingChanged)
+	plain := errors.New("a step failed")
 	busy := &jobs.BusyError{Job: api.Job{ID: "20261109-100000-aaaaaa", Title: "Reboot"}}
 	for _, tc := range []struct {
 		err  error
@@ -146,12 +139,31 @@ func ask(t *testing.T, client net.Conn, line string) api.Answer {
 
 // A request vpnd cannot read, an unknown request and an API number outside
 // vpnd's range are refused before anything runs, and say nothing changed.
+// That holds for what the Bitcoin and Lightning node's TUI could ask: its API
+// number, its requests, its job kinds and its services.
 func TestRefusalsBeforeRunning(t *testing.T) {
+	job := func(kind, params string) string {
+		return `{"api":2,"verb":"start-job","params":{"kind":"` + kind + `","params":` + params + `}}`
+	}
 	for _, tc := range []struct{ line, code, words string }{
 		{"{not json", api.CodeNothingChanged, "malformed request"},
-		{`{"api":1,"verb":"set-user-password","params":{"user":"vpn"}}`, api.CodeNothingChanged, "unknown request"},
+		{`{"api":2,"verb":"set-user-password","params":{"user":"vpn"}}`, api.CodeNothingChanged, "unknown request"},
 		{`{"api":0,"verb":"version"}`, api.CodeUnsupportedAPI, "VPN was updated"},
 		{`{"api":999,"verb":"version"}`, api.CodeUnsupportedAPI, "VPN was updated"},
+		{`{"api":1,"verb":"version"}`, api.CodeUnsupportedAPI, "VPN was updated"},
+		{`{"api":1,"verb":"read-wallet-state"}`, api.CodeUnsupportedAPI, "VPN was updated"},
+		{`{"api":2,"verb":"read-wallet-state"}`, api.CodeNothingChanged, "unknown request"},
+		{`{"api":2,"verb":"read-node-addresses"}`, api.CodeNothingChanged, "unknown request"},
+		{`{"api":2,"verb":"dir-size","params":{"which":"lnd"}}`, api.CodeNothingChanged, "unknown request"},
+		{`{"api":2,"verb":"stage-lnd-credentials"}`, api.CodeNothingChanged, "unknown request"},
+		{`{"api":2,"verb":"stage-lnd-macaroon"}`, api.CodeNothingChanged, "unknown request"},
+		{job("auto-unlock-off", "null"), api.CodeNothingChanged, "unknown job kind"},
+		{job("auto-unlock-on", `{"password":"x"}`), api.CodeNothingChanged, "unknown job kind"},
+		{job("syncthing-install", "null"), api.CodeNothingChanged, "unknown job kind"},
+		{job("p2p-upgrade", `{"expected_ipv4":"203.0.113.7"}`), api.CodeNothingChanged, "unknown job kind"},
+		{job("service-action", `{"unit":"lnd","action":"stop"}`), api.CodeNothingChanged, "not managed here"},
+		{job("service-action", `{"unit":"bitcoind","action":"restart"}`), api.CodeNothingChanged, "not managed here"},
+		{job("service-action", `{"unit":"syncthing","action":"start"}`), api.CodeNothingChanged, "not managed here"},
 	} {
 		client, conn := pair(t)
 		s := &server{version: "0.7.0", allowed: map[uint32]bool{uint32(os.Getuid()): true}, menu: menu()}
@@ -165,7 +177,15 @@ func TestRefusalsBeforeRunning(t *testing.T) {
 	}
 }
 
-// D1: vpnd answers connections in parallel. Reads answer while another
+// Tor is the one service the owner starts, stops and restarts.
+func TestServiceActionTakesTor(t *testing.T) {
+	title, _, _, err := jobs.Validate(api.KindServiceAction, json.RawMessage(`{"unit":"tor","action":"restart"}`))
+	if err != nil || title != "Restart tor" {
+		t.Fatalf("a restart of Tor: %q, %v", title, err)
+	}
+}
+
+// vpnd answers connections in parallel. Reads answer while another
 // request is still being served, and the race detector watches the shared
 // counters.
 func TestReadsAnswerBesideASlowRequest(t *testing.T) {
@@ -199,7 +219,7 @@ func TestReadsAnswerBesideASlowRequest(t *testing.T) {
 		return c
 	}
 	slow := dial()
-	if _, err := slow.Write([]byte(`{"api":1,"verb":"slow"}` + "\n")); err != nil {
+	if _, err := slow.Write([]byte(`{"api":2,"verb":"slow"}` + "\n")); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -207,7 +227,7 @@ func TestReadsAnswerBesideASlowRequest(t *testing.T) {
 		wg.Go(func() {
 			c := dial()
 			defer c.Close()
-			if a := ask(t, c, `{"api":1,"verb":"read"}`); !a.OK || string(a.Result) != `"fact"` {
+			if a := ask(t, c, `{"api":2,"verb":"read"}`); !a.OK || string(a.Result) != `"fact"` {
 				t.Errorf("read beside a slow request: %+v", a)
 			}
 		})
