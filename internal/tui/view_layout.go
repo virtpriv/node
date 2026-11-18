@@ -1,13 +1,11 @@
 package tui
 
 import (
-	"strconv"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/virtpriv/node/internal/theme"
 )
@@ -18,14 +16,7 @@ func (m Model) View() tea.View {
 	if m.width == 0 {
 		content = "Loading..."
 	} else {
-		switch m.subview {
-		case svQR:
-			content = m.viewQR()
-		case svFullURL:
-			content = m.viewFullURL()
-		default:
-			content = m.viewMain()
-		}
+		content = m.viewMain()
 	}
 
 	if m.width > 0 {
@@ -55,7 +46,8 @@ func (m Model) viewMain() string {
 
 	contentLines := strings.Split(m.renderActiveTabContent(contentW, theme.ContentRows), "\n")
 
-	// The sidebar: each section's box, closed by a line.
+	// The sidebar: each section's box, closed by a line, from the top. The
+	// theme toggle is in the last row, with empty rows between.
 	var sideRows []string
 	var sideLines []bool
 	warning := m.screenCtx.Status != nil && m.screenCtx.Status.SystemWarning(time.Now())
@@ -66,6 +58,10 @@ func (m Model) viewMain() string {
 		}
 		sideRows = append(sideRows, strings.Repeat("─", sidebarW))
 		sideLines = append(sideLines, true)
+	}
+	for len(sideRows) < theme.ContentRows-1 {
+		sideRows = append(sideRows, strings.Repeat(" ", sidebarW))
+		sideLines = append(sideLines, false)
 	}
 	sideRows = append(sideRows, m.nav.ThemeIconCell(sidebarW))
 	sideLines = append(sideLines, false)
@@ -90,22 +86,7 @@ func (m Model) viewMain() string {
 	output = append(output,
 		border.Render("╰"+strings.Repeat("─", sidebarW)+"┴"+strings.Repeat("─", contentW)+"╯"),
 		centerInWidth(m.renderHelpBar(tuiWidth), tuiWidth))
-	if banner := m.renderNetworkBanner(); banner != "" {
-		output = append([]string{centerInWidth(banner, tuiWidth)}, output...)
-	}
 	return strings.Join(output, "\n")
-}
-
-func (m Model) renderNetworkBanner() string {
-	profile, err := m.cfg.NetworkConfig()
-	if err != nil {
-		return theme.Warning.Render("⚠ Unsupported network profile")
-	}
-	if !profile.TestingOnly {
-		return ""
-	}
-	return theme.Warning.Render("⚠ TESTING NETWORK, "+profile.DisplayName+".") +
-		theme.Dim.Render(" Coins have no mainnet value.")
 }
 
 func (m Model) hasDetailTabs() bool {
@@ -220,32 +201,11 @@ func (m Model) renderTabBar(maxW int) (marks, names string) {
 
 func (m Model) effectiveTabs() []openTab {
 	sec := m.nav.ActiveSection()
-	mainLabel := "Channels"
-	switch sec {
-	case secWallet:
-		mainLabel = "Wallet"
-	case secOnChain:
-		mainLabel = "On-Chain"
-	case secAddons:
-		mainLabel = "Add-ons"
-	case secSystem:
-		mainLabel = "System"
-	}
-
 	tabs := []openTab{
-		{Kind: tabMain, Label: mainLabel, Section: sec},
+		{Kind: tabMain, Label: "System", Section: sec},
 	}
 	for _, t := range m.tabs {
 		if t.Section == sec {
-			if t.Kind == tabUtxoDetail || t.Kind == tabOnChainTx {
-				t.Label = onChainDetailLabel(t.Screen)
-			}
-			if detail, ok := t.Screen.(*ChannelDetailScreen); ok {
-				t.Label = detail.label()
-			}
-			if detail, ok := t.Screen.(*PaymentDetailScreen); ok {
-				t.Label = detail.label()
-			}
 			tabs = append(tabs, t)
 		}
 	}
@@ -268,11 +228,6 @@ func (m Model) renderActiveTabContent(w, h int) string {
 	}
 	m.screenCtx.HasTabs = m.hasDetailTabs()
 	m.screenCtx.ContentFocused = m.contentFocused
-	if (sec == secChannels || sec == secWallet || sec == secOnChain) &&
-		!m.screenCtx.walletKnown() && (idx > 0 || m.screenCtx.walletDisplayAvailable()) {
-		notice := ansi.Wrap("Wallet state unavailable. Wallet actions are temporarily disabled.", w, "")
-		return theme.Warn.Render(notice) + "\n" + screen.View(w, max(1, h-lipgloss.Height(notice)))
-	}
 	return screen.View(w, h)
 }
 
@@ -305,9 +260,4 @@ func centerInWidth(s string, w int) string {
 	right := w - vis - left
 	return strings.Repeat(" ", left) + s +
 		strings.Repeat(" ", right)
-}
-
-func parseBalance(s string) int64 {
-	n, _ := strconv.ParseInt(s, 10, 64)
-	return n
 }

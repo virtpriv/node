@@ -7,11 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/virtpriv/node/internal/api"
-	"github.com/virtpriv/node/internal/bitcoin"
-	"github.com/virtpriv/node/internal/bytesize"
-	"github.com/virtpriv/node/internal/config"
-	"github.com/virtpriv/node/internal/lndrpc"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/servicecontrol"
 	"github.com/virtpriv/node/internal/system"
@@ -43,93 +38,47 @@ func retain[T any](next, previous Observation[T]) Observation[T] {
 	return next
 }
 
-type StatusChannel struct {
-	lndrpc.Channel
-	Pending bool
-}
-
-type ChannelStatus struct {
-	Channels []StatusChannel
-	Pending  lndrpc.PendingChannelInfo
-}
-
 type StatusSnapshot struct {
-	Services    map[string]Observation[bool]
-	Disk        Observation[system.DiskInfo]
-	Memory      Observation[system.MemInfo]
-	Bitcoin     Observation[bitcoin.BlockchainInfo]
-	LNDSize     Observation[string]
-	Reboot      Observation[system.RebootFlag]
-	Updates     Observation[system.SecurityUpdates]
-	Timers      Observation[[]system.AptTimer]
-	PublicIP    Observation[string]
-	WalletState Observation[lndrpc.WalletState]
-	Node        Observation[lndrpc.NodeInfo]
-	Balance     Observation[lndrpc.WalletBalance]
-	Channels    Observation[ChannelStatus]
+	Services map[string]Observation[bool]
+	Disk     Observation[system.DiskInfo]
+	Memory   Observation[system.MemInfo]
+	Reboot   Observation[system.RebootFlag]
+	Updates  Observation[system.SecurityUpdates]
+	Timers   Observation[[]system.AptTimer]
 }
 
-// WalletUnavailable preserves observations for display without treating a
-// failed presence read as a change of wallet or proof of current balances.
-func (s StatusSnapshot) WalletUnavailable(err error) StatusSnapshot {
-	s.WalletState.Err, s.Node.Err, s.Balance.Err, s.Channels.Err = err, err, err, err
-	return s
-}
-
-// Retain combines failures with last-good values from the same observation
-// scope. Callers must discard the previous snapshot when that scope changes.
+// Retain combines failures with the last good values of the previous snapshot.
 func (s StatusSnapshot) Retain(previous StatusSnapshot) StatusSnapshot {
 	for name, value := range s.Services {
 		s.Services[name] = retain(value, previous.Services[name])
 	}
 	s.Disk = retain(s.Disk, previous.Disk)
 	s.Memory = retain(s.Memory, previous.Memory)
-	s.Bitcoin = retain(s.Bitcoin, previous.Bitcoin)
-	s.LNDSize = retain(s.LNDSize, previous.LNDSize)
 	s.Reboot = retain(s.Reboot, previous.Reboot)
 	s.Updates = retain(s.Updates, previous.Updates)
 	s.Timers = retain(s.Timers, previous.Timers)
-	s.PublicIP = retain(s.PublicIP, previous.PublicIP)
-	s.WalletState = retain(s.WalletState, previous.WalletState)
-	s.Node = retain(s.Node, previous.Node)
-	s.Balance = retain(s.Balance, previous.Balance)
-	s.Channels = retain(s.Channels, previous.Channels)
 	return s
 }
 
-type StatusLND interface {
-	GetStateContext(context.Context) (lndrpc.WalletState, error)
-	GetInfoContext(context.Context) (*lndrpc.NodeInfo, error)
-	GetWalletBalanceContext(context.Context) (*lndrpc.WalletBalance, error)
-	ListChannelsContext(context.Context) ([]lndrpc.Channel, error)
-	GetPendingChannelsContext(context.Context) (*lndrpc.PendingChannelInfo, error)
-}
-
 type statusSources struct {
-	service  func(context.Context, string) (bool, error)
-	disk     func(context.Context, string) (system.DiskInfo, error)
-	memory   func() (system.MemInfo, error)
-	bitcoin  func(context.Context, int) (bitcoin.BlockchainInfo, error)
-	size     func(context.Context) (string, error)
-	reboot   func() (system.RebootFlag, error)
-	updates  func() (system.SecurityUpdates, error)
-	timers   func(context.Context) ([]system.AptTimer, error)
-	publicIP func(context.Context) (string, error)
+	service func(context.Context, string) (bool, error)
+	disk    func(context.Context, string) (system.DiskInfo, error)
+	memory  func() (system.MemInfo, error)
+	reboot  func() (system.RebootFlag, error)
+	updates func() (system.SecurityUpdates, error)
+	timers  func(context.Context) ([]system.AptTimer, error)
 }
 
-// StatusCollector owns observation I/O and its cache for one terminal session.
-// Scheduling and publication stay with the caller. RPCs and helper reads share
-// a deadline. Separate daemon RPCs are not an atomic snapshot.
+// StatusCollector owns observation I/O for one terminal session. Scheduling
+// and publication stay with the caller. The reads share a deadline and are
+// not an atomic snapshot.
 type StatusCollector struct {
-	sources     statusSources
-	ctx         context.Context
-	cancel      context.CancelFunc
-	mu          sync.Mutex
-	closed      bool
-	calls       sync.WaitGroup
-	sizeMu      sync.Mutex
-	size        Observation[string]
-	sizeAttempt time.Time
+	sources statusSources
+	ctx     context.Context
+	cancel  context.CancelFunc
+	mu      sync.Mutex
+	closed  bool
+	calls   sync.WaitGroup
 }
 
 func readNodeService(ctx context.Context, name string) (bool, error) {
@@ -144,24 +93,16 @@ func NewStatusCollector() *StatusCollector {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &StatusCollector{ctx: ctx, cancel: cancel, sources: statusSources{
 		service: readNodeService, disk: system.ReadDisk,
-		memory: system.ReadMemory, bitcoin: bitcoin.GetBlockchainInfo,
-		reboot: system.ReadRebootFlag, publicIP: system.ReadPublicIPv4,
+		memory: system.ReadMemory,
+		reboot: system.ReadRebootFlag,
 		timers: system.ReadAptTimers,
 		updates: func() (system.SecurityUpdates, error) {
 			return system.ReadSecurityUpdates(paths.AutoUpgrades)
 		},
-		size: func(ctx context.Context) (string, error) {
-			var result api.DirSizeResult
-			if err := api.Call(ctx, api.VerbDirSize, api.DirSizeParams{Which: "lnd"}, &result); err != nil {
-				return "", err
-			}
-			return bytesize.Format(result.Bytes), nil
-		},
 	}}
 }
 
-// Close cancels and joins local readers. Existing shared LND client mutex waits
-// can delay the join. Automatic reconnection is not owned by this collector.
+// Close cancels and joins local readers.
 func (c *StatusCollector) Close() {
 	c.mu.Lock()
 	c.closed = true
@@ -170,29 +111,10 @@ func (c *StatusCollector) Close() {
 	c.calls.Wait()
 }
 
-func StatusServices(cfg config.AppConfig) []string {
-	names := []string{"tor", "bitcoind"}
-	if cfg.HasLND() {
-		names = append(names, "lnd")
-	}
-	if cfg.SyncthingEnabled {
-		names = append(names, "syncthing")
-	}
-	return names
-}
+// StatusServices are the services System lists.
+func StatusServices() []string { return []string{"tor"} }
 
-func (c *StatusCollector) lndSize(ctx context.Context) Observation[string] {
-	c.sizeMu.Lock()
-	defer c.sizeMu.Unlock()
-	if !c.sizeAttempt.IsZero() && time.Since(c.sizeAttempt) < 5*time.Minute {
-		return c.size
-	}
-	c.size = retain(observe(c.sources.size(ctx)), c.size)
-	c.sizeAttempt = time.Now()
-	return c.size
-}
-
-func (c *StatusCollector) Collect(cfg config.AppConfig, walletExists bool, client StatusLND) StatusSnapshot {
+func (c *StatusCollector) Collect() StatusSnapshot {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -206,7 +128,7 @@ func (c *StatusCollector) Collect(cfg config.AppConfig, walletExists bool, clien
 	s := StatusSnapshot{Services: make(map[string]Observation[bool])}
 	var wg sync.WaitGroup
 	var servicesMu sync.Mutex
-	for _, name := range StatusServices(cfg) {
+	for _, name := range StatusServices() {
 		wg.Go(func() {
 			value := observe(c.sources.service(ctx, name))
 			servicesMu.Lock()
@@ -219,64 +141,6 @@ func (c *StatusCollector) Collect(cfg config.AppConfig, walletExists bool, clien
 	wg.Go(func() { s.Reboot = observe(c.sources.reboot()) })
 	wg.Go(func() { s.Updates = observe(c.sources.updates()) })
 	wg.Go(func() { s.Timers = observe(c.sources.timers(ctx)) })
-	wg.Go(func() {
-		profile, err := cfg.NetworkConfig()
-		if err != nil {
-			s.Bitcoin.Err = err
-			return
-		}
-		s.Bitcoin = observe(c.sources.bitcoin(ctx, profile.RPCPort))
-	})
-	if cfg.P2PMode == "hybrid" {
-		wg.Go(func() {
-			s.PublicIP = observe(c.sources.publicIP(ctx))
-		})
-	}
-	if cfg.HasLND() {
-		wg.Go(func() { s.LNDSize = c.lndSize(ctx) })
-	}
-	if cfg.HasLND() && walletExists {
-		unavailable := errors.New("LND client unavailable")
-		s.WalletState.Err, s.Node.Err, s.Balance.Err, s.Channels.Err = unavailable, unavailable, unavailable, unavailable
-		if client != nil {
-			wg.Go(func() { s.WalletState = observe(client.GetStateContext(ctx)) })
-			wg.Go(func() {
-				value, err := client.GetInfoContext(ctx)
-				if err != nil {
-					s.Node.Err = err
-					return
-				}
-				s.Node = observe(*value, nil)
-			})
-			wg.Go(func() {
-				value, err := client.GetWalletBalanceContext(ctx)
-				if err != nil {
-					s.Balance.Err = err
-					return
-				}
-				s.Balance = observe(*value, nil)
-			})
-			wg.Go(func() {
-				channels, err := client.ListChannelsContext(ctx)
-				pending, pendingErr := client.GetPendingChannelsContext(ctx)
-				if err = errors.Join(err, pendingErr); err != nil {
-					s.Channels.Err = err
-					return
-				}
-				// Publish the channel view only when both constituent reads succeed.
-				value := ChannelStatus{Pending: *pending}
-				for _, ch := range channels {
-					value.Channels = append(value.Channels, StatusChannel{Channel: ch})
-				}
-				for _, ch := range pending.PendingOpenChannels {
-					value.Channels = append(value.Channels, StatusChannel{Pending: true, Channel: lndrpc.Channel{
-						ChannelPoint: ch.ChannelPoint, RemotePubkey: ch.RemotePubkey, PeerAlias: ch.PeerAlias, Capacity: ch.Capacity, LocalBalance: ch.LocalBalance,
-					}})
-				}
-				s.Channels = observe(value, nil)
-			})
-		}
-	}
 	wg.Wait()
 	return s
 }
@@ -329,7 +193,7 @@ func RebootLate(f system.RebootFlag, now time.Time) bool {
 
 // SystemWarning reports whether the owner should look at System. That is
 // when no nightly run succeeded for 48 hours, a nightly timer is off or
-// stopped, a service stopped, LND is locked, or a restart is late. A restart
+// stopped, a service stopped, or a restart is late. A restart
 // that waits for the next night leaves the owner nothing to do. Each reading
 // counts by its last known value, so a failed read keeps a warning it
 // showed, and one never read sets none.
@@ -346,9 +210,6 @@ func (s StatusSnapshot) SystemWarning(now time.Time) bool {
 		if o.Known() && !o.Value {
 			return true
 		}
-	}
-	if s.WalletState.Known() && s.WalletState.Value == lndrpc.WalletStateLocked {
-		return true
 	}
 	return s.Reboot.Known() && RebootLate(s.Reboot.Value, now)
 }

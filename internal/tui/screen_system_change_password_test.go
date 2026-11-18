@@ -39,11 +39,12 @@ func TestPasswordCommandResultsBelongToOriginalAttempt(t *testing.T) {
 	}
 	other := NewChangePasswordScreen(ctx)
 	other.step, other.attempt = changePwStepWorking, s.attempt
+	// A section holds one tab of a kind, so the second fixture tab gets a key
+	// of its own to stay apart from the first.
 	m := Model{nav: NewNavSidebar(), screenCtx: ctx, tabs: []openTab{
 		{Kind: tabSSHChangePassword, Section: secSystem, Screen: s},
-		{Kind: tabSSHChangePassword, Section: secSystem, Screen: other},
+		{Kind: tabSSHChangePassword, Key: "other", Section: secSystem, Screen: other},
 	}}
-	m.nav.ActiveItem = secWallet
 	stale := changePwDoneMsg{owner: s, attempt: s.attempt - 1, result: passwordExecution{started: true, changed: true}}
 	m.Update(stale)
 	if !sshAccessBusy(s) {

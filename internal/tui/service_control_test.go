@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,7 +12,7 @@ import (
 	"github.com/virtpriv/node/internal/app"
 )
 
-func TestServiceActionIdentityAndCompletionWhileHidden(t *testing.T) {
+func TestServiceActionIdentityAndCompletion(t *testing.T) {
 	m, _ := statusModelFixture(t)
 	fake := &fakeJobs{}
 	m.screenCtx.Jobs = fake
@@ -21,7 +22,6 @@ func TestServiceActionIdentityAndCompletionWhileHidden(t *testing.T) {
 	m.sectionScreens[secSystem] = s
 	press := func(code rune) tea.Cmd { return statusUpdate(&m, tea.KeyPressMsg{Code: code}) }
 	press(tea.KeyDown)
-	press(tea.KeyDown)
 	press('r')
 	requestCmd := press('y')
 	if requestCmd == nil {
@@ -29,31 +29,23 @@ func TestServiceActionIdentityAndCompletionWhileHidden(t *testing.T) {
 	}
 	requestMsg := requestCmd()
 	resultCmd := statusUpdate(&m, requestMsg)
-	if fake.calls != 1 || fake.service(0) != (api.ServiceActionParams{Unit: "bitcoind", Action: "restart"}) {
+	if fake.calls != 1 || fake.service(0) != (api.ServiceActionParams{Unit: "tor", Action: "restart"}) {
 		t.Fatalf("wrong command: %v", fake.params)
 	}
 	if statusUpdate(&m, requestMsg) != nil || fake.calls != 1 {
 		t.Fatal("replayed admission started twice")
 	}
-	press(tea.KeyDown)
 	// Assert content through the actual pane allocation. Live screenshots still
 	// establish visual quality, and operator reports establish interaction timing.
 	view := ansi.Strip(m.viewMain())
-	found := false
-	for _, line := range strings.Split(view, "\n") {
-		if strings.Contains(line, "restarting...") {
-			found = true
-			if !strings.Contains(line, "bitcoind") {
-				t.Fatalf("pending moved with cursor: %s", line)
-			}
-		}
-	}
-	if !found {
-		t.Fatal("pending action hidden")
+	if !slices.ContainsFunc(strings.Split(view, "\n"), func(line string) bool {
+		return strings.Contains(line, " tor ") && strings.Contains(line, "restarting...")
+	}) {
+		t.Fatalf("pending action hidden: %s", view)
 	}
 	for _, binding := range s.HelpBindings() {
 		for _, key := range binding.Keys() {
-			if key == "r" || key == "s" || key == "a" || key == "p" || key == "u" {
+			if key == "r" || key == "s" || key == "a" {
 				t.Fatal("busy help advertises blocked action")
 			}
 		}
@@ -62,28 +54,26 @@ func TestServiceActionIdentityAndCompletionWhileHidden(t *testing.T) {
 	if press('y') != nil || fake.calls != 1 {
 		t.Fatal("accepted a second action while busy")
 	}
-	m.nav.ActiveItem = secOnChain
 	fake.results <- done(app.JobUnconfirmed, errors.New("injected read failure"))
 	oldResult := resultCmd()
 	statusUpdate(&m, oldResult)
 	if s.svcPending != nil {
-		t.Fatal("hidden owner did not complete")
+		t.Fatal("owner did not complete")
 	}
-	m.nav.ActiveItem = secSystem
 	view = ansi.Strip(m.viewMain())
-	if !strings.Contains(view, "bitcoind restart outcome unconfirmed") || !strings.Contains(view, "injected read failure") {
+	if !strings.Contains(view, "tor restart outcome unconfirmed") || !strings.Contains(view, "injected read failure") {
 		t.Fatalf("outcome lost: %s", view)
 	}
 	press('r')
 	newRequest := press('y')()
 	newResult := statusUpdate(&m, newRequest)
 	statusUpdate(&m, oldResult)
-	if s.svcPending == nil || fake.calls != 2 || fake.service(1).Unit != "lnd" {
+	if s.svcPending == nil || fake.calls != 2 || fake.service(1).Unit != "tor" {
 		t.Fatal("old completion cleared newer action")
 	}
 	fake.results <- fake.serviceDone()
 	statusUpdate(&m, newResult())
-	if s.svcPending != nil || !strings.Contains(s.svcResult, "lnd restart completed") {
+	if s.svcPending != nil || !strings.Contains(s.svcResult, "tor restart completed") {
 		t.Fatal("new action did not complete")
 	}
 }
@@ -96,7 +86,6 @@ func TestServiceMutationRejectsPredatingStatusAtAdmissionAndCompletion(t *testin
 	m.focusContent()
 	s := NewSystemHomeScreen(m.screenCtx)
 	m.sectionScreens[secSystem] = s
-	m.statusScope = m.currentStatusScope()
 	m.screenCtx.Status = &app.StatusSnapshot{Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
 	before, beforeDone := startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
 	statusUpdate(&m, tea.KeyPressMsg{Code: tea.KeyDown})

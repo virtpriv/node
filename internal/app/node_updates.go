@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/virtpriv/node/internal/api"
-	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/update/protocol"
 )
 
@@ -146,16 +145,4 @@ func (w *NodeUpdates) Cancel(id string) (protocol.Status, error) {
 	var s protocol.Status
 	err := w.do(api.VerbCancelUpdate, api.UpdateResumeParams{ID: id}, &s)
 	return s, err
-}
-
-// UpdateUnlockArguments selects LND's own password prompt. VPN never stores
-// the entered secret.
-func UpdateUnlockArguments(s protocol.Status) ([]string, error) {
-	if !s.Active || s.Phase != "waiting-unlock" || !s.Running {
-		return nil, errors.New("the update is not waiting for a wallet unlock")
-	}
-	if s.WalletNetwork != "mainnet" && s.WalletNetwork != "testnet4" && s.WalletNetwork != "signet" {
-		return nil, errors.New("invalid wallet network")
-	}
-	return []string{"--rpcserver=" + paths.LNDGRPCEndpoint, "--tlscertpath=" + paths.StateLNDTLSCert, "--network=" + s.WalletNetwork, "unlock"}, nil
 }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -134,7 +135,8 @@ func (m *Model) restoreSystemJobs(msg restoredJobsMsg) tea.Cmd {
 		}
 	}
 	if j, ok := msg.jobs[api.KindServiceAction]; ok && s.svcPending == nil && s.svcResult == "" {
-		if request, err := app.ServiceRequestOf(j); err == nil {
+		// A job for a service System does not list has no row to show on.
+		if request, err := app.ServiceRequestOf(j); err == nil && slices.Contains(app.StatusServices(), request.Service()) {
 			if j.Finished() {
 				s.svcResult = serviceResultText(request, app.VerifyServiceAction(request, finalUpdate(j)))
 			} else {

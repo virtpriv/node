@@ -50,7 +50,6 @@ func TestPackageUpdateHiddenCompletionAndRetryIdentity(t *testing.T) {
 	m.nav.ActiveItem, m.nav.Cursor = secSystem, secSystem
 	s := NewSystemHomeScreen(m.screenCtx)
 	m.sectionScreens[secSystem] = s
-	m.sectionScreens[secAddons] = NewAddonsHomeScreen(m.screenCtx)
 	press := func(code rune) tea.Cmd { return statusUpdate(&m, tea.KeyPressMsg{Code: code}) }
 	updates := openUpdates(t, &m, s)
 	press(tea.KeyEnter)
@@ -92,24 +91,16 @@ func TestPackageUpdateHiddenCompletionAndRetryIdentity(t *testing.T) {
 	if press('y') != nil || fake.calls != 1 {
 		t.Fatal("reopened Updates started a second update")
 	}
-	// Navigate through root dispatch while the same System screen stays mounted.
-	statusUpdate(&m, emitFocusSidebar())
-	press(tea.KeyUp)
-	press(tea.KeyEnter)
-	if m.nav.ActiveSection() == secSystem {
-		t.Fatal("System did not hide")
+	// The result arrives while the Updates tab is closed.
+	statusUpdate(&m, closeTabMsg{})
+	if slices.ContainsFunc(m.effectiveTabs(), func(tab openTab) bool { return tab.Screen == Screen(updates) }) {
+		t.Fatal("Updates tab did not close")
 	}
 	fake.results <- done(app.JobUnconfirmed, errors.New("injected dpkg failure"))
 	oldResult := resultCmd()
 	statusUpdate(&m, oldResult)
 	if s.pkgPending != nil {
 		t.Fatal("hidden owner did not complete")
-	}
-	statusUpdate(&m, emitFocusSidebar())
-	press(tea.KeyDown)
-	press(tea.KeyEnter)
-	if m.nav.ActiveSection() != secSystem {
-		t.Fatal("did not return to System")
 	}
 	updates = openUpdates(t, &m, s)
 	view := ansi.Strip(m.viewMain())
@@ -144,7 +135,6 @@ func TestPackageUpdateRejectsPredatingStatusAndRefreshesOpenView(t *testing.T) {
 	m.nav.ActiveItem = secSystem
 	s := NewSystemHomeScreen(m.screenCtx)
 	m.sectionScreens[secSystem] = s
-	m.statusScope = m.currentStatusScope()
 	m.screenCtx.Status = &app.StatusSnapshot{Reboot: freshStatus(system.RebootFlag{}), Services: map[string]app.Observation[bool]{"tor": freshStatus(true)}}
 	before, beforeDone := startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
 	openUpdates(t, &m, s)

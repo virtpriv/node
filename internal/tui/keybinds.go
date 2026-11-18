@@ -30,28 +30,15 @@ var (
 	// Directional
 	kLeftRightButtons = bind(theme.KeyLeft+theme.KeyRight, "buttons", "left", "right")
 	kRightButton      = bind(theme.KeyRight, "button", "right")
-	kLeftRightCursor  = bind(theme.KeyLeft+theme.KeyRight, "cursor", "left", "right")
 	kUpTabBar         = bind(theme.KeyUp, "tab bar", "up")
 	kShiftTabBar      = bind(theme.KeyShiftTab, "tab bar", "shift+tab")
 	kUpShiftTabBar    = bind(theme.KeyUp+"/"+theme.KeyShiftTab, "tab bar", "up", "shift+tab")
 	kShiftTabButtons  = bind(theme.KeyShiftTab, "buttons", "shift+tab")
 	kShiftTabInput    = bind(theme.KeyShiftTab, "input", "shift+tab")
-	kTabNext          = bind(theme.KeyTab, "next", "tab")
 	kTabButtons       = bind(theme.KeyTab, "buttons", "tab")
-	kTabNextField     = bind(theme.KeyTab, "next field", "tab")
-	kUpDownSelect     = bind(theme.KeyUp+theme.KeyDown, "select", "up", "down")
-	kUpDownFields     = bind(theme.KeyUp+theme.KeyDown, "fields", "up", "down")
-	kUpDownChannels   = bind(theme.KeyUp+theme.KeyDown, "channels", "up", "down")
 
 	// Enter variants
-	kEnterOpen            = bind(theme.KeyEnter, "open", "enter")
-	kEnterClose           = bind(theme.KeyEnter, "close", "enter")
-	kEnterDetails         = bind(theme.KeyEnter, "details", "enter")
-	kEnterNext            = bind(theme.KeyEnter, "next", "enter")
-	kEnterConfirm         = bind(theme.KeyEnter, "confirm", "enter")
-	kEnterCreate          = bind(theme.KeyEnter, "create", "enter")
-	kEnterCreateWallet    = bind(theme.KeyEnter, "create wallet", "enter")
-	kEnterRetryWalletRead = bind(theme.KeyEnter, "retry wallet state", "enter")
+	kEnterClose = bind(theme.KeyEnter, "close", "enter")
 )
 
 // ── Button navigation helper ────────────────────────────
@@ -69,7 +56,7 @@ func buttonNav(btnIdx int) []key.Binding {
 
 // ── Archetype: section home, button zone ───────────────
 // Buttons above a list/table on a section home screen.
-// downLabel names the content below (e.g. "channels").
+// downLabel names the content below (e.g. "services").
 
 func homeButtonBindings(
 	downLabel string, btnIdx int, hasTabs bool,
@@ -98,7 +85,7 @@ func homeButtonBindings(
 
 // ── Archetype: section home, list zone ─────────────────
 // Scrollable list/table below buttons on a home screen.
-// itemsLabel names the items (e.g. "channels").
+// itemsLabel names the items (e.g. "keys").
 // enterLabel names the enter action (e.g. "details").
 // shiftTabLabel names the zone above (e.g. "buttons").
 
@@ -114,23 +101,9 @@ func homeListBindings(
 	}
 }
 
-// ── Archetype: view-only detail tab ─────────────────────
-// Read-only tab with no buttons. Navigate away via
-// backspace (parent) or sidebar. Used by PaymentDetail,
-// OnChainTx, UtxoDetail, pending ChannelDetail.
-
-func viewDetailBindings(hasTabs bool) []key.Binding {
-	binds := []key.Binding{kSidebar}
-	if hasTabs {
-		binds = append(binds, kUpShiftTabBar)
-	}
-	binds = append(binds, kBack, kQuit)
-	return binds
-}
-
 // ── Archetype: tab with buttons ─────────────────────────
-// Tab content showing buttons (e.g. pairing, receive,
-// post-action views). No list below.
+// Tab content showing buttons (e.g. post-action views).
+// No list below.
 
 func tabButtonBindings(hasTabs bool) []key.Binding {
 	binds := []key.Binding{kEnter, kLeftRightButtons, kSidebar}
@@ -159,7 +132,7 @@ func actionButtonBindings(
 
 // ── Archetype: detail tab with action ───────────────────
 // Tab showing an item with Cancel + action button
-// (e.g. "Cancel" / "Close Channel"). Cancel is always
+// (e.g. "Cancel" / "Remove"). Cancel is always
 // index 0, action is index 1. Arrow-down from tab bar
 // lands on Cancel (safe default).
 
@@ -181,14 +154,6 @@ func detailActionBindings(
 
 func waitingBindings() []key.Binding {
 	return []key.Binding{kQuit}
-}
-
-// inFlightBindings is for fund-moving operations where
-// ctrl+c is blocked. Shows a status hint instead of keys.
-func inFlightBindings() []key.Binding {
-	return []key.Binding{
-		bind("···", "in progress"),
-	}
 }
 
 // ── Archetype: result screen ────────────────────────────
@@ -216,7 +181,7 @@ func confirmDialogBindings() []key.Binding {
 
 // ── Archetype: manage screen, button zone ──────────────
 // Buttons above a list on a tab content screen
-// (Syncthing devices, SSH keys).
+// (SSH keys).
 // Uses shift+tab to reach tab bar (tab content context).
 
 func manageButtonBindings(
@@ -245,15 +210,12 @@ func sidebarBindings() []key.Binding {
 
 // ── Model-level: tab bar ────────────────────────────────
 
-func tabBarBindings(viewOnly, onTab bool) []key.Binding {
+func tabBarBindings(onTab bool) []key.Binding {
 	lr := bind(theme.KeyLeft+theme.KeyRight, "tabs", "left", "right")
 	down := bind(theme.KeyDown, "content", "down", "tab")
 	enter := bind(theme.KeyEnter, "select", "enter")
 
-	binds := []key.Binding{lr}
-	if !viewOnly {
-		binds = append(binds, down, enter)
-	}
+	binds := []key.Binding{lr, down, enter}
 	if onTab {
 		binds = append(binds,
 			bind(theme.KeyUp, "close", "up"),

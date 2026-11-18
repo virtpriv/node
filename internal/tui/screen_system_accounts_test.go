@@ -102,10 +102,10 @@ func TestAccountImportFreezesReviewAndRoutesHiddenCompletion(t *testing.T) {
 	if len(m.tabs) != 1 || m.tabs[0].Screen != s {
 		t.Fatal("pending import tab was closed")
 	}
+	// System's home covers the Accounts tab.
 	run(press(tea.KeyLeft))
-	press(tea.KeyUp)
 	press(tea.KeyEnter)
-	if m.nav.ActiveSection() == secSystem {
+	if m.activeTab != 0 {
 		t.Fatal("Accounts did not hide")
 	}
 	statusUpdate(&m, accountImportMsg{owner: s, attempt: s.attempt - 1})

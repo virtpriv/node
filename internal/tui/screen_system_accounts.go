@@ -565,7 +565,7 @@ func (s *AccountsScreen) viewImport(w, h int) string {
 		if s.configured {
 			p.success("Already configured for vpn")
 		} else {
-			p.warnWrapWords("The holder of this key will gain vpn SSH and node access, including wallet access.")
+			p.warnWrapWords("The holder of this key will gain vpn SSH and node access.")
 			p.blank().valueWrap("The source account and key are kept. Sudo policy stays the same.")
 		}
 		if s.working {

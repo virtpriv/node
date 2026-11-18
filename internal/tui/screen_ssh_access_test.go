@@ -176,7 +176,8 @@ func TestSSHKeyTabsUseFingerprintAndRouteRemovalToOwner(t *testing.T) {
 	second.step = sshKeyDetailStepConfirm
 	second.confirmIdx = 1
 	_, command := second.HandleKey("enter", tea.KeyPressMsg{})
-	m.nav.ActiveItem = secOnChain
+	// The other key's tab is the one on screen when the result arrives.
+	m.activeTab = 2
 	updated, done := m.Update(command())
 	m = updated.(Model)
 	if !second.removed || first.removed || first.step != sshKeyDetailStepView {

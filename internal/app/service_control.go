@@ -32,7 +32,7 @@ func VerifyServiceAction(request servicecontrol.Request, u JobUpdate) JobUpdate 
 }
 
 // ServiceRequestOf rebuilds a service job's request from its title, such as
-// "Restart lnd", for a job this TUI did not start.
+// "Restart tor", for a job this TUI did not start.
 func ServiceRequestOf(job api.Job) (servicecontrol.Request, error) {
 	action, service, ok := strings.Cut(job.Title, " ")
 	if !ok || job.Kind != api.KindServiceAction {

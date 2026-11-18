@@ -55,27 +55,19 @@ func ThemeIcon() string {
 // literal.
 
 var (
-	ColorPrimary   = lipgloss.Color("255")
-	ColorLabel     = lipgloss.Color("253")
-	ColorDim       = lipgloss.Color("246")
-	ColorGrayed    = lipgloss.Color("243")
-	ColorFaint     = lipgloss.Color("240")
-	ColorBorder    = lipgloss.Color("248")
-	ColorSuccess   = lipgloss.Color("34")
-	ColorDanger    = lipgloss.Color("196")
-	ColorBitcoin   = lipgloss.Color("172")
-	ColorLightning = lipgloss.Color("135")
-	ColorBtnBg     = lipgloss.Color("237")
-	ColorBtnFg     = lipgloss.Color("255")
-	ColorCursor    = lipgloss.Color("251")
+	ColorPrimary = lipgloss.Color("255")
+	ColorLabel   = lipgloss.Color("253")
+	ColorDim     = lipgloss.Color("246")
+	ColorGrayed  = lipgloss.Color("243")
+	ColorFaint   = lipgloss.Color("240")
+	ColorBorder  = lipgloss.Color("248")
+	ColorSuccess = lipgloss.Color("34")
+	ColorDanger  = lipgloss.Color("196")
+	ColorSpinner = lipgloss.Color("172")
+	ColorBtnBg   = lipgloss.Color("237")
+	ColorBtnFg   = lipgloss.Color("255")
+	ColorCursor  = lipgloss.Color("251")
 
-	// Channel bar
-	ColorChanLocal     = lipgloss.Color("34")
-	ColorChanRemote    = lipgloss.Color("69")
-	ColorChanLocalDim  = lipgloss.Color("22")
-	ColorChanRemoteDim = lipgloss.Color("240")
-
-	ColorCheck  = lipgloss.Color("34")
 	ColorUpdate = lipgloss.Color("34")
 
 	// ColorBackground and ColorText are the window's own colors while the
@@ -107,16 +99,10 @@ func applyColors() {
 		ColorBorder = lipgloss.Color("248")
 		ColorSuccess = lipgloss.Color("34")
 		ColorDanger = lipgloss.Color("196")
-		ColorBitcoin = lipgloss.Color("172")
-		ColorLightning = lipgloss.Color("135")
+		ColorSpinner = lipgloss.Color("172")
 		ColorBtnBg = lipgloss.Color("237")
 		ColorBtnFg = lipgloss.Color("255")
 		ColorCursor = lipgloss.Color("251")
-		ColorChanLocal = lipgloss.Color("34")
-		ColorChanRemote = lipgloss.Color("69")
-		ColorChanLocalDim = lipgloss.Color("22")
-		ColorChanRemoteDim = lipgloss.Color("240")
-		ColorCheck = lipgloss.Color("34")
 		ColorUpdate = lipgloss.Color("34")
 		ColorBackground = lipgloss.Color("234")
 		ColorText = lipgloss.Color("253")
@@ -129,16 +115,10 @@ func applyColors() {
 		ColorBorder = lipgloss.Color("238")
 		ColorSuccess = lipgloss.Color("28")
 		ColorDanger = lipgloss.Color("160")
-		ColorBitcoin = lipgloss.Color("130")
-		ColorLightning = lipgloss.Color("91")
+		ColorSpinner = lipgloss.Color("130")
 		ColorBtnBg = lipgloss.Color("252")
 		ColorBtnFg = lipgloss.Color("232")
 		ColorCursor = lipgloss.Color("236")
-		ColorChanLocal = lipgloss.Color("28")
-		ColorChanRemote = lipgloss.Color("63")
-		ColorChanLocalDim = lipgloss.Color("114")
-		ColorChanRemoteDim = lipgloss.Color("245")
-		ColorCheck = lipgloss.Color("28")
 		ColorUpdate = lipgloss.Color("28")
 		ColorBackground = lipgloss.Color("255")
 		ColorText = lipgloss.Color("234")
@@ -154,19 +134,9 @@ var (
 	Mono    lipgloss.Style
 	Dim     lipgloss.Style
 	Grayed  lipgloss.Style
-	Good    lipgloss.Style
 	Success lipgloss.Style
-	Warn    lipgloss.Style
 	Warning lipgloss.Style
 	Action  lipgloss.Style
-	Footer  lipgloss.Style
-)
-
-// ── Branded ─────────────────────────────────────────────
-
-var (
-	Bitcoin   lipgloss.Style
-	Lightning lipgloss.Style
 )
 
 // ── Status indicators ───────────────────────────────────
@@ -189,21 +159,22 @@ var (
 // measurements here and the two cannot drift apart.
 //
 // From the top, the frame has its border, the top bar, a line, the sidebar
-// beside the content, and the border. The sidebar holds the five sections,
-// each SectionRows tall and closed by a line, then the theme icon's row.
-// Screens draw in every row beside it, so their last row is the one just
-// above the frame's bottom border.
+// beside the content, and the border. The sidebar holds the sections from
+// its top, each SectionRows tall and closed by a line, and the theme icon in
+// its last row. Screens draw in every row beside it, so their last row is the
+// one just above the frame's bottom border. ContentRows is a number of its
+// own, because the screens are laid out for it.
 const (
 	FrameWidth   = 82
 	SidebarWidth = 12
 	TopBarRows   = 2
 	SectionRows  = 5
-	ContentRows  = len(Sections)*(SectionRows+1) + 1
+	ContentRows  = 31
 	FrameHeight  = 1 + TopBarRows + 1 + ContentRows + 1
 )
 
-// Sections are the sidebar's five sections, top to bottom.
-var Sections = [5]string{"Channels", "Wallet", "On-Chain", "Add-On", "System"}
+// Sections are the sidebar's sections, top to bottom.
+var Sections = [1]string{"System"}
 
 // ── Help bar ────────────────────────────────────────────
 
@@ -221,14 +192,10 @@ var (
 	NavCursor lipgloss.Style
 
 	TableHeader lipgloss.Style
-	TableDim    lipgloss.Style
 
 	FrameBorder lipgloss.Style
-	QRCode      lipgloss.Style
 
-	AddonBorderNormal lipgloss.Style
-	AddonTitleNormal  lipgloss.Style
-	AddonTitleActive  lipgloss.Style
+	CardBorder lipgloss.Style
 )
 
 func applyStyles() {
@@ -239,16 +206,9 @@ func applyStyles() {
 	Mono = lipgloss.NewStyle().Foreground(ColorPrimary)
 	Dim = lipgloss.NewStyle().Foreground(ColorDim)
 	Grayed = lipgloss.NewStyle().Foreground(ColorGrayed)
-	Good = lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true)
 	Success = lipgloss.NewStyle().Foreground(ColorSuccess).Bold(true)
-	Warn = lipgloss.NewStyle().Foreground(ColorLabel)
 	Warning = lipgloss.NewStyle().Foreground(ColorDanger).Bold(true)
 	Action = lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true)
-	Footer = lipgloss.NewStyle().Foreground(ColorDim)
-
-	// Branded
-	Bitcoin = lipgloss.NewStyle().Foreground(ColorBitcoin).Bold(true)
-	Lightning = lipgloss.NewStyle().Foreground(ColorLightning).Bold(true)
 
 	// Status
 	GreenDot = lipgloss.NewStyle().Foreground(ColorSuccess)
@@ -286,21 +246,12 @@ func applyStyles() {
 
 	// Table
 	TableHeader = lipgloss.NewStyle().Foreground(ColorLabel).Bold(true)
-	TableDim = lipgloss.NewStyle().Foreground(ColorGrayed)
 
 	// Frame
 	FrameBorder = lipgloss.NewStyle().Foreground(ColorBorder)
 
-	// QR codes are black on white in both themes, for scanners.
-	QRCode = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Background(lipgloss.Color("16"))
-
-	// Addon cards
-	AddonBorderNormal = lipgloss.NewStyle().Foreground(ColorGrayed)
-	AddonTitleNormal = lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true)
-	AddonTitleActive = lipgloss.NewStyle().
-		Foreground(ColorPrimary).
-		Reverse(true).
-		Bold(true)
+	// Cards
+	CardBorder = lipgloss.NewStyle().Foreground(ColorGrayed)
 }
 
 // init sets up the default dark theme.

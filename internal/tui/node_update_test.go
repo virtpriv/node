@@ -12,14 +12,13 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/virtpriv/node/internal/app"
-	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/theme"
 	"github.com/virtpriv/node/internal/update/protocol"
 )
 
 func TestSavedUpdateCanBeResumedWithoutReleaseDiscovery(t *testing.T) {
 	client := &nodeUpdateClientStub{status: protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1-rc.1", Phase: "failed", Active: true}}
-	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0"}
+	ctx := &ScreenContext{NodeUpdates: client, Version: "0.7.0"}
 	home := NewSystemHomeScreen(ctx)
 	home.btnIdx = slices.Index(home.buttonActions(), sysBtnUpdates)
 	if home.btnIdx < 0 {
@@ -139,7 +138,7 @@ func TestNodeUpdateSubmitsReviewedTokenAndRejectsStalePreparation(t *testing.T) 
 		t.Run(selection.target, func(t *testing.T) {
 			target := selection.target
 			client := &nodeUpdateClientStub{}
-			ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0", LatestVersion: "0.7.1"}
+			ctx := &ScreenContext{NodeUpdates: client, Version: "0.7.0", LatestVersion: "0.7.1"}
 			var s *NodeUpdateScreen
 			if selection.explicit {
 				settings, cmd := testRelease(t, ctx, "v"+target)
@@ -176,7 +175,7 @@ func TestNodeUpdateSubmitsReviewedTokenAndRejectsStalePreparation(t *testing.T) 
 
 func TestCandidateRequiresExplicitSelection(t *testing.T) {
 	client := &nodeUpdateClientStub{}
-	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0", LatestVersion: "0.7.1-rc.1"}
+	ctx := &ScreenContext{NodeUpdates: client, Version: "0.7.0", LatestVersion: "0.7.1-rc.1"}
 	if NewSystemHomeScreen(ctx).hasUpdate() || NewNodeUpdateScreen(ctx).hasTarget() {
 		t.Fatal("normal discovery offered a release candidate")
 	}
@@ -190,7 +189,7 @@ func TestCandidateRequiresExplicitSelection(t *testing.T) {
 func TestNodeUpdateReviewFailureSurvivesStatusRefresh(t *testing.T) {
 	failure := errors.New("cannot read installed component version")
 	client := &nodeUpdateClientStub{prepareErr: failure}
-	s := NewNodeUpdateScreen(&ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0-rc.1", LatestVersion: "0.7.0"})
+	s := NewNodeUpdateScreen(&ScreenContext{NodeUpdates: client, Version: "0.7.0-rc.1", LatestVersion: "0.7.0"})
 	cmd := pressNodeUpdateAction(t, s, "Review")
 	_, poll := s.HandleMsg(cmd())
 	if poll == nil {
@@ -245,7 +244,7 @@ func pressNodeUpdateAction(t *testing.T, s *NodeUpdateScreen, action string) tea
 
 func TestNodeUpdateMessagesReachOnlyTheirLiveOwner(t *testing.T) {
 	client := &nodeUpdateClientStub{status: protocol.Status{ID: strings.Repeat("a", 64), Active: true, Phase: "failed"}}
-	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0"}
+	ctx := &ScreenContext{NodeUpdates: client, Version: "0.7.0"}
 	owner, other := NewNodeUpdateScreen(ctx), NewNodeUpdateScreen(ctx)
 	m := Model{nav: NewNavSidebar(), screenCtx: ctx, activeTab: 1, tabs: []openTab{
 		{Kind: tabNodeUpdates, Section: secSystem, Screen: other},
@@ -289,7 +288,7 @@ func TestNodeUpdateMessagesReachOnlyTheirLiveOwner(t *testing.T) {
 // answer is guidance only and must never be installable as it stands.
 func TestSkippedReleaseIsReviewedThroughItsBridge(t *testing.T) {
 	client := &nodeUpdateClientStub{updateFirst: map[string]string{"0.9.0": "0.8.0"}}
-	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0", LatestVersion: "0.9.0"}
+	ctx := &ScreenContext{NodeUpdates: client, Version: "0.7.0", LatestVersion: "0.9.0"}
 	s := NewNodeUpdateScreen(ctx)
 	s.HandleMsg(pressNodeUpdateAction(t, s, "Review")())
 	if s.review != nil || slices.Contains(s.buttons(), "Install") || client.starts != 0 {
@@ -314,7 +313,7 @@ func TestSkippedReleaseIsReviewedThroughItsBridge(t *testing.T) {
 func drawNodeUpdates(t *testing.T, ctx *ScreenContext, s *NodeUpdateScreen) (string, []string) {
 	t.Helper()
 	m := Model{
-		cfg: ctx.Cfg, state: &RuntimeState{}, screenCtx: ctx, nav: NewNavSidebar(),
+		state: &RuntimeState{}, screenCtx: ctx, nav: NewNavSidebar(),
 		width: tuiWidth, height: theme.FrameHeight + 1, contentFocused: true, activeTab: 1,
 		tabs: []openTab{{Kind: tabNodeUpdates, Section: secSystem, Screen: s}},
 	}
@@ -436,7 +435,7 @@ func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			ctx := &ScreenContext{Cfg: config.Default(), Version: "0.7.0", LatestVersion: c.latest}
+			ctx := &ScreenContext{Version: "0.7.0", LatestVersion: c.latest}
 			s := NewNodeUpdateScreen(ctx)
 			c.prepare(t, s)
 			if got := s.buttons(); !slices.Equal(got, c.buttons) {
@@ -528,12 +527,12 @@ func spinTick(s *NodeUpdateScreen, msgs []tea.Msg) tea.Msg {
 func TestStepSpinnerTicksOnlyWhileItsScreenShows(t *testing.T) {
 	running := protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "installing", Active: true, Running: true,
 		Steps: []string{"Check the node", "Stop lnd"}, StepNumber: 2}
-	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: &nodeUpdateClientStub{status: running}, Version: "0.7.0"}
+	ctx := &ScreenContext{NodeUpdates: &nodeUpdateClientStub{status: running}, Version: "0.7.0"}
 	s := NewNodeUpdateScreen(ctx)
-	m := Model{cfg: ctx.Cfg, state: &RuntimeState{}, screenCtx: ctx, nav: NewNavSidebar(), activeTab: 1,
+	m := Model{state: &RuntimeState{}, screenCtx: ctx, nav: NewNavSidebar(), activeTab: 1,
 		tabs: []openTab{{Kind: tabNodeUpdates, Section: secSystem, Screen: s}}}
 	show := func(on bool) {
-		m.nav.ActiveItem, m.nav.Cursor, m.activeTab = secChannels, secChannels, 0
+		m.nav.ActiveItem, m.nav.Cursor, m.activeTab = secSystem, secSystem, 0
 		if on {
 			m.nav.ActiveItem, m.nav.Cursor, m.activeTab = secSystem, secSystem, 1
 		}
@@ -616,7 +615,7 @@ func TestNextWithoutItsAdviceIsNotFollowed(t *testing.T) {
 func TestContinueDuringAStatusCheckResumes(t *testing.T) {
 	f := protocol.Failure{Code: protocol.FailureStopFailed, Service: protocol.LND}
 	client := &nodeUpdateClientStub{status: protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "failed", Active: true, Error: "stopped", Failure: &f}}
-	s := NewNodeUpdateScreen(&ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0"})
+	s := NewNodeUpdateScreen(&ScreenContext{NodeUpdates: client, Version: "0.7.0"})
 	s.HandleMsg(s.Init()())
 	_, check := s.HandleMsg(nodeUpdateTick{owner: s})
 	if check == nil {

@@ -4,13 +4,9 @@ package tui
 import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"time"
 
 	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/app"
-	"github.com/virtpriv/node/internal/config"
-	"github.com/virtpriv/node/internal/lndrpc"
-	"github.com/virtpriv/node/internal/syncthing"
 )
 
 // ── Screen interface ────────────────────────────────────
@@ -24,7 +20,7 @@ type Screen interface {
 	HandleKey(key string, msg tea.KeyPressMsg) (Screen, tea.Cmd)
 
 	// HandleMsg processes async results (e.g.
-	// invoiceStatusMsg), paste messages, and any
+	// sshKeysListMsg), paste messages, and any
 	// future non-key message types.
 	HandleMsg(msg tea.Msg) (Screen, tea.Cmd)
 
@@ -37,9 +33,9 @@ type Screen interface {
 	// for the helpbar.
 	HelpBindings() []key.Binding
 
-	// Init returns any initial command (e.g.
-	// createInvoiceCmd for receive flow after input).
-	// Called once when the screen is mounted to a tab.
+	// Init returns any initial command (e.g. the first
+	// read of a list). Called once when the screen is
+	// mounted to a tab.
 	Init() tea.Cmd
 }
 
@@ -48,43 +44,22 @@ type Screen interface {
 // read the current observation when rendering. No screen owns a second copy.
 
 type ScreenContext struct {
-	NodeUpdates    nodeUpdates
-	ChannelHistory *channelHistoryContext
-	PaymentHistory *paymentHistoryContext
-	OnChain        *OnChainContext
+	NodeUpdates nodeUpdates
 	// Jobs starts and watches the changes vpnd runs as jobs.
 	Jobs jobRunner
 	// shownJobs are the jobs whose outcome this TUI has shown, so a screen
 	// opened again does not show it a second time.
-	shownJobs           map[string]bool
-	ConnectionInfo      connectionInfoReader
-	Fees                feeReader
-	Syncthing           *app.Syncthing
-	syncthingRevision   uint64
-	syncthingActive     uint64
-	syncthingPending    bool
-	syncthingPolling    bool
-	WalletCreation      *app.WalletCreation
-	walletCreationOwner *WalletCreateScreen
-	WalletRuntime       walletRuntime
-	walletRead          *walletStateRequest
-	walletReadPending   bool
-	walletReadFailing   bool // the failure is logged, the next success is too
-	walletClient        *walletClientRequest
-	walletGeneration    uint64 // Scopes retained observations. Routine reads do not change it.
-	Workflows           *app.Workflows
-	SSHAccess           *app.SSHAccess
-	AccountAccess       accountAccess
-	sshAuthRevision     uint64
-	Cfg                 *config.AppConfig
-	State               *RuntimeState
-	LndClient           *lndrpc.Client
-	Status              *statusSnapshot
-	HasTabs             bool   // varies by section, Model sets it before calling View/HelpBindings
-	ContentFocused      bool   // true when content pane has focus (not tab bar, not sidebar)
-	Version             string // set once at construction
-	LatestVersion       string // updated by latestVersionMsg handler
-	LatestChecked       bool   // the release check has answered, found or not
+	shownJobs       map[string]bool
+	SSHAccess       *app.SSHAccess
+	AccountAccess   accountAccess
+	sshAuthRevision uint64
+	State           *RuntimeState
+	Status          *statusSnapshot
+	HasTabs         bool   // Model sets it before calling View/HelpBindings
+	ContentFocused  bool   // true when content pane has focus (not tab bar, not sidebar)
+	Version         string // set once at construction
+	LatestVersion   string // updated by latestVersionMsg handler
+	LatestChecked   bool   // the release check has answered, found or not
 	// FolderReleases lists the versions whose files are all in the releases
 	// folder, newest first. FolderNotFolder reports a releases folder that is
 	// a link or a file, so it is not read.
@@ -118,98 +93,12 @@ func (c *ScreenContext) jobs() jobRunner {
 	return c.Jobs
 }
 
-func (c *ScreenContext) syncthing() *app.Syncthing {
-	if c.Syncthing == nil {
-		c.Syncthing = app.NewSyncthing()
-	}
-	return c.Syncthing
-}
-
-func (c *ScreenContext) walletCreation() *app.WalletCreation {
-	if c.WalletCreation == nil {
-		c.WalletCreation = app.NewWalletCreation()
-	}
-	return c.WalletCreation
-}
-
 // RuntimeState contains facts whose authority is the live system rather than
 // config.json. Known flags make read failures explicit so risky actions can
 // fail closed instead of guessing.
 type RuntimeState struct {
-	WalletExists            bool
-	WalletKnown             bool
 	SSHPasswordAuthDisabled bool
 	SSHPasswordAuthKnown    bool
-	SyncthingDevices        []syncthing.Device
-	SyncthingDevicesErr     error
-	SyncthingDevicesKnown   bool
-	SyncthingDevicesChecked time.Time
-	SyncthingDelivery       map[string]syncthing.Delivery
-	SyncthingDeliveryErr    error
-	SyncthingDeliveryKnown  bool
-	SyncthingCopy           app.BackupCopy
-	SyncthingCopyErr        error
-	SyncthingCopyKnown      bool
-}
-
-func (c *ScreenContext) invalidateWalletObservations() {
-	c.cancelWalletRead()
-	c.cancelWalletClient()
-	c.walletGeneration++
-	c.Status = nil
-	if c.ChannelHistory != nil {
-		c.ChannelHistory.ChannelHistorySnapshot = app.ChannelHistorySnapshot{}
-	}
-	if c.PaymentHistory != nil {
-		c.PaymentHistory.PaymentHistorySnapshot = app.PaymentHistorySnapshot{}
-	}
-	if c.OnChain != nil {
-		c.OnChain.OnChainSnapshot = app.OnChainSnapshot{}
-		c.OnChain.Selection.Clear()
-	}
-}
-
-func (c *ScreenContext) walletExists() bool {
-	return c.State != nil && c.State.WalletKnown && c.State.WalletExists
-}
-
-func (c *ScreenContext) walletKnown() bool {
-	return c.State != nil && c.State.WalletKnown
-}
-
-func (c *ScreenContext) walletDisplayAvailable() bool {
-	if c.State == nil || !c.State.WalletExists {
-		return false
-	}
-	return c.walletKnown() || (c.Status != nil &&
-		(c.Status.Node.Known() || c.Status.Balance.Known() || c.Status.Channels.Known()))
-}
-
-func (c *ScreenContext) disabledWalletButtons(indices ...int) []int {
-	if c.walletExists() {
-		return nil
-	}
-	return indices
-}
-
-func walletUnavailableHelpBindings(c *ScreenContext) []key.Binding {
-	enter := kEnterCreateWallet
-	if !c.walletKnown() || c.walletClientUnavailable() {
-		enter = kEnterRetryWalletRead
-	}
-	return []key.Binding{enter, kSidebar, kBack, kQuit}
-}
-
-// OnChainContext holds wallet data and the selection shared by home and send.
-// Prepared sends own copies of their reviewed inputs.
-type OnChainContext struct {
-	app.OnChainSnapshot
-	revision  uint64
-	Selection app.CoinSelection
-	reader    onChainReader
-	scope     walletObservationScope
-	active    *onChainRequest
-	pending   bool
 }
 
 // ── Screen-to-Model messages ────────────────────────────
@@ -224,14 +113,12 @@ type closeTabMsg struct{}
 // openTabMsg tells Model to open a new tab with the
 // given screen.
 type openTabMsg struct {
-	Kind        tabKind
-	Label       string
-	Index       int    // for other detail tabs (dedup key)
-	Key         string // funding outpoint for channel detail tabs
-	Screen      Screen
-	FocusTabBar bool    // true = tab bar focused on open
-	Replace     bool    // true = replace existing screen on dedup
-	Parent      tabKind // parent tab kind (0 = section home)
+	Kind    tabKind
+	Label   string
+	Key     string // key fingerprint for SSH key detail tabs
+	Screen  Screen
+	Replace bool    // true = replace existing screen on dedup
+	Parent  tabKind // parent tab kind (0 = section home)
 }
 
 // focusSidebarMsg tells Model to move focus to the
@@ -274,10 +161,6 @@ func emitFocusTabBar() tea.Msg {
 
 func emitFocusParent() tea.Msg {
 	return focusParentMsg{}
-}
-
-func emitRefreshStatus() tea.Msg {
-	return refreshStatusMsg{}
 }
 
 func (c *ScreenContext) sshAccess() *app.SSHAccess {

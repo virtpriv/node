@@ -15,7 +15,7 @@ import (
 // ── SSHKeysScreen ──────────────────────────────────────
 // Pure list/management screen. Add and per-key detail
 // are opened as their own tabs (tabSSHKeyAdd,
-// tabSSHKeyDetail). Mirrors the Syncthing manage pattern.
+// tabSSHKeyDetail).
 // ── Focus zones ────────────────────────────────────────
 
 const (

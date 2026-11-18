@@ -1,6 +1,5 @@
-// Package steplist draws the list of steps that the installer, Node Updates
-// and the Syncthing and P2P progress screen show, with the spinner on the
-// step that runs.
+// Package steplist draws the list of steps that the installer and Node
+// Updates show, with the spinner on the step that runs.
 package steplist
 
 import (
@@ -168,5 +167,5 @@ func (s *Spinner) Update(msg tea.Msg) tea.Cmd {
 // View is the current frame. Charm's frames end in a space, which would
 // push the step's name one column right of the other rows.
 func (s Spinner) View() string {
-	return lipgloss.NewStyle().Foreground(theme.ColorBitcoin).Render(strings.TrimSpace(s.m.View()))
+	return lipgloss.NewStyle().Foreground(theme.ColorSpinner).Render(strings.TrimSpace(s.m.View()))
 }

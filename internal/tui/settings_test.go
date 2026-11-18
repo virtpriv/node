@@ -8,7 +8,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/update/protocol"
 )
 
@@ -54,7 +53,7 @@ func openedNodeUpdates(t *testing.T, s *SettingsScreen, cmd tea.Cmd) (*NodeUpdat
 // newer never reaches the node.
 func TestTestReleaseOpensItsReviewOnNodeUpdates(t *testing.T) {
 	client := &nodeUpdateClientStub{}
-	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0", LatestVersion: "0.7.1"}
+	ctx := &ScreenContext{NodeUpdates: client, Version: "0.7.0", LatestVersion: "0.7.1"}
 	for _, tag := range []string{"v0.7.0", "v0.6.3", "v0.7.0-rc.1", "latest"} {
 		s, _ := testRelease(t, ctx, tag)
 		if client.prepared != "" || s.release == nil || s.err == "" {
@@ -88,7 +87,7 @@ func TestTestReleaseDuringAnUpdateOpensThatUpdate(t *testing.T) {
 			Advice: "The update was interrupted, for example by a restart.\n\nSelect Continue."},
 	} {
 		client := &nodeUpdateClientStub{status: st}
-		ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0"}
+		ctx := &ScreenContext{NodeUpdates: client, Version: "0.7.0"}
 		s, cmd := testRelease(t, ctx, "v0.7.2-rc.1")
 		screen, opened := openedNodeUpdates(t, s, cmd)
 		if client.prepared != "" || screen.review != nil || opened.Kind != tabNodeUpdates || s.release != nil {
@@ -107,7 +106,7 @@ func TestTestReleaseRefusalStaysOnTheForm(t *testing.T) {
 	refusal := errors.New("this release cannot repair the unfinished update, select Retry first")
 	client := &nodeUpdateClientStub{prepareErr: refusal,
 		status: protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "failed", Active: true}}
-	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0"}
+	ctx := &ScreenContext{NodeUpdates: client, Version: "0.7.0"}
 	s, cmd := testRelease(t, ctx, "v0.7.2-rc.1")
 	if cmd == nil {
 		t.Fatal("Review asked nothing")
@@ -126,10 +125,10 @@ func TestTestReleaseRefusalStaysOnTheForm(t *testing.T) {
 // Node Updates waiting for an answer, such as the start of an approved
 // update, is not replaced by a review, so that answer is not lost.
 func TestBusyNodeUpdatesIsNotReplaced(t *testing.T) {
-	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: &nodeUpdateClientStub{}, Version: "0.7.0"}
+	ctx := &ScreenContext{NodeUpdates: &nodeUpdateClientStub{}, Version: "0.7.0"}
 	busy := NewNodeUpdateScreen(ctx)
 	busy.busy = "start"
-	m := Model{nav: NewNavSidebar(), screenCtx: ctx, cfg: ctx.Cfg, state: &RuntimeState{},
+	m := Model{nav: NewNavSidebar(), screenCtx: ctx, state: &RuntimeState{},
 		tabs: []openTab{{Kind: tabNodeUpdates, Section: secSystem, Screen: busy}}}
 	m.nav.ActiveItem = secSystem
 	review := newReviewedRelease(ctx, "0.7.1-rc.1", protocol.Review{Token: "t", Manifest: protocol.Manifest{Version: "0.7.1-rc.1"}})
@@ -145,7 +144,7 @@ func systemTabs(ctx *ScreenContext, tabs ...openTab) Model {
 	for i := range tabs {
 		tabs[i].Section = secSystem
 	}
-	m := Model{nav: NewNavSidebar(), screenCtx: ctx, cfg: ctx.Cfg, state: &RuntimeState{}, tabs: tabs, activeTab: len(tabs)}
+	m := Model{nav: NewNavSidebar(), screenCtx: ctx, state: &RuntimeState{}, tabs: tabs, activeTab: len(tabs)}
 	m.nav.ActiveItem, m.nav.Cursor = secSystem, secSystem
 	m.focusContent()
 	return m
@@ -162,7 +161,7 @@ func deliver(m *Model, msg tea.Msg) tea.Cmd {
 // in Node Updates goes back to Updates, and closing Settings leaves Node
 // Updates open.
 func TestNodeUpdatesFromSettingsStaysUnderUpdates(t *testing.T) {
-	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: &nodeUpdateClientStub{}, Version: "0.7.0"}
+	ctx := &ScreenContext{NodeUpdates: &nodeUpdateClientStub{}, Version: "0.7.0"}
 	settings, cmd := testRelease(t, ctx, "v0.7.1-rc.1")
 	m := systemTabs(ctx,
 		openTab{Kind: tabUpdates, Screen: &UpdatesScreen{ctx: ctx, home: NewSystemHomeScreen(ctx)}},
@@ -189,7 +188,7 @@ func TestNodeUpdatesFromSettingsStaysUnderUpdates(t *testing.T) {
 // An open Node Updates tab already shows the update on its way and is kept.
 func TestRunningUpdateKeepsTheOpenNodeUpdates(t *testing.T) {
 	client := &nodeUpdateClientStub{status: protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "installing", Active: true, Running: true}}
-	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: client, Version: "0.7.0"}
+	ctx := &ScreenContext{NodeUpdates: client, Version: "0.7.0"}
 	settings, cmd := testRelease(t, ctx, "v0.7.2-rc.1")
 	open := NewNodeUpdateScreen(ctx)
 	m := systemTabs(ctx,
@@ -204,7 +203,7 @@ func TestRunningUpdateKeepsTheOpenNodeUpdates(t *testing.T) {
 // Preparing a review can take minutes over Tor. Cancel leaves it, and the
 // node's late answer opens nothing, also on a form opened again since.
 func TestCancelWhilePreparingDropsTheAnswer(t *testing.T) {
-	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: &nodeUpdateClientStub{}, Version: "0.7.0"}
+	ctx := &ScreenContext{NodeUpdates: &nodeUpdateClientStub{}, Version: "0.7.0"}
 	s, cmd := testRelease(t, ctx, "v0.7.1-rc.1")
 	if !s.checking {
 		t.Fatal("Review did not ask the node")
@@ -219,13 +218,13 @@ func TestCancelWhilePreparingDropsTheAnswer(t *testing.T) {
 // Node Updates asks for the update's state every 2 seconds. A Test release
 // review that arrives while that question is out still replaces the tab.
 func TestReviewDuringAStatusCheckReplacesNodeUpdates(t *testing.T) {
-	ctx := &ScreenContext{Cfg: config.Default(), NodeUpdates: &nodeUpdateClientStub{}, Version: "0.7.0"}
+	ctx := &ScreenContext{NodeUpdates: &nodeUpdateClientStub{}, Version: "0.7.0"}
 	open := NewNodeUpdateScreen(ctx)
 	open.HandleMsg(open.Init()())
 	if _, check := open.HandleMsg(nodeUpdateTick{owner: open}); check == nil {
 		t.Fatal("the tick asked nothing")
 	}
-	m := Model{nav: NewNavSidebar(), screenCtx: ctx, cfg: ctx.Cfg, state: &RuntimeState{},
+	m := Model{nav: NewNavSidebar(), screenCtx: ctx, state: &RuntimeState{},
 		tabs: []openTab{{Kind: tabNodeUpdates, Section: secSystem, Screen: open}}}
 	m.nav.ActiveItem = secSystem
 	review := newReviewedRelease(ctx, "0.7.1-rc.1", protocol.Review{Token: "t", Manifest: protocol.Manifest{Version: "0.7.1-rc.1"}})

@@ -173,11 +173,10 @@ func loadConsoleConfig(
 // runConsole is the bare `vpn` path: the node TUI for the
 // admin user. Fail-stop on an unloadable config: the
 // error names the file and the reason, and Default() is NEVER
-// substituted. A TUI running on defaults would render a
-// mainnet node's screens over a testnet4 node's services and
-// write the wrong answers back on its first save.
+// substituted. The TUI reads no setting from it. A config that
+// loads says the install finished.
 func runConsole() {
-	cfg, err := loadConsoleConfig(os.Geteuid(), user.Lookup, config.Load)
+	_, err := loadConsoleConfig(os.Geteuid(), user.Lookup, config.Load)
 	if errors.Is(err, errWrongTUIIdentity) {
 		fmt.Fprintf(os.Stderr,
 			"  The node TUI runs as the %q user.\n"+
@@ -208,7 +207,7 @@ func runConsole() {
 			err)
 		prefs = config.DefaultPreferences()
 	}
-	tui.Show(cfg, prefs, version)
+	tui.Show(prefs, version)
 }
 
 type command int
