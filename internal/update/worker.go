@@ -3,18 +3,12 @@ package update
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
-	"slices"
-	"time"
 
-	"github.com/virtpriv/node/internal/component"
 	"github.com/virtpriv/node/internal/config"
-	"github.com/virtpriv/node/internal/host"
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/update/files"
 	"github.com/virtpriv/node/internal/update/protocol"
@@ -52,35 +46,11 @@ func RunWorker(version string) error {
 	if err := verifyHash(self, j.WorkerHash); err != nil {
 		return recordWorkerFailure(j, err)
 	}
-	if err := inheritFailed(Root, j); err != nil {
-		return recordWorkerFailure(j, err)
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return recordWorkerFailure(j, err)
-	}
-	if cfg.Network != j.Review.Network {
-		return recordWorkerFailure(j, errors.New("node network changed during update"))
-	}
-	if err := verifyHash(paths.ConfigFile, j.ConfigHash); err != nil {
-		return recordWorkerFailure(j, errors.New("node configuration changed during update"))
-	}
 	return runJob(j, workflowOps{
 		save: func(j *job) error { return saveJob(Root, j) },
-		identify: func(j *job) error {
-			if err := observeIdentity(j, host.CheckUpdateProcess, func() (bool, error) { return host.WalletExists(cfg.Network) }, host.SyncthingDeviceID); err != nil {
-				return err
-			}
-			// A host step that cannot run is refused here, while Cancel still
-			// leaves the node as it was.
-			for _, step := range j.Review.Manifest.HostSteps {
-				if err := host.CheckUpdateHostStep(step, cfg); err != nil {
-					return err
-				}
-			}
-			return nil
+		check: func(j *job) error {
+			return checkNode(j, func() error { _, err := config.Load(); return err }, paths.ConfigFile)
 		},
-		stage: func(j *job) error { return stageJob(j) },
 		capacity: func(j *job) error {
 			needs, err := spaceNeeds(Root, paths.BinaryPath, j)
 			if err != nil {
@@ -88,22 +58,23 @@ func RunWorker(version string) error {
 			}
 			return checkSpaceNeeds(needs, observeSpace)
 		},
-		discard: func(j *job) error { return discardStaged(Root, j) },
-		guard:   host.GuardUpdateServices,
-		stop:    host.StopUpdateService,
-		install: func(j *job) error { return installJob(j, cfg) },
-		start:   host.StartUpdateService,
-		running: host.CheckUpdateProcess,
-		health:  func(j *job, c protocol.Component) error { return waitHealth(j, c, cfg) },
-		commit: func(j *job) error {
-			return commitJob(Root, paths.BinaryPath, j, host.CheckUpdateProcess, host.ReleaseUpdateGuards)
-		},
-		backup:     host.RefreshLNDBackupExport,
-		quarantine: quarantine,
+		commit: func(j *job) error { return commitJob(Root, paths.BinaryPath, j) },
 	})
 }
 
-// loadPlan reads the approved plan bytes in full. The installed helper that
+// checkNode is the update's first step. The node's settings must load, and
+// must be the ones the owner reviewed the update for.
+func checkNode(j *job, load func() error, configFile string) error {
+	if err := load(); err != nil {
+		return err
+	}
+	if err := verifyHash(configFile, j.ConfigHash); err != nil {
+		return errors.New("node configuration changed during update")
+	}
+	return nil
+}
+
+// loadPlan reads the approved plan bytes in full. The installed side that
 // accepted the job may be older and may have understood only part of the plan.
 func loadPlan(root string, j *job) (protocol.Manifest, error) {
 	path := filepath.Join(j.dir(root), "update.json")
@@ -120,129 +91,23 @@ func loadPlan(root string, j *job) (protocol.Manifest, error) {
 	return protocol.Decode(data)
 }
 
-// inheritFailed gives a repair job the duties of the failed update it follows,
-// the services that update affected, what may already have run, and the wallet
-// and device identity recorded before any change. The helper retained each
-// failed record as result.json. A failed repair whose worker never ran has not
-// merged its own predecessor, so the chain is followed until one has.
-func inheritFailed(root string, j *job) error {
-	if j.Previous == "" || j.Completed["inherited"] {
-		return nil
-	}
-	affected, mayHaveRun := slices.Clone(j.Affected), maps.Clone(j.MayHaveRun)
-	wallet, device, hostChanges := j.WalletPresent, j.SyncthingID, j.HostChanges
-	seen := map[string]bool{j.Review.Digest: true}
-	for id := j.Previous; id != ""; {
-		if !protocol.ValidDigest(id) || seen[id] {
-			return errors.New("invalid failed update history")
-		}
-		seen[id] = true
-		b, err := readRecord(filepath.Join(root, id, "result.json"))
-		if err != nil {
-			return fmt.Errorf("read failed update record: %w", err)
-		}
-		var failed struct {
-			Previous      string                      `json:"previous"`
-			Affected      []protocol.Component        `json:"affected"`
-			MayHaveRun    map[protocol.Component]bool `json:"may_have_run"`
-			Completed     map[string]bool             `json:"completed"`
-			WalletPresent bool                        `json:"wallet_present"`
-			SyncthingID   string                      `json:"syncthing_id"`
-			HostChanges   bool                        `json:"host_changes_begun"`
-		}
-		if err := json.Unmarshal(b, &failed); err != nil {
-			return fmt.Errorf("read failed update record: %w", err)
-		}
-		for _, c := range append(slices.Collect(maps.Keys(failed.MayHaveRun)), failed.Affected...) {
-			if !slices.Contains(protocol.Components, c) {
-				return fmt.Errorf("failed update involved %q, which this release cannot repair", c)
-			}
-		}
-		for _, c := range failed.Affected {
-			if !slices.Contains(affected, c) {
-				affected = append(affected, c)
-			}
-		}
-		for c, ran := range failed.MayHaveRun {
-			if ran {
-				mayHaveRun[c] = true
-			}
-		}
-		wallet, hostChanges = wallet || failed.WalletPresent, hostChanges || failed.HostChanges
-		if device == "" {
-			device = failed.SyncthingID
-		}
-		if failed.Completed["inherited"] {
-			break
-		}
-		id = failed.Previous
-	}
-	slices.SortFunc(affected, func(a, b protocol.Component) int {
-		return slices.Index(protocol.Components, a) - slices.Index(protocol.Components, b)
-	})
-	j.Affected, j.MayHaveRun, j.WalletPresent, j.SyncthingID, j.HostChanges = affected, mayHaveRun, wallet, device, hostChanges
-	j.Completed["inherited"] = true
-	return nil
-}
-
-// observeIdentity requires every affected service to run its installed
-// executable, then records the wallet and device identity that the health
-// checks compare against after the update. This rule belongs to the worker so
-// that a release can change it. A helper that enforced it would keep a node
-// from the very update that repairs a service which cannot start.
-func observeIdentity(j *job, running func(protocol.Component) error, wallet func() (bool, error), device func() string) error {
-	for _, c := range j.Affected {
-		if err := running(c); err != nil {
-			err = fmt.Errorf("cancel this update and restart %s first: %w", c, err)
-			switch {
-			case errors.Is(err, host.ErrUpdateServiceNotActive):
-				return known(protocol.FailureServiceNotRunning, c, err)
-			case errors.Is(err, host.ErrUpdateServiceChanged):
-				return known(protocol.FailureServiceChanged, c, err)
-			}
-			return err
-		}
-	}
-	if slices.Contains(j.Affected, protocol.LND) {
-		var err error
-		j.WalletPresent, err = wallet()
-		if err != nil {
-			return err
-		}
-	}
-	if slices.Contains(j.Affected, protocol.Syncthing) {
-		j.SyncthingID = device()
-		if j.SyncthingID == "" {
-			return errors.New("cannot establish Syncthing device identity")
-		}
-	}
-	return nil
-}
-
-// commitJob publishes VPN only after the affected processes and retained bytes
-// pass their final checks. Service guards stay in place until publication.
-func commitJob(root, binary string, j *job, running func(protocol.Component) error, releaseGuards func([]protocol.Component) error) error {
-	for _, c := range j.Affected {
-		if err := running(c); err != nil {
-			return err
-		}
-	}
+// commitJob replaces the installed program with the approved bytes. The copy
+// leaves the old program or the whole new one, and the same bytes can be
+// copied again.
+func commitJob(root, binary string, j *job) error {
 	if err := verifyHash(filepath.Join(j.dir(root), "vpn"), j.WorkerHash); err != nil {
 		return err
 	}
 	if err := files.Copy(filepath.Join(j.dir(root), "vpn"), binary, 0755); err != nil {
 		return err
 	}
-	if err := verifyHash(binary, j.WorkerHash); err != nil {
-		return err
-	}
-	return releaseGuards(j.Affected)
+	return verifyHash(binary, j.WorkerHash)
 }
 
 func recordWorkerFailure(j *job, cause error) error {
 	j.Phase = "failed"
-	j.Error, j.Failure = cause.Error(), nil
-	j.Next, j.Advice = protocol.Advise(nil, !j.HostChanges)
+	j.Error = cause.Error()
+	j.Next, j.Advice = protocol.Advise(!j.HostChanges)
 	// These checks run before this worker writes its list of steps, so the
 	// list from an earlier run would mark the wrong step. Without a list the
 	// screen shows the error under the saved step text.
@@ -250,61 +115,26 @@ func recordWorkerFailure(j *job, cause error) error {
 	return errors.Join(cause, saveJob(Root, j))
 }
 
-func quarantine(components []protocol.Component) error {
-	// A known failure closes the gates and stops unverified processes. No
-	// database, wallet, configuration or old executable is restored.
-	err := host.GuardUpdateServices(components)
-	order := slices.Clone(components)
-	slices.Reverse(order)
-	for _, c := range order {
-		err = errors.Join(err, host.StopUpdateService(c))
-	}
-	return err
-}
-
-const installDir = "/usr/local/bin"
-
-// A spaceNeed is what one path's filesystem must hold before services stop,
-// the free space that has to remain, plus the bytes still to be written there.
+// A spaceNeed is what one path's filesystem must hold before the program is
+// replaced, the free space that has to remain, plus the bytes still to be
+// written there.
 type spaceNeed struct {
 	path         string
 	floor, write uint64
 }
 
-func dataDir(c protocol.Component) string {
-	return map[protocol.Component]string{protocol.Bitcoin: paths.BitcoinDataDir, protocol.LND: paths.LNDDataDir, protocol.Syncthing: paths.SyncthingDataDir}[c]
-}
-
-func floorNeeds(root string, j *job) []spaceNeed {
-	floor := uint64(j.Review.Manifest.MinimumFreeMiB) << 20
-	needs := []spaceNeed{{path: root, floor: floor}, {path: installDir, floor: 1024 << 20}}
-	for _, c := range j.Affected {
-		needs = append(needs, spaceNeed{path: dataDir(c), floor: floor})
-	}
-	return needs
-}
-
-// spaceNeeds measures the staged files, so it covers every byte installation
-// and VPN publication will write after the services stop.
+// spaceNeeds asks for the plan's free space where the update's files are
+// kept, and for room for the new program beside 1024 MiB where it is
+// installed.
 func spaceNeeds(root, binary string, j *job) ([]spaceNeed, error) {
-	var install uint64
-	for _, c := range j.Affected {
-		for _, name := range host.UpdateBinaryNames(c) {
-			if _, ok := j.BinaryHashes[name]; !ok {
-				continue
-			}
-			i, err := os.Stat(filepath.Join(j.dir(root), string(c), "bin", name))
-			if err != nil {
-				return nil, err
-			}
-			install += uint64(i.Size())
-		}
-	}
 	worker, err := os.Stat(filepath.Join(j.dir(root), "vpn"))
 	if err != nil {
 		return nil, err
 	}
-	return append(floorNeeds(root, j), spaceNeed{path: installDir, write: install}, spaceNeed{path: filepath.Dir(binary), write: uint64(worker.Size())}), nil
+	return []spaceNeed{
+		{path: root, floor: uint64(j.Review.Manifest.MinimumFreeMiB) << 20},
+		{path: filepath.Dir(binary), floor: 1024 << 20, write: uint64(worker.Size())},
+	}, nil
 }
 
 // checkSpaceNeeds counts each filesystem once, even when several paths share
@@ -349,168 +179,18 @@ func observeSpace(path string) (dev, avail uint64, err error) {
 	return uint64(st.Dev), uint64(fs.Bavail) * uint64(fs.Bsize), nil
 }
 
-// discardStaged removes the downloaded component files. The worker, plan and
-// job records stay for status and inspection.
-func discardStaged(root string, j *job) error {
-	if err := files.Check(j.dir(root), true); err != nil {
-		return err
-	}
-	var err error
-	for _, c := range protocol.Components {
-		err = errors.Join(err, os.RemoveAll(filepath.Join(j.dir(root), string(c))))
-	}
-	return errors.Join(err, files.Sync(j.dir(root)))
-}
-
-func stageJob(j *job) error {
-	// Refuse early, before downloading anything.
-	if err := checkSpaceNeeds(floorNeeds(Root, j), observeSpace); err != nil {
-		return err
-	}
-	// Every affected component is staged again, so earlier entries are stale.
-	clear(j.BinaryHashes)
-	for _, c := range j.Affected {
-		j.Step = "Download and verify " + string(c)
-		if err := saveJob(Root, j); err != nil {
-			return err
-		}
-		dir := filepath.Join(j.dir(Root), string(c))
-		hashes, err := host.StageUpdateComponent(c, j.Review.Manifest.Artifact(c), dir)
-		if err != nil {
-			return fmt.Errorf("stage %s: %w", c, err)
-		}
-		for name, hash := range hashes {
-			j.BinaryHashes[name] = hash
-		}
-	}
-	return nil
-}
-
-func installJob(j *job, cfg *config.AppConfig) error {
-	// Verify every staged member before replacing the first installed member.
-	for _, c := range j.Affected {
-		_, required, err := host.UpdateArchive(c, j.Review.Manifest.Artifact(c).Version)
-		if err != nil {
-			return err
-		}
-		for _, name := range required {
-			if j.BinaryHashes[name] == "" {
-				return errors.New("staged component is incomplete")
-			}
-		}
-		for _, name := range host.UpdateBinaryNames(c) {
-			if hash, ok := j.BinaryHashes[name]; ok {
-				if err := verifyHash(filepath.Join(j.dir(Root), string(c), "bin", name), hash); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	for _, step := range j.Review.Manifest.HostSteps {
-		j.Step = "Apply " + step
-		if err := saveJob(Root, j); err != nil {
-			return err
-		}
-		if err := host.ApplyUpdateHostStep(step, cfg); err != nil {
-			return err
-		}
-	}
-	for _, c := range j.Affected {
-		for _, name := range host.UpdateBinaryNames(c) {
-			if _, ok := j.BinaryHashes[name]; !ok {
-				continue
-			}
-			j.Step = "Install " + name
-			if err := saveJob(Root, j); err != nil {
-				return err
-			}
-			if err := files.Copy(filepath.Join(j.dir(Root), string(c), "bin", name), filepath.Join(installDir, name), 0755); err != nil {
-				return err
-			}
-			if err := verifyHash(filepath.Join(installDir, name), j.BinaryHashes[name]); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func waitHealth(j *job, c protocol.Component, cfg *config.AppConfig) error {
-	deadline := time.Now().Add(20 * time.Minute)
-	for {
-		state, err := host.CheckUpdateHealth(c, j.Review.Manifest.Artifact(c).Version, cfg, j.WalletPresent, j.SyncthingID)
-		if err != nil {
-			return fmt.Errorf("check %s: %w", c, err)
-		}
-		if state.Ready {
-			if c == protocol.Syncthing {
-				if err := host.StageSyncthingAPIKey(); err != nil {
-					return err
-				}
-			}
-			if c == protocol.LND {
-				if err := host.StageLNDTLSCert(); err != nil {
-					return err
-				}
-				if j.WalletPresent {
-					if err := host.StageLNDMacaroon(); err != nil {
-						return err
-					}
-				}
-			}
-			return nil
-		}
-		if state.Unlock {
-			deadline = time.Now().Add(20 * time.Minute)
-			if j.Phase != "waiting-unlock" {
-				if err := host.StageLNDTLSCert(); err != nil {
-					return err
-				}
-				j.Phase = "waiting-unlock"
-				j.Step = "Unlock the LND wallet to finish"
-				if err := saveJob(Root, j); err != nil {
-					return err
-				}
-			}
-		} else {
-			if j.Phase == "waiting-unlock" {
-				j.Phase = "checking"
-				j.Step = "Check lnd"
-				if err := saveJob(Root, j); err != nil {
-					return err
-				}
-			}
-			if time.Now().After(deadline) {
-				return fmt.Errorf("%s did not become ready, check its service journal before Retry", c)
-			}
-		}
-		time.Sleep(2 * time.Second)
-	}
-}
-
-// ValidateBuild checks that the plan can be executed by this worker.
+// ValidateBuild checks that the plan can be executed by this worker: it is
+// the plan of this release, and it names no change to the machine, since this
+// release implements none.
 func ValidateBuild(m protocol.Manifest, version string) error {
 	if err := m.Validate(); err != nil {
 		return err
 	}
-	if m.Version != version || m.Bitcoin.Version != component.BitcoinCoreVersion || m.LND.Version != component.LNDVersion || m.Syncthing.Version != component.SyncthingVersion {
-		return errors.New("release plan differs from this VPN build's pinned versions")
+	if m.Version != version {
+		return errors.New("release plan differs from this VPN build's version")
 	}
-	if m.Bitcoin.SHA256 != component.BitcoinCoreArchiveSHA256 || m.LND.SHA256 != component.LNDArchiveSHA256 || m.Syncthing.SHA256 != component.SyncthingArchiveSHA256 {
-		return errors.New("release plan archive hashes differ from this VPN build's pinned hashes")
-	}
-	for _, step := range m.HostSteps {
-		switch step {
-		case "lnd-service-v1":
-		case "lnd-config-v1":
-			// The installed helper picks the services to stop with its own
-			// code, which does not know this step.
-			if !slices.Contains(m.HostServices, protocol.LND) {
-				return errors.New("a plan with host step lnd-config-v1 must list lnd in host_services")
-			}
-		default:
-			return fmt.Errorf("this worker does not implement host step %q", step)
-		}
+	if len(m.HostSteps) > 0 {
+		return fmt.Errorf("this worker does not implement host step %q", m.HostSteps[0])
 	}
 	return nil
 }

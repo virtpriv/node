@@ -9,31 +9,28 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
-
-	"github.com/virtpriv/node/internal/config"
 )
 
 // The ledger is root-private historical authority for exactly one bounded
-// base-install lifecycle. It records immutable resume context, completed base
-// steps, and a terminal status. It never records add-ons, later settings,
-// upgrades, or present-tense service health.
-const ledgerSchema = 1
+// base-install lifecycle. It records completed base steps and a terminal
+// status. It never records add-ons, later settings, upgrades, or
+// present-tense service health.
+//
+// The schema is 2. Number 1 was the record of the Bitcoin and Lightning node,
+// which is refused.
+const ledgerSchema = 2
 
 const (
 	ledgerInProgress = "in_progress"
 	ledgerComplete   = "complete"
 )
 
-// The install runs the host steps, then the Bitcoin and Lightning steps, then
-// the last host steps. The install record names the programs of the middle
-// group, Bitcoin Core and LND in this release, which installs them every
-// time. They run before root's SSH login goes off, so an unattended install,
-// which shows its password only at the end, stays reachable as root through
-// the long downloads.
-var hostSetupStepKeys = []string{
+// The install's steps, in the order they run. Root's SSH login goes off late,
+// at ssh.harden, so an unattended install, which shows its password only at
+// the end, stays reachable as root through the package upgrade.
+var baseInstallStepKeys = []string{
 	"binary.install",
 	"apt.base",
 	"firewall",
@@ -47,74 +44,29 @@ var hostSetupStepKeys = []string{
 	"base.upgrade",
 	"security",
 	"swap.zram",
-}
-
-var bitcoinLightningStepKeys = []string{
-	"service-identities.v1",
-	"btc.download",
-	"btc.verify",
-	"btc.install",
-	"btc.start",
-	"lnd.download",
-	"lnd.verify",
-	"lnd.install",
-	"lnd.start",
-	"lnd.tls-san",
-	"lnd.certwatch",
-	"lnd.tls-stage",
-}
-
-var hostFinishStepKeys = []string{
 	"ssh.harden",
 	"journal.access",
 	"helper.enable",
-	"shellenv",
 	"releases.folder",
 }
-
-var baseInstallStepKeys = slices.Concat(
-	hostSetupStepKeys, bitcoinLightningStepKeys, hostFinishStepKeys)
 
 type ledgerEntry struct {
 	CompletedAt string `json:"completed_at"`
 	Version     string `json:"version"`
 }
 
-type installContext struct {
-	Network        string `json:"network"`
-	InitialP2PMode string `json:"initial_p2p_mode"`
-	Bitcoin        string `json:"bitcoin"`
-	Lightning      string `json:"lightning"`
-	DbCacheMB      *int   `json:"db_cache_mb,omitempty"`
-}
-
-// newInstallContext is the context every install of this release starts
-// with: Tor only, Bitcoin Core and LND.
-func newInstallContext(network string) installContext {
-	return installContext{
-		Network: network, InitialP2PMode: "tor",
-		Bitcoin: config.BitcoinCore, Lightning: config.LightningLND,
-	}
-}
-
 type installLedger struct {
-	Schema  int                    `json:"schema"`
-	Status  string                 `json:"status"`
-	Context installContext         `json:"context"`
-	Steps   map[string]ledgerEntry `json:"steps"`
+	Schema int                    `json:"schema"`
+	Status string                 `json:"status"`
+	Steps  map[string]ledgerEntry `json:"steps"`
 }
 
-func newLedger(ctx installContext) (*installLedger, error) {
-	l := &installLedger{
-		Schema:  ledgerSchema,
-		Status:  ledgerInProgress,
-		Context: ctx,
-		Steps:   map[string]ledgerEntry{},
+func newLedger() *installLedger {
+	return &installLedger{
+		Schema: ledgerSchema,
+		Status: ledgerInProgress,
+		Steps:  map[string]ledgerEntry{},
 	}
-	if err := validateLedger(l); err != nil {
-		return nil, err
-	}
-	return l, nil
 }
 
 func parseLedger(data []byte) (*installLedger, error) {
@@ -159,24 +111,6 @@ func validateLedger(l *installLedger) error {
 	if l.Status != ledgerInProgress && l.Status != ledgerComplete {
 		return fmt.Errorf("invalid ledger status %q", l.Status)
 	}
-	if err := config.ValidateNetwork(l.Context.Network); err != nil {
-		return fmt.Errorf("invalid install network %q", l.Context.Network)
-	}
-	// Every install starts Tor only. Hybrid comes later, through the Hybrid
-	// upgrade, which saves the address the owner reviewed.
-	if l.Context.InitialP2PMode != "tor" {
-		return fmt.Errorf("invalid initial P2P mode %q",
-			l.Context.InitialP2PMode)
-	}
-	if err := config.ValidateBitcoin(l.Context.Bitcoin); err != nil {
-		return fmt.Errorf("invalid Bitcoin part %q", l.Context.Bitcoin)
-	}
-	if err := config.ValidateLightning(l.Context.Lightning); err != nil {
-		return fmt.Errorf("invalid Lightning part %q", l.Context.Lightning)
-	}
-	if l.Context.DbCacheMB != nil && !validDbCache(*l.Context.DbCacheMB) {
-		return fmt.Errorf("invalid db cache %d", *l.Context.DbCacheMB)
-	}
 	if l.Steps == nil {
 		return fmt.Errorf("ledger steps must be an object")
 	}
@@ -191,9 +125,6 @@ func validateLedger(l *installLedger) error {
 		if _, err := time.Parse(time.RFC3339, entry.CompletedAt); err != nil {
 			return fmt.Errorf("step %q has invalid completed_at: %w", key, err)
 		}
-	}
-	if len(l.Steps) > 0 && l.Context.DbCacheMB == nil {
-		return fmt.Errorf("ledger records install steps without a db cache decision")
 	}
 	if !validInstallProgressSubset(l.Steps) {
 		return fmt.Errorf("ledger step set is not a reachable base-install state")
@@ -215,10 +146,6 @@ func validInstallProgressSubset(steps map[string]ledgerEntry) bool {
 		}
 	}
 	return len(steps) <= len(baseInstallStepKeys)
-}
-
-func validDbCache(v int) bool {
-	return v == 512 || v == 1024 || v == 2048
 }
 
 func baseStepKeySet() map[string]bool {
@@ -257,18 +184,6 @@ func (l *installLedger) markDone(key, version string) error {
 		CompletedAt: time.Now().UTC().Format(time.RFC3339),
 		Version:     version,
 	}
-	return nil
-}
-
-func (l *installLedger) setDbCache(v int) error {
-	if !validDbCache(v) {
-		return fmt.Errorf("invalid db cache %d", v)
-	}
-	if l.Context.DbCacheMB != nil && *l.Context.DbCacheMB != v {
-		return fmt.Errorf("db cache is already recorded as %d, refusing %d",
-			*l.Context.DbCacheMB, v)
-	}
-	l.Context.DbCacheMB = &v
 	return nil
 }
 

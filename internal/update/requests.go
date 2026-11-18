@@ -127,14 +127,7 @@ func Prepare(current, version string) (protocol.Review, error) {
 		onRecord = previous.Review.Digest
 	}
 	removeEarlierReviews(Root, onRecord)
-	cfg, err := config.Load()
-	if err != nil {
-		return none, err
-	}
-	source, err := host.ObserveUpdateVersions(current, cfg)
-	if err != nil {
-		return none, err
-	}
+	source := protocol.Versions{VPN: current}
 	work, err := os.MkdirTemp(Root, "prepare-")
 	if err != nil {
 		return none, err
@@ -180,7 +173,7 @@ func Prepare(current, version string) (protocol.Review, error) {
 	if err != nil {
 		return none, err
 	}
-	m, first, err := protocol.Admission(data, version, current, source, cfg.Network, failed)
+	m, first, err := protocol.Admission(data, version, current, source, failed)
 	if err != nil {
 		return none, err
 	}
@@ -203,7 +196,7 @@ func Prepare(current, version string) (protocol.Review, error) {
 	if err != nil {
 		return none, err
 	}
-	p := prepared{Review: protocol.Review{Digest: id, Manifest: m, Source: source, Network: cfg.Network, KeyServerUnreachable: keyCheck.WebsiteUnreachable, FromFolder: fromFolder}, WorkerHash: workerHash, PlanHash: planHash, ConfigHash: configHash, Previous: failed}
+	p := prepared{Review: protocol.Review{Digest: id, Manifest: m, Source: source, KeyServerUnreachable: keyCheck.WebsiteUnreachable, FromFolder: fromFolder}, WorkerHash: workerHash, PlanHash: planHash, ConfigHash: configHash, Previous: failed}
 	p.Review.Token, err = approvalToken(p)
 	if err != nil {
 		return none, err
@@ -282,14 +275,11 @@ func ReadReview(token string) (protocol.Review, error) {
 
 type nodeObservation struct {
 	source     protocol.Versions
-	config     *config.AppConfig
 	configHash string
 }
 
 // Admission owns the approved record and its durable successor. Host reads and
 // launcher installation are separate boundaries, called under the mutation lock.
-// Admission does not ask whether the affected services run: the worker does,
-// before it changes anything.
 type admissionOps struct {
 	observe  func() (nodeObservation, error)
 	launcher func() error
@@ -298,16 +288,11 @@ type admissionOps struct {
 func startLocked(current, token, jobID string) error {
 	return acceptUpdate(Root, token, jobID, admissionOps{
 		observe: func() (nodeObservation, error) {
-			cfg, err := config.Load()
-			if err != nil {
-				return nodeObservation{}, err
-			}
-			source, err := host.ObserveUpdateVersions(current, cfg)
-			if err != nil {
+			if _, err := config.Load(); err != nil {
 				return nodeObservation{}, err
 			}
 			hash, err := files.Hash(paths.ConfigFile)
-			return nodeObservation{source: source, config: cfg, configHash: hash}, err
+			return nodeObservation{source: protocol.Versions{VPN: current}, configHash: hash}, err
 		},
 		launcher: func() error {
 			// Retain the working executable as the boot/recovery launcher.
@@ -350,14 +335,14 @@ func acceptUpdate(root, token, jobID string, ops admissionOps) error {
 	if err != nil {
 		return err
 	}
-	source, cfg, configHash := node.source, node.config, node.configHash
+	source, configHash := node.source, node.configHash
 	if source != p.Review.Source || configHash != p.ConfigHash {
 		return errors.New("node changed since review, review the release again")
 	}
-	if failed != "" && (cfg.Network != previous.Review.Network || configHash != previous.ConfigHash) {
+	if failed != "" && configHash != previous.ConfigHash {
 		return errors.New("node configuration changed during the failed update, resolve that change before recovery")
 	}
-	if err := p.Review.Manifest.AdmitInstalled(source, cfg.Network, failed); err != nil {
+	if err := p.Review.Manifest.Admit(source, failed); err != nil {
 		return err
 	}
 	if err := verifyHash(filepath.Join(root, id, "vpn"), p.WorkerHash); err != nil {
@@ -366,15 +351,16 @@ func acceptUpdate(root, token, jobID string, ops admissionOps) error {
 	if err := verifyHash(filepath.Join(root, id, "update.json"), p.PlanHash); err != nil {
 		return err
 	}
-	j := &job{Schema: 1, Review: p.Review, WorkerHash: p.WorkerHash, PlanHash: p.PlanHash, ConfigHash: configHash, Phase: "accepted", Step: "Update accepted", Started: map[protocol.Component]bool{}, MayHaveRun: map[protocol.Component]bool{}, Completed: map[string]bool{}, BinaryHashes: map[string]string{}, Affected: p.Review.Manifest.Affected(source), JobID: jobID, Accepted: time.Now().UTC()}
+	j := &job{Schema: jobSchema, Review: p.Review, WorkerHash: p.WorkerHash, PlanHash: p.PlanHash, ConfigHash: configHash, Phase: "accepted", Step: "Update accepted", JobID: jobID, Accepted: time.Now().UTC()}
 	// The job record keeps the same fields as before: every later worker has
 	// to read it, and the notice has served its purpose once approved.
 	j.Review.KeyServerUnreachable = false
 	j.Previous = failed
 	if failed != "" {
 		// A repair keeps the failed update's cancellation boundary. Its worker
-		// reads the remaining duties from the record retained below, which a
-		// later worker may have written in a form this helper cannot interpret.
+		// can read anything else it needs from the record retained below, which
+		// a later worker may have written in a form the installed side cannot
+		// interpret.
 		j.HostChanges = previous.HostChanges
 	}
 
@@ -427,7 +413,7 @@ func Resume(id string, busy func() error) (protocol.Status, error) {
 }
 
 // retryUpdate records explicit consent to try again. The worker decides where
-// to resume and keeps the evidence that component data may have been migrated.
+// to resume.
 func retryUpdate(root, id string) error {
 	j, err := loadRecord(root)
 	if err != nil {
@@ -436,7 +422,7 @@ func retryUpdate(root, id string) error {
 	if j == nil || !j.active() || j.Review.Digest != id {
 		return errors.New("update identity changed, refresh its status")
 	}
-	return amendRecord(root, map[string]any{"phase": "retry", "error": nil, "failure": nil, "next": nil, "advice": nil})
+	return amendRecord(root, map[string]any{"phase": "retry", "error": nil, "next": nil, "advice": nil})
 }
 
 func Status() (protocol.Status, error) {
@@ -450,13 +436,6 @@ func Status() (protocol.Status, error) {
 	s := j.status()
 	s.Running = system.IsServiceActive(Service)
 	s.Cancellable = j.active() && !j.HostChanges && !s.Running
-	if j.Phase == "waiting-unlock" {
-		p, err := config.NetworkConfigFromName(j.Review.Network)
-		if err != nil {
-			return s, err
-		}
-		s.WalletNetwork = p.LNDNetwork
-	}
 	return s, nil
 }
 
@@ -479,14 +458,9 @@ func (r *record) status() protocol.Status {
 			}
 		}
 	}
-	// A code is passed only with the error it explains, and only in a shape
-	// this release can read. Anything else gets the screen's general advice.
-	var f protocol.Failure
-	if r.Error != "" && json.Unmarshal(r.Failure, &f) == nil && f.Readable() {
-		s.Failure = &f
-	}
-	// The next step and advice pass the same way, so later values reach the
-	// screen, which ignores a next step it does not know.
+	// The next step and advice pass only with the error they explain, and only
+	// in a shape this release can read, so later values reach the screen,
+	// which ignores a next step it does not know.
 	var next protocol.Next
 	if r.Error != "" && json.Unmarshal(r.Next, &next) == nil && next.Readable() {
 		s.Next = next
@@ -570,7 +544,7 @@ func cancelUpdate(root, id string) error {
 	if !j.active() || j.HostChanges {
 		return errors.New("host changes may have begun, complete or repair this update")
 	}
-	return amendRecord(root, map[string]any{"phase": "canceled", "step": "Update canceled before host changes", "error": nil, "failure": nil, "next": nil, "advice": nil, "ended": time.Now().UTC()})
+	return amendRecord(root, map[string]any{"phase": "canceled", "step": "Update canceled before host changes", "error": nil, "next": nil, "advice": nil, "ended": time.Now().UTC()})
 }
 
 // removeEarlierReviews removes every review file, the folder of a review
@@ -579,8 +553,8 @@ func cancelUpdate(root, id string) error {
 // record of an earlier update, stay, since a repair reads them. Only files
 // and folders vpn made are removed, never a link, and other names are left
 // alone. A removal that fails is logged and the review goes on. Prepare is
-// v0.7.0's code on every node's first update, so a later release keeps what
-// it needs inside its job's folder.
+// the installed release's code on a node's first update, so a later release
+// keeps what it needs inside its job's folder.
 func removeEarlierReviews(root, current string) {
 	// Review files go first, so a review never names a folder half removed.
 	// While one is left, the release folders stay too.

@@ -25,7 +25,7 @@
 // Every request and outcome is logged to standard output, which journald
 // keeps under the name vpnd. The admin user can read that record
 // (systemd-journal group) but cannot rewrite it. Parameters are never
-// logged, because some carry secrets.
+// logged.
 package vpnd
 
 import (
@@ -87,11 +87,6 @@ func Serve(version string) error {
 	if err != nil {
 		// A missing admin account means the install is broken, not that
 		// everyone is welcome.
-		return err
-	}
-	// A password left by a vpnd that died between writing it and removing
-	// it. /run is memory only, so none survives a restart.
-	if err := clearCredentials(); err != nil {
 		return err
 	}
 	audit(`{"event":"start","version":%q,"api":[%d,%d]}`, version, api.MinVersion, api.Version)

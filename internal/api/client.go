@@ -28,7 +28,6 @@ import (
 const dialTimeout = 5 * time.Second
 
 // answerTimeout bounds reading the answer when the caller set no deadline.
-// The slowest answer is a credential copy waiting for LND's files.
 const answerTimeout = 5 * time.Minute
 
 // socket is vpnd's address. Tests point it elsewhere.

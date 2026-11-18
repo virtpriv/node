@@ -87,7 +87,7 @@ func TestReplacedFile(t *testing.T) {
 		locales  = "7f2a0f000000-7f2a0f400000 r--p 00000000 08:01 400100 /usr/lib/locale/locale-archive (deleted)"
 		memfd    = "7f2a0e000000-7f2a0e001000 r-xp 00000000 00:01 2051 /memfd:libffi (deleted)"
 		temp     = "7f2a0c001000-7f2a0c002000 r-xs 00000000 00:1f 77 /tmp/ffiXyZ12 (deleted)"
-		bitcoind = "55d0c0a00000-55d0c0b00000 r-xp 00028000 08:01 393500 /usr/local/bin/bitcoind (deleted)"
+		vpn      = "55d0c0a00000-55d0c0b00000 r-xp 00028000 08:01 393500 /usr/local/bin/vpn (deleted)"
 	)
 	for _, tc := range []struct {
 		name string
@@ -101,7 +101,7 @@ func TestReplacedFile(t *testing.T) {
 		{name: "a replaced data file", maps: []string{tor, locales}},
 		{name: "a memory file", maps: []string{tor, memfd}},
 		{name: "a temporary file", maps: []string{tor, temp}},
-		{name: "vpn's own program, replaced by a node update", maps: []string{bitcoind}},
+		{name: "vpn's own program, replaced by a node update", maps: []string{vpn}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := replacedFile(strings.Join(tc.maps, "\n") + "\n"); got != tc.want {
@@ -125,10 +125,10 @@ func TestRebootCheckProgramsStoppedAndEnded(t *testing.T) {
 	}
 	h := rebootHost{root: root, run: func(string, ...string) (string, error) {
 		return "Id=tor@default.service\nMainPID=4242\n\nId=ssh.service\nMainPID=700\n\n" +
-			"Id=bitcoind.service\nMainPID=0\n\nId=fail2ban.service\nMainPID=0", nil
+			"Id=fail2ban.service\nMainPID=0", nil
 	}}
 	reasons, err := h.programs()
-	if err == nil || !strings.Contains(err.Error(), "tor@default.service") || strings.Contains(err.Error(), "bitcoind") {
+	if err == nil || !strings.Contains(err.Error(), "tor@default.service") || strings.Contains(err.Error(), "fail2ban") {
 		t.Fatalf("error %v, want one naming only tor@default.service", err)
 	}
 	if len(reasons) != 1 || reasons[0].name != "ssh.service" {

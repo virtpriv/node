@@ -33,7 +33,7 @@ func run(env []string, name string, args ...string) error {
 }
 
 // requireRoot checks the process's effective UID. It never elevates privileges.
-// The root installer, vpnd, jobs and credential staging can use these wrappers.
+// The root installer, vpnd and its jobs can use these wrappers.
 // Unprivileged callers must use vpnd's fixed requests for root work.
 func requireRoot(name string) error {
 	if os.Geteuid() == 0 {
@@ -103,15 +103,6 @@ func RunOutputWithTimeout(timeout time.Duration, name string, args ...string) (s
 		return "", fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
 	}
 	return strings.TrimSpace(string(output)), nil
-}
-
-// RunRootOutputWithTimeout requires root and uses RunOutputWithTimeout's
-// output and timeout behavior, including its bounded wait for output.
-func RunRootOutputWithTimeout(timeout time.Duration, name string, args ...string) (string, error) {
-	if err := requireRoot(name); err != nil {
-		return "", err
-	}
-	return RunOutputWithTimeout(timeout, name, args...)
 }
 
 // RunCombinedOutput executes a command and returns combined stdout+stderr.
@@ -311,8 +302,7 @@ func torWrapper() string {
 }
 
 // ReadFileRoot requires the process to be root and returns os.ReadFile's result,
-// preserving errors for os.IsNotExist checks. Ordinary unprivileged TUI reads use
-// staged files. Separate jobs can refresh privileged evidence.
+// preserving errors for os.IsNotExist checks.
 func ReadFileRoot(path string) ([]byte, error) {
 	if os.Geteuid() == 0 {
 		return os.ReadFile(path)

@@ -59,19 +59,16 @@ type InstallEvent struct {
 // Stop prevents admission of another step. It does not kill an active subprocess
 // or undo its changes. Forced process death still relies on lifecycle resume.
 type InstallSession struct {
-	mu                      sync.Mutex
-	started, stopped        bool
-	runner                  *stepRunner
-	dec                     *InstallDecisions
-	persistDBCache          func(int) error
-	complete                func() error
-	needIdentity, needCache bool
-	// cacheMB is measured once, so a retried Start records the same value.
-	cacheMB       int
-	events        chan InstallEvent
-	done          chan struct{}
-	result        RunResult
-	completionErr error
+	mu               sync.Mutex
+	started, stopped bool
+	runner           *stepRunner
+	dec              *InstallDecisions
+	complete         func() error
+	needIdentity     bool
+	events           chan InstallEvent
+	done             chan struct{}
+	result           RunResult
+	completionErr    error
 	// began bounds the SSH log read, so only a login during this run counts.
 	began time.Time
 	// startErr is why the last Start was refused, kept for the shell if
@@ -79,27 +76,20 @@ type InstallSession struct {
 	startErr error
 }
 
-func newInstallSession(r *stepRunner, dec *InstallDecisions,
-	persistDBCache func(int) error, complete func() error,
-) *InstallSession {
-	s := &InstallSession{
-		runner: r, dec: dec, persistDBCache: persistDBCache, complete: complete,
+func newInstallSession(r *stepRunner, dec *InstallDecisions, complete func() error) *InstallSession {
+	return &InstallSession{
+		runner: r, dec: dec, complete: complete,
 		needIdentity: r.willRun("identity.access"),
-		needCache:    r.willRun("btc.install") && r.ledger.Context.DbCacheMB == nil,
 		// Each step emits running and finished, followed by one final event.
 		// A closed or failed frontend cannot block the installation worker.
 		events: make(chan InstallEvent, 2*len(r.steps)+1), done: make(chan struct{}),
 		result: classifyRun(r.steps, false, false, 0),
 		began:  time.Now(),
 	}
-	if s.needCache {
-		s.cacheMB = recommendedDbCache()
-	}
-	return s
 }
 
-// Start validates and freezes choices before admitting the first step. It may
-// be retried after a decision error, but a started or stopped session is final.
+// Start validates and freezes the password before admitting the first step. It
+// may be retried after a refusal, but a started or stopped session is final.
 func (s *InstallSession) Start(input InteractiveInput) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -114,12 +104,6 @@ func (s *InstallSession) Start(input InteractiveInput) error {
 		var err error
 		password, err = loginpassword.New(input.Password.Text())
 		if err != nil {
-			s.refuse(err)
-			return err
-		}
-	}
-	if s.needCache {
-		if err := s.persistDBCache(s.cacheMB); err != nil {
 			s.refuse(err)
 			return err
 		}

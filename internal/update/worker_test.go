@@ -5,39 +5,28 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
-	"github.com/virtpriv/node/internal/component"
 	"github.com/virtpriv/node/internal/update/files"
 	"github.com/virtpriv/node/internal/update/protocol"
 )
 
+// The worker runs only the plan of its own release, and no change to the
+// machine it does not implement. This release implements none, so a plan that
+// names one is refused before anything changes.
 func TestWorkerRejectsPlanForDifferentBuild(t *testing.T) {
 	m := workflowFixture().Review.Manifest
-	m.Bitcoin.Version, m.LND.Version, m.Syncthing.Version = component.BitcoinCoreVersion, component.LNDVersion, component.SyncthingVersion
-	m.Bitcoin.SHA256, m.LND.SHA256, m.Syncthing.SHA256 = component.BitcoinCoreArchiveSHA256, component.LNDArchiveSHA256, component.SyncthingArchiveSHA256
 	if err := ValidateBuild(m, "0.7.1"); err != nil {
 		t.Fatal(err)
 	}
-	for _, mismatch := range []string{"vpn", "bitcoin", "lnd", "syncthing", "archive hash", "host step"} {
-		t.Run(mismatch, func(t *testing.T) {
+	for name, change := range map[string]func(*protocol.Manifest){
+		"another version": func(m *protocol.Manifest) { m.Version = "0.7.2" },
+		"a host step":     func(m *protocol.Manifest) { m.HostSteps = []string{"unsupported-host-change"} },
+	} {
+		t.Run(name, func(t *testing.T) {
 			changed := m
-			switch mismatch {
-			case "vpn":
-				changed.Version = "0.7.2"
-			case "bitcoin":
-				changed.Bitcoin.Version = "999.0"
-			case "lnd":
-				changed.LND.Version = "999.0.0-beta"
-			case "syncthing":
-				changed.Syncthing.Version = "999.0.0"
-			case "archive hash":
-				changed.LND.SHA256 = strings.Repeat("b", 64)
-			case "host step":
-				changed.HostSteps = []string{"unsupported-host-change"}
-			}
+			change(&changed)
 			if err := changed.Validate(); err != nil {
 				t.Fatal("fixture must pass general plan validation", err)
 			}
@@ -48,27 +37,7 @@ func TestWorkerRejectsPlanForDifferentBuild(t *testing.T) {
 	}
 }
 
-// The installed helper works out which services an update stops with its own
-// code, which knows only lnd-service-v1. A plan with lnd-config-v1 must
-// therefore name lnd itself, or LND would keep running while its file is
-// rewritten.
-func TestWorkerNeedsLNDServiceForLNDConfigStep(t *testing.T) {
-	m := workflowFixture().Review.Manifest
-	m.Bitcoin.Version, m.LND.Version, m.Syncthing.Version = component.BitcoinCoreVersion, component.LNDVersion, component.SyncthingVersion
-	m.Bitcoin.SHA256, m.LND.SHA256, m.Syncthing.SHA256 = component.BitcoinCoreArchiveSHA256, component.LNDArchiveSHA256, component.SyncthingArchiveSHA256
-	m.HostSteps = []string{"lnd-config-v1"}
-	m.HostServices = []protocol.Component{protocol.LND}
-	if err := ValidateBuild(m, "0.7.1"); err != nil {
-		t.Fatal("plan with lnd-config-v1 and lnd refused:", err)
-	}
-	m.HostServices = nil
-	err := ValidateBuild(m, "0.7.1")
-	if err == nil || !strings.Contains(err.Error(), "host_services") {
-		t.Fatalf("plan with lnd-config-v1 and no lnd service: %v", err)
-	}
-}
-
-// The installed helper may understand less of a plan than the worker must.
+// The installed side may understand less of a plan than the worker must.
 // The worker therefore reads the approved plan bytes itself, in full.
 func TestWorkerReadsApprovedPlanInFull(t *testing.T) {
 	for _, tc := range []struct {
@@ -157,8 +126,10 @@ func workerFiles(t *testing.T, j *job) (string, string) {
 	return root, binary
 }
 
-func TestCommitRequiresLiveComponentsAndVerifiedBytes(t *testing.T) {
-	for _, failure := range []string{"", "bitcoin", "lnd", "syncthing", "worker", "destination", "guards"} {
+// The program is replaced only by the bytes the owner approved, and never
+// through a file another user could have changed.
+func TestCommitRequiresVerifiedBytes(t *testing.T) {
+	for _, failure := range []string{"", "worker", "destination"} {
 		t.Run("failure="+failure, func(t *testing.T) {
 			j := workflowFixture()
 			root, binary := workerFiles(t, j)
@@ -172,37 +143,9 @@ func TestCommitRequiresLiveComponentsAndVerifiedBytes(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			injected := errors.New("injected boundary failure")
-			var checked []protocol.Component
-			released := false
-			err := commitJob(root, binary, j, func(c protocol.Component) error {
-				data, err := os.ReadFile(binary)
-				if err != nil || string(data) != "old VPN" {
-					t.Fatal("published before all process checks", err)
-				}
-				checked = append(checked, c)
-				if string(c) == failure {
-					return injected
-				}
-				return nil
-			}, func(components []protocol.Component) error {
-				if err := verifyHash(binary, j.WorkerHash); err != nil {
-					t.Fatal("released guards before verified publication", err)
-				}
-				if !slices.Equal(checked, j.Affected) || !slices.Equal(components, j.Affected) {
-					t.Fatal("omitted affected service")
-				}
-				released = true
-				if failure == "guards" {
-					return injected
-				}
-				return nil
-			})
+			err := commitJob(root, binary, j)
 			if (err != nil) != (failure != "") {
 				t.Fatalf("wrong outcome: %v", err)
-			}
-			if slices.Contains([]string{"bitcoin", "lnd", "syncthing", "guards"}, failure) && !errors.Is(err, injected) {
-				t.Fatalf("lost boundary failure: %v", err)
 			}
 			if failure == "worker" && !strings.Contains(err.Error(), "integrity") {
 				t.Fatalf("wrong refusal: %v", err)
@@ -210,14 +153,12 @@ func TestCommitRequiresLiveComponentsAndVerifiedBytes(t *testing.T) {
 			if failure == "destination" && !strings.Contains(err.Error(), "unsafe update path") {
 				t.Fatalf("wrong refusal: %v", err)
 			}
-			published := failure == "" || failure == "guards"
 			want := "old VPN"
-			if published {
+			if failure == "" {
 				want = "new VPN"
 			}
-			data, readErr := os.ReadFile(binary)
-			if readErr != nil || string(data) != want || released != published {
-				t.Fatalf("wrong publication state: %q, guards=%v, err=%v", data, released, readErr)
+			if data, readErr := os.ReadFile(binary); readErr != nil || string(data) != want {
+				t.Fatalf("wrong publication state: %q, err=%v", data, readErr)
 			}
 		})
 	}
@@ -254,5 +195,33 @@ func TestSpaceNeedsAreCombinedPerFilesystem(t *testing.T) {
 				t.Fatalf("wrong outcome: %v", err)
 			}
 		})
+	}
+}
+
+// The update's first step refuses a node whose settings are not the ones the
+// owner reviewed the update for, or cannot be read.
+func TestNodeCheckRefusesChangedOrUnreadableSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"schema": 2}`), 0640); err != nil {
+		t.Fatal(err)
+	}
+	j := workflowFixture()
+	var err error
+	if j.ConfigHash, err = files.Hash(path); err != nil {
+		t.Fatal(err)
+	}
+	loads := func() error { return nil }
+	if err := checkNode(j, loads, path); err != nil {
+		t.Fatal("the reviewed settings were refused:", err)
+	}
+	unreadable := errors.New("config file: mode is 0600, want 0640")
+	if err := checkNode(j, func() error { return unreadable }, path); !errors.Is(err, unreadable) {
+		t.Fatalf("settings that cannot be read: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"schema": 2, "later": true}`), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkNode(j, loads, path); err == nil || !strings.Contains(err.Error(), "configuration changed") {
+		t.Fatalf("settings changed since the review: %v", err)
 	}
 }

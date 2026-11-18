@@ -224,36 +224,6 @@ func ReadAptTimers(ctx context.Context) ([]AptTimer, error) {
 	return timers, nil
 }
 
-// DirSize measures the disk space a directory tree uses, in bytes, with du.
-// Root only, because the data directories it is used on belong to service
-// users. The unprivileged status screen gets the LND size through vpnd's
-// dir-size read (which calls this as root) and the Bitcoin size from
-// bitcoind's own RPC. It never calls this directly.
-func DirSize(path string) (uint64, error) {
-	if os.Geteuid() != 0 {
-		return 0, errors.New("measuring a data folder requires root")
-	}
-	out, err := exec.Command("du", "-s", "-B1", path).Output()
-	if err != nil {
-		return 0, fmt.Errorf("du %s: %w", path, err)
-	}
-	bytes, ok := parseDu(string(out))
-	if !ok {
-		return 0, fmt.Errorf("du %s: unreadable output", path)
-	}
-	return bytes, nil
-}
-
-// parseDu reads du -s -B1 output, the bytes used, a tab and the path.
-func parseDu(out string) (uint64, bool) {
-	f := strings.Fields(out)
-	if len(f) < 1 {
-		return 0, false
-	}
-	bytes, err := strconv.ParseUint(f[0], 10, 64)
-	return bytes, err == nil
-}
-
 func IsServiceActive(name string) bool {
 	return exec.Command("systemctl", "is-active", "--quiet", name).Run() == nil
 }
@@ -267,7 +237,6 @@ var (
 
 // PublicIPv4 returns the server's public IPv4 address.
 // Uses the kernel routing table (no network call) and caches the result.
-// Only relevant in hybrid (clearnet+tor) P2P mode.
 func PublicIPv4() string {
 	ipOnce.Do(func() {
 		cachedIP = detectPublicIPv4()

@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/virtpriv/node/internal/config"
 	"github.com/virtpriv/node/internal/host"
 )
 
@@ -98,7 +97,7 @@ func installStartupFixture(
 		return preflight()
 	}
 	deps.initializeLifecycle = func(
-		lifecycleFS, identityLookup, installContext,
+		lifecycleFS, identityLookup,
 	) (*installLedger, error) {
 		initializeCalls++
 		return nil, errors.New("unexpected lifecycle initialization")
@@ -141,9 +140,6 @@ func captureRunInstallOutput(t *testing.T, fn func() error) (string, error) {
 func completeLifecycleFixture(t *testing.T, f *lifecycleFixture) {
 	t.Helper()
 	ledger := f.initialize(t)
-	if err := ledger.setDbCache(512); err != nil {
-		t.Fatal(err)
-	}
 	for _, key := range baseInstallStepKeys {
 		if err := ledger.markDone(key, "0.7.0"); err != nil {
 			t.Fatal(err)
@@ -212,7 +208,7 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 			}
 		}},
 		{"conflicting bootstrap evidence", func(t *testing.T, f *lifecycleFixture) {
-			f.seedBootstrap(t, 1)
+			f.seedBootstrap(t)
 			if err := os.WriteFile(f.fs.unmarkedPaths[1],
 				[]byte("preserve me"), 0o600); err != nil {
 				t.Fatal(err)
@@ -283,9 +279,6 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 	t.Run("no system bus after step 2", func(t *testing.T) {
 		f := newLifecycleFixture(t)
 		ledger := f.initialize(t)
-		if err := ledger.setDbCache(512); err != nil {
-			t.Fatal(err)
-		}
 		for _, key := range baseInstallStepKeys[:2] {
 			if err := ledger.markDone(key, "0.7.0"); err != nil {
 				t.Fatal(err)
@@ -349,8 +342,7 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 }
 
 func TestBaseInstallStepsMatchLedgerSchema(t *testing.T) {
-	cfg := config.Default()
-	steps := buildInstallSteps(cfg, &InstallDecisions{}, t.TempDir(), nil)
+	steps := buildInstallSteps(&InstallDecisions{}, nil)
 	if err := validateBaseInstallSteps(steps); err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +364,7 @@ func unexpectedInstallFrontend(t *testing.T) InstallFrontend {
 // stepIndex finds a step in the install list by its key.
 func stepIndex(t *testing.T, key string) int {
 	t.Helper()
-	for i, s := range buildInstallSteps(config.Default(), &InstallDecisions{}, t.TempDir(), nil) {
+	for i, s := range buildInstallSteps(&InstallDecisions{}, nil) {
 		if s.Key == key {
 			return i
 		}
@@ -395,20 +387,15 @@ func TestPackageUpgradeRunsBehindTorAndFirewallStaysFirst(t *testing.T) {
 	if at("base.upgrade") < at("apt.tor") {
 		t.Fatal("the package upgrade runs before apt uses Tor")
 	}
-	if at("btc.download") < at("base.upgrade") {
-		t.Fatal("the package upgrade runs after the node software downloads")
-	}
 }
 
 // fail2ban and compressed swap are Debian packages, so they come after the
-// upgrade, which leaves apt's lists fresh through Tor. Both are on before
-// Bitcoin Core: fail2ban guards SSH logins, and compressed swap is there for
-// Core's first sync, when memory is shortest.
-func TestDebianPackagesComeBetweenTheUpgradeAndBitcoinCore(t *testing.T) {
+// upgrade, which leaves apt's lists fresh through Tor.
+func TestDebianPackagesComeAfterTheUpgrade(t *testing.T) {
 	at := func(key string) int { return stepIndex(t, key) }
 	for _, key := range []string{"security", "swap.zram"} {
-		if at(key) < at("base.upgrade") || at(key) > at("btc.download") {
-			t.Fatalf("%s is not between the package upgrade and Bitcoin Core", key)
+		if at(key) < at("base.upgrade") {
+			t.Fatalf("%s comes before the package upgrade", key)
 		}
 	}
 }
@@ -443,7 +430,7 @@ func TestPackageUpgradeConfirmsTorBeforeItReportsDone(t *testing.T) {
 			return nil
 		}
 		var step *InstallStep
-		steps := buildInstallSteps(config.Default(), &InstallDecisions{}, t.TempDir(), nil)
+		steps := buildInstallSteps(&InstallDecisions{}, nil)
 		for i := range steps {
 			if steps[i].Key == "base.upgrade" {
 				step = &steps[i]

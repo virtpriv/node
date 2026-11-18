@@ -19,6 +19,7 @@ import (
 
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/system"
+	"github.com/virtpriv/node/internal/update/files"
 )
 
 // The suites and components of Debian 13. They change with the release that
@@ -1116,11 +1117,11 @@ func (h aptHost) configureAptTor(write func(string, []byte, os.FileMode) error) 
 // vpn's. apt skips that suffix by its own default (Dir::Ignore-Files-Silently,
 // apt 3.0.3 init.cc line 175), and the owner keeps the original text.
 func (h aptHost) switchOffMachineSources() error {
-	files, err := h.aptSourceFiles()
+	sources, err := h.aptSourceFiles()
 	if err != nil {
 		return err
 	}
-	for _, file := range files {
+	for _, file := range sources {
 		if file == paths.AptSources {
 			continue
 		}
@@ -1131,7 +1132,7 @@ func (h aptHost) switchOffMachineSources() error {
 		if err := os.Rename(h.path(file), off); err != nil {
 			return fmt.Errorf("switch off %s: %w", file, unwrapPath(err))
 		}
-		if err := syncDir(filepath.Dir(off)); err != nil {
+		if err := files.Sync(filepath.Dir(off)); err != nil {
 			return fmt.Errorf("switch off %s: %w", file, err)
 		}
 	}

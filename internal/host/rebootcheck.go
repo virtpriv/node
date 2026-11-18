@@ -15,9 +15,9 @@ import (
 )
 
 // rebootCheckUnits are the services that run programs from Debian's packages
-// and keep running across an update. LND and vpn's helper are built with no
-// outside libraries, so Debian's updates never leave them on old code.
-var rebootCheckUnits = []string{"tor@default.service", "ssh.service", "bitcoind.service", "fail2ban.service"}
+// and keep running across an update. vpnd is built with no outside libraries,
+// so Debian's updates never leave it on old code.
+var rebootCheckUnits = []string{"tor@default.service", "ssh.service", "fail2ban.service"}
 
 // rebootReason is one reason to restart. name goes in the .pkgs file, text is
 // for people.

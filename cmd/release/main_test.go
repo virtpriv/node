@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/virtpriv/node/internal/component"
 	"github.com/virtpriv/node/internal/host"
 	"github.com/virtpriv/node/internal/release"
 	"github.com/virtpriv/node/internal/update/protocol"
@@ -118,7 +117,7 @@ func TestReleaseRefusesInvalidPlanOrCompilerBeforeBuilding(t *testing.T) {
 		compiler string
 		want     string
 	}{
-		{"build mismatch", func(m *protocol.Manifest) { m.Bitcoin.Version = "999.0" }, "", "pinned versions"},
+		{"build mismatch", func(m *protocol.Manifest) { m.Version = "0.7.2" }, "", "VPN build's version"},
 		{"unsupported host step", func(m *protocol.Manifest) { m.HostSteps = []string{"unknown-step"} }, "", "does not implement host step"},
 		{"wrong compiler", nil, "go0.0.0", "release build requires"},
 	} {
@@ -204,12 +203,7 @@ func planFixture(version string) protocol.Manifest {
 	return protocol.Manifest{
 		Protocol: protocol.Protocol, Platform: "debian-13-amd64", Version: version,
 		Summary: "Test fixture only", MinimumFreeMiB: 2048,
-		Sources:   []protocol.Versions{{VPN: "0.7.0", Bitcoin: component.BitcoinCoreVersion, LND: component.LNDVersion}},
-		Networks:  []string{"public-signet"},
-		Bitcoin:   protocol.Artifact{Version: component.BitcoinCoreVersion, SHA256: component.BitcoinCoreArchiveSHA256},
-		LND:       protocol.Artifact{Version: component.LNDVersion, SHA256: component.LNDArchiveSHA256},
-		Syncthing: protocol.Artifact{Version: component.SyncthingVersion, SHA256: component.SyncthingArchiveSHA256},
-		HostSteps: []string{"lnd-service-v1"},
+		Sources: []protocol.Versions{{VPN: "0.7.0"}},
 	}
 }
 

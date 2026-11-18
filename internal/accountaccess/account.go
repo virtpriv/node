@@ -39,7 +39,7 @@ func (a Account) KeyDiscoverySupported() bool {
 	switch a.Name {
 	case "root", "vpn":
 		return true
-	case "bitcoin", "bitcoind", "lnd", "syncthing", "debian-tor", "nobody":
+	case "debian-tor", "nobody":
 		return false
 	}
 	switch filepath.Base(a.Shell) {

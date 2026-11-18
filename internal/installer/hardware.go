@@ -3,9 +3,8 @@
 package installer
 
 // The installer measures the machine it runs on, memory from
-// /proc/meminfo and the size of the filesystem that will hold Bitcoin
-// Core's data. Preflight refuses a machine below the limits set here, and
-// the measured memory sets Bitcoin Core's database cache without asking.
+// /proc/meminfo and the size of the filesystem that holds /var/lib.
+// Preflight refuses a machine below the limits set here.
 
 import (
 	"math"
@@ -20,7 +19,7 @@ import (
 // Hardware is the measured machine, in bytes. A zero field was not measured.
 type Hardware struct {
 	MemoryBytes uint64 // MemTotal
-	DiskBytes   uint64 // filesystem holding the data dir
+	DiskBytes   uint64 // filesystem holding /var/lib
 }
 
 // The smallest machine the installer accepts. The README asks for 4 GB of
@@ -32,7 +31,7 @@ const (
 )
 
 // DetectHardware measures the machine. A measurement that fails leaves its
-// field zero, which the checks and RecommendDbCache treat as unknown.
+// field zero, which the checks treat as unknown.
 func DetectHardware() Hardware {
 	var hw Hardware
 
@@ -40,9 +39,8 @@ func DetectHardware() Hardware {
 		hw.MemoryBytes = parseMemTotal(string(data))
 	}
 
-	// The bitcoin data dir may not exist yet on a fresh machine, so measure
-	// the nearest existing parent. /var/lib exists on any Debian system.
-	for _, p := range []string{"/var/lib/bitcoin", "/var/lib", "/"} {
+	// /var/lib exists on any Debian system.
+	for _, p := range []string{"/var/lib", "/"} {
 		var st syscall.Statfs_t
 		if err := syscall.Statfs(p, &st); err == nil {
 			hw.DiskBytes = uint64(st.Blocks) * uint64(st.Bsize)
@@ -72,28 +70,3 @@ func parseMemTotal(meminfo string) uint64 {
 	}
 	return 0
 }
-
-// Memory from which Bitcoin Core gets a larger cache. LND gets memory first,
-// so a machine below 7.5 GB keeps the small cache and its first sync
-// takes longer. After the first sync the cache hardly matters.
-const (
-	mediumCacheMemoryBytes = 7_500 * bytesize.MB
-	largeCacheMemoryBytes  = 15 * bytesize.GB
-)
-
-// RecommendDbCache maps measured memory, in bytes, to Bitcoin Core's
-// dbcache, which Core reads in MiB. Unknown memory (zero) gets the small
-// cache.
-func RecommendDbCache(memBytes uint64) int {
-	switch {
-	case memBytes >= largeCacheMemoryBytes:
-		return 2048
-	case memBytes >= mediumCacheMemoryBytes:
-		return 1024
-	default:
-		return 512
-	}
-}
-
-// recommendedDbCache is the cache the installer records for this machine.
-func recommendedDbCache() int { return RecommendDbCache(detectHardware().MemoryBytes) }

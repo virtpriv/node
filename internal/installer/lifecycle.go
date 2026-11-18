@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	layoutVersionContent       = "service-layout=1\n"
+	// The layout is number 2. Number 1 was the Bitcoin and Lightning node's.
+	layoutVersionContent       = "service-layout=2\n"
 	maxLifecycleStateFileBytes = 64 * 1024
 	ledgerBootstrapSuffix      = ".bootstrap"
 	layoutBootstrapSuffix      = ".bootstrap"
@@ -34,14 +35,8 @@ const (
 )
 
 type lifecycleState struct {
-	Disposition      lifecycleDisposition
-	Ledger           *installLedger
-	BootstrapContext *installContext
-}
-
-type lifecycleBootstrapState struct {
-	path    string
-	context installContext
+	Disposition lifecycleDisposition
+	Ledger      *installLedger
 }
 
 type lifecycleDir struct {
@@ -56,7 +51,7 @@ type lifecycleFS struct {
 	ledger          string
 	passwordMarker  string
 	bootstrapPrefix string
-	bootstraps      []lifecycleBootstrapState
+	bootstrap       string
 	ancestors       []lifecycleDir
 	unmarkedPaths   []string
 	conflictPaths   []string
@@ -75,24 +70,15 @@ func productionLifecycleFS() lifecycleFS {
 		ledger:          paths.InstallStateFile,
 		passwordMarker:  paths.PasswordPendingMarker,
 		bootstrapPrefix: paths.InstallBootstrapPrefix,
-		bootstraps: []lifecycleBootstrapState{
-			{
-				path:    paths.InstallBootstrapMainnet,
-				context: newInstallContext("mainnet"),
-			},
-			{
-				path:    paths.InstallBootstrapTestnet4,
-				context: newInstallContext("testnet4"),
-			},
-			{
-				path:    paths.InstallBootstrapPublicSignet,
-				context: newInstallContext("public-signet"),
-			},
-		},
+		bootstrap:       paths.InstallBootstrap,
 		ancestors: []lifecycleDir{
 			{path: "/var", mode: 0o755},
 			{path: "/var/lib", mode: 0o755},
 		},
+		// What this installer writes, then what v0.6.x left on a machine
+		// under its earlier name, rlvpn. A machine that holds one of them
+		// without a valid install record is refused, never migrated. The
+		// v0.6.x entries go in a later release.
 		unmarkedPaths: []string{
 			paths.VarLibVPN,
 			paths.ConfigDir,
@@ -106,43 +92,18 @@ func productionLifecycleFS() lifecycleFS {
 			paths.JournaldDropIn,
 			paths.LogRotate,
 			paths.Fail2banJail,
-			paths.BitcoinDir,
-			paths.BitcoinDataDir,
-			paths.BitcoindService,
-			paths.LNDDir,
-			paths.LNDDataDir,
-			paths.LNDService,
-			paths.TorBitcoinP2P,
-			paths.TorLNDGRPC,
-			paths.TorLNDREST,
 			paths.TorrcDistrib,
-			paths.SyncthingDir,
-			paths.SyncthingDataDir,
-			paths.SyncthingService,
-			paths.TorSyncthing,
-			paths.TorSyncthingSync,
-			paths.StateDir,
-			paths.ExportDir,
-			paths.BackupWatchPath,
-			paths.BackupExportService,
-			paths.BackupCheckTimer,
-			paths.LNDCertWatchPath,
-			paths.LNDCertStageService,
 			paths.VPNDSocketUnit,
 			paths.VPNDServiceUnit,
 			paths.OldSSHDDropIn,
-			paths.OldInstallStateFile,
-			paths.OldPasswordPending,
-			paths.OldServiceLayoutMark,
 			"/etc/rlvpn",
 			"/usr/local/bin/rlvpn",
 			"/var/log/rlvpn.log",
 		},
+		// The v0.6.x traces again. Beside a valid install record they are a
+		// conflict.
 		conflictPaths: []string{
 			paths.OldSSHDDropIn,
-			paths.OldInstallStateFile,
-			paths.OldPasswordPending,
-			paths.OldServiceLayoutMark,
 			"/etc/rlvpn",
 			"/usr/local/bin/rlvpn",
 			"/var/log/rlvpn.log",
@@ -178,8 +139,8 @@ func classifyLifecycleState(
 	if err != nil {
 		return lifecycleState{}, err
 	}
-	if bootstrap != nil {
-		return classifyBootstrapLifecycle(fs, lookup, *bootstrap)
+	if bootstrap {
+		return classifyBootstrapLifecycle(fs, lookup)
 	}
 
 	_, markerErr := os.Lstat(fs.layoutVersion)
@@ -284,55 +245,40 @@ func classifyLifecycleState(
 	}
 }
 
-func inspectLifecycleBootstrap(
-	fs lifecycleFS,
-) (*lifecycleBootstrapState, error) {
-	known := make(map[string]bool, len(fs.bootstraps))
-	for _, candidate := range fs.bootstraps {
-		known[candidate.path] = true
-	}
+// inspectLifecycleBootstrap reports whether this installer's bootstrap file
+// is present and safe. Any other name with the bootstrap prefix is refused,
+// the names of the Bitcoin and Lightning node's installer among them.
+func inspectLifecycleBootstrap(fs lifecycleFS) (bool, error) {
 	bootstrapDir := filepath.Dir(fs.bootstrapPrefix)
 	entries, err := os.ReadDir(bootstrapDir)
 	if err != nil {
-		return nil, fmt.Errorf(
+		return false, fmt.Errorf(
 			"inspect lifecycle bootstrap directory %s: %w", bootstrapDir, err)
 	}
 	prefix := filepath.Base(fs.bootstrapPrefix)
 	for _, entry := range entries {
 		path := filepath.Join(bootstrapDir, entry.Name())
-		if strings.HasPrefix(entry.Name(), prefix) && !known[path] {
-			return nil, fmt.Errorf(
+		if strings.HasPrefix(entry.Name(), prefix) && path != fs.bootstrap {
+			return false, fmt.Errorf(
 				"unsupported or ambiguous lifecycle bootstrap %s, refusing to modify the host",
 				path)
 		}
 	}
-
-	var found *lifecycleBootstrapState
-	for i := range fs.bootstraps {
-		candidate := fs.bootstraps[i]
-		if _, err := os.Lstat(candidate.path); errors.Is(err, os.ErrNotExist) {
-			continue
-		} else if err != nil {
-			return nil, fmt.Errorf(
-				"inspect lifecycle bootstrap %s: %w", candidate.path, err)
-		}
-		if found != nil {
-			return nil, fmt.Errorf(
-				"conflicting lifecycle bootstrap state found (%s, %s), refusing to modify the host",
-				found.path, candidate.path)
-		}
-		if err := validateBootstrapFile(candidate.path, 0); err != nil {
-			return nil, fmt.Errorf(
-				"unsafe lifecycle bootstrap %s: %w", candidate.path, err)
-		}
-		copy := candidate
-		found = &copy
+	if _, err := os.Lstat(fs.bootstrap); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf(
+			"inspect lifecycle bootstrap %s: %w", fs.bootstrap, err)
 	}
-	return found, nil
+	if err := validateBootstrapFile(fs.bootstrap, 0); err != nil {
+		return false, fmt.Errorf(
+			"unsafe lifecycle bootstrap %s: %w", fs.bootstrap, err)
+	}
+	return true, nil
 }
 
 func classifyBootstrapLifecycle(
-	fs lifecycleFS, lookup identityLookup, bootstrap lifecycleBootstrapState,
+	fs lifecycleFS, lookup identityLookup,
 ) (lifecycleState, error) {
 	found, err := existingPathsExcept(
 		fs.unmarkedPaths, map[string]bool{fs.varLibVPN: true})
@@ -349,14 +295,11 @@ func classifyBootstrapLifecycle(
 			"lifecycle bootstrap conflicts with existing project state (%s), refusing to modify the host",
 			strings.Join(found, ", "))
 	}
-	if err := validateBootstrapTree(fs, bootstrap.context); err != nil {
+	if err := validateBootstrapTree(fs); err != nil {
 		return lifecycleState{}, fmt.Errorf(
 			"invalid lifecycle bootstrap state: %w", err)
 	}
-	ctx := bootstrap.context
-	return lifecycleState{
-		Disposition: lifecycleBootstrap, BootstrapContext: &ctx,
-	}, nil
+	return lifecycleState{Disposition: lifecycleBootstrap}, nil
 }
 
 func classifyUnmarkedLifecycle(
@@ -375,14 +318,16 @@ func classifyUnmarkedLifecycle(
 		return lifecycleState{Disposition: lifecyclePristine}, nil
 	}
 	return lifecycleState{}, fmt.Errorf(
-		"existing unmarked vpn/rlvpn state found (%s), v0.7.0 supports only a fresh machine or a recognized interrupted v0.7.0 install, no installation changes were made",
+		"existing vpn or rlvpn files found (%s). vpn installs only on a fresh machine or continues its own interrupted install. Nothing was changed.",
 		strings.Join(found, ", "))
 }
 
+// existingLifecycleIdentities finds the accounts and groups of vpn and of
+// v0.6.x, which ran as ripsline. An account of other software is not vpn's
+// to judge.
 func existingLifecycleIdentities(lookup identityLookup) ([]string, error) {
 	var found []string
-	for _, name := range []string{paths.AdminUser, bitcoinUser, lndUser,
-		syncthingUser, "ripsline"} {
+	for _, name := range []string{paths.AdminUser, "ripsline"} {
 		present, err := identityPresent(lookup.user, name)
 		if err != nil {
 			return nil, err
@@ -391,8 +336,7 @@ func existingLifecycleIdentities(lookup identityLookup) ([]string, error) {
 			found = append(found, "user:"+name)
 		}
 	}
-	for _, name := range []string{paths.AdminUser, bitcoinUser, lndUser,
-		syncthingUser, "ripsline", backupGroup} {
+	for _, name := range []string{paths.AdminUser, "ripsline"} {
 		present, err := identityPresent(lookup.group, name)
 		if err != nil {
 			return nil, err
@@ -491,7 +435,7 @@ func validateBootstrapFile(path string, maxBytes int64) error {
 	return nil
 }
 
-func validateBootstrapTree(fs lifecycleFS, ctx installContext) error {
+func validateBootstrapTree(fs lifecycleFS) error {
 	varLibPresent, err := lifecyclePathExists(fs.varLibVPN)
 	if err != nil {
 		return err
@@ -560,10 +504,8 @@ func validateBootstrapTree(fs lifecycleFS, ctx installContext) error {
 		if err != nil {
 			return fmt.Errorf("invalid bootstrap ledger: %w", err)
 		}
-		if !initialLedgerMatchesContext(ledger, ctx) {
-			return fmt.Errorf(
-				"bootstrap ledger is not the exact initial %s/%s state",
-				ctx.Network, ctx.InitialP2PMode)
+		if !isInitialLedger(ledger) {
+			return fmt.Errorf("bootstrap ledger is not the exact initial state")
 		}
 	}
 	if layoutStagePresent {
@@ -641,9 +583,10 @@ func lifecyclePathExists(path string) (bool, error) {
 	}
 }
 
-func initialLedgerMatchesContext(l *installLedger, ctx installContext) bool {
-	return l.Schema == ledgerSchema && l.Status == ledgerInProgress &&
-		sameInitialContext(l.Context, ctx) && len(l.Steps) == 0
+// isInitialLedger reports whether l is the record as lifecycle initialization
+// publishes it, with no step done.
+func isInitialLedger(l *installLedger) bool {
+	return l.Schema == ledgerSchema && l.Status == ledgerInProgress && len(l.Steps) == 0
 }
 
 type lifecycleInitBoundary string
@@ -663,28 +606,19 @@ const (
 type lifecycleInitHook func(lifecycleInitBoundary) error
 
 func initializeLifecycle(
-	fs lifecycleFS, lookup identityLookup, ctx installContext,
+	fs lifecycleFS, lookup identityLookup,
 ) (*installLedger, error) {
-	return initializeLifecycleWithHook(fs, lookup, ctx, nil)
+	return initializeLifecycleWithHook(fs, lookup, nil)
 }
 
 func initializeLifecycleWithHook(
-	fs lifecycleFS, lookup identityLookup, ctx installContext,
-	hook lifecycleInitHook,
+	fs lifecycleFS, lookup identityLookup, hook lifecycleInitHook,
 ) (*installLedger, error) {
-	ledger, err := newLedger(ctx)
-	if err != nil {
-		return nil, err
-	}
-	bootstrap, err := bootstrapForContext(fs, ctx)
-	if err != nil {
-		return nil, err
-	}
-	f, err := os.OpenFile(bootstrap.path,
+	f, err := os.OpenFile(fs.bootstrap,
 		os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"create lifecycle bootstrap %s: %w", bootstrap.path, err)
+			"create lifecycle bootstrap %s: %w", fs.bootstrap, err)
 	}
 	if err := f.Chmod(0o600); err != nil {
 		_ = f.Close()
@@ -697,40 +631,33 @@ func initializeLifecycleWithHook(
 	if err := f.Close(); err != nil {
 		return nil, fmt.Errorf("close lifecycle bootstrap: %w", err)
 	}
-	if err := syncLifecycleDir(filepath.Dir(bootstrap.path)); err != nil {
+	if err := syncLifecycleDir(filepath.Dir(fs.bootstrap)); err != nil {
 		return nil, fmt.Errorf("persist lifecycle bootstrap: %w", err)
 	}
 	if err := callLifecycleInitHook(hook, initBootstrapPublished); err != nil {
 		return nil, err
 	}
-	return completeLifecycleBootstrapWithHook(
-		fs, lookup, bootstrap.context, ledger, hook)
+	return completeLifecycleBootstrapWithHook(fs, lookup, hook)
 }
 
 func resumeLifecycleBootstrap(
-	fs lifecycleFS, lookup identityLookup, ctx installContext,
+	fs lifecycleFS, lookup identityLookup,
 ) (*installLedger, error) {
-	ledger, err := newLedger(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return completeLifecycleBootstrapWithHook(fs, lookup, ctx, ledger, nil)
+	return completeLifecycleBootstrapWithHook(fs, lookup, nil)
 }
 
 func completeLifecycleBootstrapWithHook(
-	fs lifecycleFS, lookup identityLookup, ctx installContext,
-	ledger *installLedger, hook lifecycleInitHook,
+	fs lifecycleFS, lookup identityLookup, hook lifecycleInitHook,
 ) (*installLedger, error) {
 	state, err := classifyLifecycleState(fs, lookup)
 	if err != nil {
 		return nil, err
 	}
-	if state.Disposition != lifecycleBootstrap ||
-		state.BootstrapContext == nil ||
-		!sameInitialContext(*state.BootstrapContext, ctx) {
+	if state.Disposition != lifecycleBootstrap {
 		return nil, fmt.Errorf(
 			"lifecycle bootstrap changed before initialization could resume")
 	}
+	ledger := newLedger()
 
 	varLibPresent, err := lifecyclePathExists(fs.varLibVPN)
 	if err != nil {
@@ -795,9 +722,9 @@ func completeLifecycleBootstrapWithHook(
 			return nil, err
 		}
 		published, err := parseLedger(data)
-		if err != nil || !initialLedgerMatchesContext(published, ctx) {
+		if err != nil || !isInitialLedger(published) {
 			return nil, fmt.Errorf(
-				"published bootstrap ledger no longer matches its context")
+				"published bootstrap ledger is no longer the initial state")
 		}
 		ledger = published
 	}
@@ -836,40 +763,16 @@ func completeLifecycleBootstrapWithHook(
 		return nil, err
 	}
 
-	bootstrap, err := bootstrapForContext(fs, ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := os.Remove(bootstrap.path); err != nil {
+	if err := os.Remove(fs.bootstrap); err != nil {
 		return nil, fmt.Errorf("remove lifecycle bootstrap: %w", err)
 	}
-	if err := syncLifecycleDir(filepath.Dir(bootstrap.path)); err != nil {
+	if err := syncLifecycleDir(filepath.Dir(fs.bootstrap)); err != nil {
 		return nil, fmt.Errorf("persist lifecycle bootstrap removal: %w", err)
 	}
 	if err := callLifecycleInitHook(hook, initBootstrapRemoved); err != nil {
 		return nil, err
 	}
 	return ledger, nil
-}
-
-func bootstrapForContext(
-	fs lifecycleFS, ctx installContext,
-) (lifecycleBootstrapState, error) {
-	for _, candidate := range fs.bootstraps {
-		if sameInitialContext(candidate.context, ctx) {
-			return candidate, nil
-		}
-	}
-	return lifecycleBootstrapState{}, fmt.Errorf(
-		"no lifecycle bootstrap path for initial context %q/%q",
-		ctx.Network, ctx.InitialP2PMode)
-}
-
-func sameInitialContext(a, b installContext) bool {
-	return a.Network == b.Network &&
-		a.InitialP2PMode == b.InitialP2PMode &&
-		a.Bitcoin == b.Bitcoin && a.Lightning == b.Lightning &&
-		a.DbCacheMB == nil && b.DbCacheMB == nil
 }
 
 func createBootstrapDir(path, parent string) error {

@@ -67,26 +67,28 @@ func TestSavedUpdateCanBeResumedWithoutReleaseDiscovery(t *testing.T) {
 	}
 }
 
+// continueStop is a stop a later release's worker leads to Continue. No
+// worker of this release sends one.
+func continueStop() protocol.Status {
+	return protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "failed", Active: true, Error: "stopped",
+		Next: protocol.NextContinue, Advice: "A program stopped as it does in normal use.\n\nSelect Continue."}
+}
+
 func TestContinueResumesAnExpectedStop(t *testing.T) {
-	for _, f := range []protocol.Failure{
-		{Code: protocol.FailureStopFailed, Service: protocol.LND},
-		{Code: protocol.FailureStartInterrupted, Service: protocol.LND},
-	} {
-		client := &nodeUpdateClientStub{status: protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "failed", Active: true, Error: "stopped", Failure: &f}}
-		s := NewNodeUpdateScreen(&ScreenContext{NodeUpdates: client, Version: "0.7.0"})
-		s.HandleMsg(s.Init()())
-		s.button = slices.Index(s.buttons(), "Continue")
-		if s.button < 0 {
-			t.Fatalf("%s offers no Continue", f.Code)
-		}
-		_, cmd := s.HandleKey("enter", tea.KeyPressMsg{})
-		if cmd == nil {
-			t.Fatalf("Continue did nothing after %s", f.Code)
-		}
-		s.HandleMsg(cmd())
-		if client.resumed != client.status.ID {
-			t.Fatalf("Continue did not resume the update after %s", f.Code)
-		}
+	client := &nodeUpdateClientStub{status: continueStop()}
+	s := NewNodeUpdateScreen(&ScreenContext{NodeUpdates: client, Version: "0.7.0"})
+	s.HandleMsg(s.Init()())
+	s.button = slices.Index(s.buttons(), "Continue")
+	if s.button < 0 {
+		t.Fatal("an expected stop offers no Continue")
+	}
+	_, cmd := s.HandleKey("enter", tea.KeyPressMsg{})
+	if cmd == nil {
+		t.Fatal("Continue did nothing")
+	}
+	s.HandleMsg(cmd())
+	if client.resumed != client.status.ID {
+		t.Fatal("Continue did not resume the update")
 	}
 }
 
@@ -97,7 +99,7 @@ type nodeUpdateClientStub struct {
 	status            protocol.Status
 	prepareErr        error
 	statusErr         error
-	// updateFirst maps a selected release to the one the helper names first.
+	// updateFirst maps a selected release to the one the node names first.
 	updateFirst map[string]string
 }
 
@@ -349,22 +351,22 @@ func readable(content []string, text string) bool {
 func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 	id := strings.Repeat("a", 64)
 	failed := func(text string, cancellable bool) protocol.Status {
-		return protocol.Status{ID: id, Version: "0.7.1", Phase: "failed", Step: "Stop LND", Error: text, Active: true, Cancellable: cancellable}
+		return protocol.Status{ID: id, Version: "0.7.1", Phase: "failed", Step: "Stop Tor", Error: text, Active: true, Cancellable: cancellable}
 	}
 	// A failed stop followed by a failed cleanup, as the worker joins them.
-	stop := "stop lnd: systemctl stop lnd.service: exit status 1: Job for lnd.service failed because the control process exited with error code.\n" +
-		"See \"systemctl status lnd.service\" and \"journalctl -xeu lnd.service\" for details.\n\n" +
-		"bitcoind did not stop cleanly, no binaries were replaced"
+	stop := "stop tor: systemctl stop tor.service: exit status 1: Job for tor.service failed because the control process exited with error code.\n" +
+		"See \"systemctl status tor.service\" and \"journalctl -xeu tor.service\" for details.\n\n" +
+		"fail2ban did not stop cleanly, no binaries were replaced"
 	refusal := "this installed combination and network have no tested transition in the release plan; install the release it names first and review again"
 	outage := "job-status: no answer from vpnd (dial unix /run/vpnd.sock: connect: no such file or directory). Check: systemctl status vpnd.socket, then journalctl -t vpnd"
 	var endless strings.Builder
 	for i := range 40 {
 		fmt.Fprintf(&endless, "step %d: the unit reported a failure that fills most of one row of this screen\n", i)
 	}
-	summary := strings.TrimSpace(strings.Repeat("Updates LND for a channel-closing fix and restarts it. ", 9))
+	summary := strings.TrimSpace(strings.Repeat("Updates Tor for a circuit-closing fix and restarts it. ", 9))
 	firstStop := strings.SplitN(stop, "\n", 2)[0]
-	changed := []string{firstStop, "Services may have been changed."}
-	unchanged := []string{"not enough free space", "No services were changed."}
+	changed := []string{firstStop, "The update may have changed this machine."}
+	unchanged := []string{"not enough free space", "Nothing was changed."}
 
 	cases := []struct {
 		name    string
@@ -403,9 +405,9 @@ func TestNodeUpdateScreenKeepsButtonsAndFailureTextReadable(t *testing.T) {
 		{name: "review with a long summary", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) {
 				s.review = &protocol.Review{Token: id, KeyServerUnreachable: true, Source: protocol.Versions{VPN: "0.7.0"},
-					Manifest: protocol.Manifest{Version: "0.7.1", Summary: summary, HostSteps: []string{"lnd-service-v1", "lnd-service-v2", "lnd-service-v3"}}}
+					Manifest: protocol.Manifest{Version: "0.7.1", Summary: summary, HostSteps: []string{"tor-service-v1", "tor-service-v2", "tor-service-v3"}}}
 			},
-			buttons: []string{"Cancel", "Install"}, shown: []string{summary, "lnd-service-v3", "Key server not reached"}},
+			buttons: []string{"Cancel", "Install"}, shown: []string{summary, "tor-service-v3", "Key server not reached"}},
 		{name: "failure with control characters", latest: "0.7.1",
 			prepare: func(_ *testing.T, s *NodeUpdateScreen) {
 				s.status = failed("first\rsecond\tthird\a \x1b[2Jfourth", false)
@@ -526,7 +528,7 @@ func spinTick(s *NodeUpdateScreen, msgs []tea.Msg) tea.Msg {
 // the spinner starts again once its screen shows.
 func TestStepSpinnerTicksOnlyWhileItsScreenShows(t *testing.T) {
 	running := protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "installing", Active: true, Running: true,
-		Steps: []string{"Check the node", "Stop lnd"}, StepNumber: 2}
+		Steps: []string{"Check the node", "Stop tor"}, StepNumber: 2}
 	ctx := &ScreenContext{NodeUpdates: &nodeUpdateClientStub{status: running}, Version: "0.7.0"}
 	s := NewNodeUpdateScreen(ctx)
 	m := Model{state: &RuntimeState{}, screenCtx: ctx, nav: NewNavSidebar(), activeTab: 1,
@@ -565,8 +567,7 @@ func TestRefreshDoesNotMoveFocus(t *testing.T) {
 	// Focus moves when a state appears. A refresh of the same state leaves
 	// the operator's own choice alone, so Enter never does what they did not
 	// choose.
-	f := protocol.Failure{Code: protocol.FailureStopFailed, Service: protocol.LND}
-	client := &nodeUpdateClientStub{status: protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "failed", Active: true, Error: "stopped", Failure: &f}}
+	client := &nodeUpdateClientStub{status: continueStop()}
 	s := NewNodeUpdateScreen(&ScreenContext{NodeUpdates: client, Version: "0.7.0"})
 	s.HandleMsg(s.Init()())
 	s.button = 0
@@ -580,8 +581,8 @@ func TestNextFromTheUpdateProgramLeadsAnUnknownStop(t *testing.T) {
 	// A later release's own stop of normal use, unknown to this screen,
 	// reaches it with its next step and words.
 	client := &nodeUpdateClientStub{status: protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "failed", Active: true,
-		Error: "syncthing was busy", Failure: &protocol.Failure{Code: "syncthing_busy", Service: protocol.Syncthing},
-		Next: protocol.NextContinue, Advice: "Syncthing was busy and has stopped now.\n\nSelect Continue."}}
+		Error: "a program was busy",
+		Next:  protocol.NextContinue, Advice: "A program was busy and has stopped now.\n\nSelect Continue."}}
 	s := NewNodeUpdateScreen(&ScreenContext{NodeUpdates: client, Version: "0.7.0"})
 	s.HandleMsg(s.Init()())
 	s.button = slices.Index(s.buttons(), "Continue")
@@ -596,12 +597,12 @@ func TestNextFromTheUpdateProgramLeadsAnUnknownStop(t *testing.T) {
 }
 
 func TestNextWithoutItsAdviceIsNotFollowed(t *testing.T) {
-	// The helper drops advice it cannot show. A next step left alone would
+	// The installed side drops advice it cannot show. A next step left alone would
 	// pair the update program's button with this screen's own words, so
 	// the screen then uses its own pair.
 	client := &nodeUpdateClientStub{status: protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "failed", Active: true,
-		Error: "syncthing was busy", Failure: &protocol.Failure{Code: "syncthing_busy", Service: protocol.Syncthing},
-		Next: protocol.NextContinue}}
+		Error: "a program was busy",
+		Next:  protocol.NextContinue}}
 	s := NewNodeUpdateScreen(&ScreenContext{NodeUpdates: client, Version: "0.7.0"})
 	s.HandleMsg(s.Init()())
 	if slices.Contains(s.buttons(), "Continue") {
@@ -613,8 +614,7 @@ func TestNextWithoutItsAdviceIsNotFollowed(t *testing.T) {
 // while that question is out still acts: Continue is drawn and sends the
 // request, and the late answer to the old question changes nothing.
 func TestContinueDuringAStatusCheckResumes(t *testing.T) {
-	f := protocol.Failure{Code: protocol.FailureStopFailed, Service: protocol.LND}
-	client := &nodeUpdateClientStub{status: protocol.Status{ID: strings.Repeat("a", 64), Version: "0.7.1", Phase: "failed", Active: true, Error: "stopped", Failure: &f}}
+	client := &nodeUpdateClientStub{status: continueStop()}
 	s := NewNodeUpdateScreen(&ScreenContext{NodeUpdates: client, Version: "0.7.0"})
 	s.HandleMsg(s.Init()())
 	_, check := s.HandleMsg(nodeUpdateTick{owner: s})

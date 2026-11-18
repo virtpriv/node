@@ -5,12 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
-	"github.com/virtpriv/node/internal/config"
-	"github.com/virtpriv/node/internal/update/protocol"
+	"github.com/virtpriv/node/internal/update/files"
 )
 
 func saveReview(t *testing.T, root string, p prepared) string {
@@ -36,9 +34,7 @@ func TestStartRechecksNodeAndWorkerBeforeAcceptingReview(t *testing.T) {
 			root, _ := workerFiles(t, j)
 			p := prepared{Review: j.Review, WorkerHash: j.WorkerHash, PlanHash: j.PlanHash, ConfigHash: j.ConfigHash}
 			token := saveReview(t, root, p)
-			cfg := config.Default()
-			cfg.Network = j.Review.Network
-			node := nodeObservation{source: j.Review.Source, config: cfg, configHash: j.ConfigHash}
+			node := nodeObservation{source: j.Review.Source, configHash: j.ConfigHash}
 			wantError := ""
 			wantLaunches := 0
 			switch change {
@@ -46,7 +42,7 @@ func TestStartRechecksNodeAndWorkerBeforeAcceptingReview(t *testing.T) {
 				node.configHash = strings.Repeat("b", 64)
 				wantError = "node changed since review"
 			case "source":
-				node.source.LND = "0.21.0-beta"
+				node.source.VPN = "0.6.9"
 				wantError = "node changed since review"
 			case "worker":
 				if err := os.WriteFile(filepath.Join(j.dir(root), "vpn"), []byte("changed worker"), 0700); err != nil {
@@ -103,59 +99,17 @@ func TestStartRechecksNodeAndWorkerBeforeAcceptingReview(t *testing.T) {
 	}
 }
 
-// A plan may name networks and services added after this helper was built.
-// The helper must still accept the job. The newer worker checks those names.
-func TestHelperAcceptsReviewOfPlanWithLaterNames(t *testing.T) {
-	j := workflowFixture()
-	j.Review.Manifest.Networks = append(j.Review.Manifest.Networks, "testnet5")
-	j.Review.Manifest.HostServices = []protocol.Component{"tor"}
-	root, _ := workerFiles(t, j)
-	p := prepared{Review: j.Review, WorkerHash: j.WorkerHash, PlanHash: j.PlanHash, ConfigHash: j.ConfigHash}
-	token := saveReview(t, root, p)
-	cfg := config.Default()
-	cfg.Network = j.Review.Network
-	err := acceptUpdate(root, token, "20261109-100000-aaaaaa", admissionOps{
-		observe: func() (nodeObservation, error) {
-			return nodeObservation{source: j.Review.Source, config: cfg, configHash: j.ConfigHash}, nil
-		},
-		launcher: func() error { return nil },
-	})
-	if err != nil {
-		t.Fatal("helper refused a plan over names it does not need:", err)
-	}
-	if r, err := loadRecord(root); err != nil || r == nil || !r.relaunch() {
-		t.Fatal("accepted job is not ready for its worker:", err)
-	}
-	cfg.Network = "mainnet"
-	if err := cancelUpdate(root, j.Review.Digest); err != nil {
-		t.Fatal(err)
-	}
-	if acceptUpdate(root, saveReview(t, root, p), "20261109-100000-aaaaaa", admissionOps{
-		observe: func() (nodeObservation, error) {
-			return nodeObservation{source: j.Review.Source, config: cfg, configHash: j.ConfigHash}, nil
-		},
-		launcher: func() error { return nil },
-	}) == nil {
-		t.Fatal("later names admitted a node on a network the plan does not list")
-	}
-}
-
+// A repair release follows a failed update. It is accepted only when its plan
+// names that failed release, and it keeps the failed update's record and its
+// answer to Cancel.
 func TestCorrectiveAdmissionPreservesFailedUpdateObligations(t *testing.T) {
 	for _, refusal := range []string{"", "ordinary release", "different failed update", "configuration", "unfinished"} {
 		t.Run("refusal="+refusal, func(t *testing.T) {
 			previous := workflowFixture()
-			previous.Phase = "failed"
-			previous.Completed["staged"], previous.HostChanges = true, true
-			previous.Started[protocol.LND], previous.MayHaveRun[protocol.LND] = true, true
-			previous.WalletPresent, previous.SyncthingID = true, "original device"
+			previous.Phase, previous.HostChanges = "failed", true
 			j := workflowFixture()
 			j.Review.Digest = strings.Repeat("b", 64)
 			j.Review.Manifest.Version = "0.7.2"
-			// Core and LND binaries were replaced by the failed update. The
-			// corrective plan alone would now affect only Syncthing.
-			j.Review.Source.Bitcoin = j.Review.Manifest.Bitcoin.Version
-			j.Review.Source.LND = j.Review.Manifest.LND.Version
-			j.Review.Manifest.Sources = []protocol.Versions{j.Review.Source}
 			j.Review.Manifest.RecoveryFrom = []string{previous.Review.Digest}
 			root, _ := workerFiles(t, j)
 			p := prepared{Review: j.Review, WorkerHash: j.WorkerHash, PlanHash: j.PlanHash, ConfigHash: j.ConfigHash, Previous: previous.Review.Digest}
@@ -171,7 +125,7 @@ func TestCorrectiveAdmissionPreservesFailedUpdateObligations(t *testing.T) {
 				p.ConfigHash = strings.Repeat("c", 64)
 				wantError = "configuration changed during the failed update"
 			case "unfinished":
-				previous.Phase = "checking"
+				previous.Phase = "committing"
 				wantError = "another update is unfinished"
 			}
 			if err := os.Mkdir(previous.dir(root), 0700); err != nil {
@@ -185,12 +139,10 @@ func TestCorrectiveAdmissionPreservesFailedUpdateObligations(t *testing.T) {
 				t.Fatal(err)
 			}
 			token := saveReview(t, root, p)
-			cfg := config.Default()
-			cfg.Network = p.Review.Network
 			launches := 0
 			err = acceptUpdate(root, token, "20261109-100000-aaaaaa", admissionOps{
 				observe: func() (nodeObservation, error) {
-					return nodeObservation{source: p.Review.Source, config: cfg, configHash: p.ConfigHash}, nil
+					return nodeObservation{source: p.Review.Source, configHash: p.ConfigHash}, nil
 				},
 				launcher: func() error { launches++; return nil },
 			})
@@ -205,113 +157,115 @@ func TestCorrectiveAdmissionPreservesFailedUpdateObligations(t *testing.T) {
 				t.Fatal("corrective admission failed", err)
 			}
 			j, err = loadJob(root)
-			if err != nil || j == nil {
+			if err != nil || j == nil || j.Previous != previous.Review.Digest {
 				t.Fatal("corrective record missing", err)
 			}
-			// The helper only carries the cancellation boundary. The repair
-			// worker reads the failed job's duties from its retained record.
+			// The installed side carries the cancellation boundary, and keeps
+			// the failed update's record for the repair's worker.
 			if cancelUpdate(root, j.Review.Digest) == nil {
 				t.Fatal("repair of a changed node could be cancelled before its worker ran")
 			}
-			if err := inheritFailed(root, j); err != nil {
-				t.Fatal(err)
-			}
-			if !j.MayHaveRun[protocol.LND] || !j.WalletPresent || j.SyncthingID != previous.SyncthingID {
-				t.Fatal("repair forgot data or identity obligations")
-			}
 			var retained job
-			if err := readJSON(filepath.Join(previous.dir(root), "result.json"), &retained); err != nil || retained.Review.Digest != previous.Review.Digest || !retained.MayHaveRun[protocol.LND] {
+			if err := readJSON(filepath.Join(previous.dir(root), "result.json"), &retained); err != nil || retained.Review.Digest != previous.Review.Digest || !retained.HostChanges {
 				t.Fatal("lost failed release evidence", err)
 			}
 			h := newHarness(t, j)
-			if err := runJob(j, h.ops()); err != nil {
-				t.Fatal(err)
-			}
-			for _, c := range previous.Affected {
-				if !slices.Contains(h.events, "stop:"+string(c)) || !slices.Contains(h.events, "health:"+string(c)) {
-					t.Fatalf("corrective update abandoned %s: %v", c, h.events)
-				}
-			}
-			if slices.Index(h.events, "health:bitcoin") >= slices.Index(h.events, "start:lnd") {
-				t.Fatal("inherited dependencies started in the wrong order")
+			if err := runJob(j, h.ops()); err != nil || h.installed() != "new VPN" {
+				t.Fatal("the repair did not finish the update:", err)
 			}
 		})
 	}
 }
 
 // A repair can itself fail before its worker ever runs. The next repair must
-// still find the duties of the first failure.
-func TestRepairOfRepairKeepsFirstFailureDuties(t *testing.T) {
+// still refuse Cancel, since the first failure may have replaced the program.
+func TestRepairOfRepairKeepsTheCancellationBoundary(t *testing.T) {
 	first := workflowFixture()
 	first.Phase, first.HostChanges = "failed", true
-	first.MayHaveRun[protocol.LND] = true
-	first.WalletPresent, first.SyncthingID = true, "original device"
 	second := workflowFixture()
-	second.Review.Digest, second.Previous = strings.Repeat("b", 64), first.Review.Digest
-	second.Phase, second.HostChanges, second.Affected = "failed", true, nil
+	second.Review.Digest = strings.Repeat("b", 64)
+	second.Review.Manifest.Version = "0.7.2"
+	second.Review.Manifest.RecoveryFrom = []string{first.Review.Digest}
 	third := workflowFixture()
-	third.Review.Digest, third.Previous = strings.Repeat("c", 64), second.Review.Digest
-	third.HostChanges, third.Affected = true, nil
-	third.Review.Source = third.Review.Manifest.Target(third.Review.Source)
-	root, err := filepath.EvalSymlinks(t.TempDir())
+	third.Review.Digest = strings.Repeat("c", 64)
+	third.Review.Manifest.Version = "0.7.3"
+	third.Review.Manifest.RecoveryFrom = []string{second.Review.Digest}
+	root, _ := workerFiles(t, second)
+	if err := os.Mkdir(first.dir(root), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveJob(root, first); err != nil {
+		t.Fatal(err)
+	}
+	accept := func(j *job, previous string) {
+		t.Helper()
+		token := saveReview(t, root, prepared{Review: j.Review, WorkerHash: j.WorkerHash, PlanHash: j.PlanHash, ConfigHash: j.ConfigHash, Previous: previous})
+		if err := acceptUpdate(root, token, "20261109-100000-aaaaaa", admissionOps{
+			observe: func() (nodeObservation, error) {
+				return nodeObservation{source: j.Review.Source, configHash: j.ConfigHash}, nil
+			},
+			launcher: func() error { return nil },
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	accept(second, first.Review.Digest)
+	// The second update fails before its worker runs.
+	if err := amendRecord(root, map[string]any{"phase": "failed", "error": "worker did not start"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(third.dir(root), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string]string{"vpn": "new VPN"} {
+		if err := os.WriteFile(filepath.Join(third.dir(root), name), []byte(data), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plan, err := json.Marshal(third.Review.Manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(third.dir(root), "update.json"), plan, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if third.WorkerHash, err = files.Hash(filepath.Join(third.dir(root), "vpn")); err != nil {
+		t.Fatal(err)
+	}
+	if third.PlanHash, err = files.Hash(filepath.Join(third.dir(root), "update.json")); err != nil {
+		t.Fatal(err)
+	}
+	accept(third, second.Review.Digest)
+	if cancelUpdate(root, third.Review.Digest) == nil {
+		t.Fatal("the second repair could be cancelled")
+	}
 	for _, failed := range []*job{first, second} {
-		if err := os.Mkdir(failed.dir(root), 0700); err != nil {
-			t.Fatal(err)
+		if _, err := os.Stat(filepath.Join(failed.dir(root), "result.json")); err != nil {
+			t.Fatal("lost a failed update's record:", err)
 		}
-		if err := writeJSON(filepath.Join(failed.dir(root), "result.json"), failed); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := inheritFailed(root, third); err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(third.Affected, first.Affected) || !third.MayHaveRun[protocol.LND] || !third.WalletPresent || third.SyncthingID != first.SyncthingID {
-		t.Fatal("second repair lost the first failure's duties", third.Affected, third.MayHaveRun)
-	}
-	// A missing record must stop the repair, never shrink its duties.
-	if err := os.Remove(filepath.Join(first.dir(root), "result.json")); err != nil {
-		t.Fatal(err)
-	}
-	fresh := workflowFixture()
-	fresh.Previous, fresh.Affected = second.Review.Digest, nil
-	if inheritFailed(root, fresh) == nil {
-		t.Fatal("repair continued without the first failure's record")
 	}
 }
 
-func TestExplicitRetryCompletesSavedFailureWithoutLosingMigrationHistory(t *testing.T) {
-	for _, failure := range []string{"stage", "start:lnd"} {
-		t.Run(failure, func(t *testing.T) {
-			j := workflowFixture()
-			h := newHarness(t, j)
-			h.failure = failure
-			if err := runJob(j, h.ops()); err == nil {
-				t.Fatal("fixture did not reach the failure")
-			}
-			if err := retryUpdate(h.root, strings.Repeat("b", 64)); err == nil || h.reload().Phase != "failed" {
-				t.Fatal("stale retry changed the saved job", err)
-			}
-			if err := retryUpdate(h.root, j.Review.Digest); err != nil {
-				t.Fatal(err)
-			}
-			j = h.reload()
-			if failure == "start:lnd" && !j.MayHaveRun[protocol.LND] {
-				t.Fatal("explicit retry erased possible migration")
-			}
-			h.failure, h.events = "", nil
-			if err := runJob(j, h.ops()); err != nil || h.reload().Phase != "complete" {
-				t.Fatal("explicit retry could not complete the saved job", err)
-			}
-			if slices.Contains(h.events, "stage") != (failure == "stage") {
-				t.Fatal("retry discarded verified staging or skipped unfinished staging")
-			}
-			if err := retryUpdate(h.root, j.Review.Digest); err == nil || h.reload().Phase != "complete" {
-				t.Fatal("retry reopened a completed update", err)
-			}
-		})
+// Retry needs the update on record, and cannot reopen a finished one.
+func TestRetryNeedsTheSavedUpdateAndCannotReopenAFinishedOne(t *testing.T) {
+	j := workflowFixture()
+	h := newHarness(t, j)
+	h.failure = "check"
+	if err := runJob(j, h.ops()); err == nil {
+		t.Fatal("fixture did not reach the failure")
+	}
+	if err := retryUpdate(h.root, strings.Repeat("b", 64)); err == nil || h.reload().Phase != "failed" {
+		t.Fatal("stale retry changed the saved job", err)
+	}
+	if err := retryUpdate(h.root, j.Review.Digest); err != nil {
+		t.Fatal(err)
+	}
+	h.failure = ""
+	if err := runJob(h.reload(), h.ops()); err != nil || h.reload().Phase != "complete" {
+		t.Fatal("explicit retry could not complete the saved job", err)
+	}
+	if err := retryUpdate(h.root, j.Review.Digest); err == nil || h.reload().Phase != "complete" {
+		t.Fatal("retry reopened a completed update", err)
 	}
 }
 
@@ -324,11 +278,9 @@ func TestKeyServerNoticeIsApprovedButNotKeptInTheJob(t *testing.T) {
 	review := j.Review
 	review.KeyServerUnreachable = true
 	token := saveReview(t, root, prepared{Review: review, WorkerHash: j.WorkerHash, PlanHash: j.PlanHash, ConfigHash: j.ConfigHash})
-	cfg := config.Default()
-	cfg.Network = j.Review.Network
 	err := acceptUpdate(root, token, "20261109-100000-aaaaaa", admissionOps{
 		observe: func() (nodeObservation, error) {
-			return nodeObservation{source: j.Review.Source, config: cfg, configHash: j.ConfigHash}, nil
+			return nodeObservation{source: j.Review.Source, configHash: j.ConfigHash}, nil
 		},
 		launcher: func() error { return nil },
 	})
@@ -351,7 +303,7 @@ func TestRetryAndCancelLeaveNoOldAdvice(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			j := workflowFixture()
 			h := newHarness(t, j)
-			h.failure = "stage"
+			h.failure = "check"
 			if err := runJob(j, h.ops()); err == nil {
 				t.Fatal("fixture did not reach the failure")
 			}

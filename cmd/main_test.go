@@ -21,44 +21,31 @@ func TestParseArgs(t *testing.T) {
 	}
 
 	cmd, opts, err := parseArgs([]string{"install"})
-	if err != nil || cmd != cmdInstall {
-		t.Fatalf("install: got (%v,%v)", cmd, err)
+	if err != nil || cmd != cmdInstall || opts.Unattended {
+		t.Fatalf("install: got (%v,%+v,%v)", cmd, opts, err)
 	}
-	if opts.Network != "" || opts.Unattended {
-		t.Errorf("install: unexpected opts %+v", opts)
-	}
-
-	cmd, opts, err = parseArgs(
-		[]string{"install", "--testnet4", "--unattended"})
-	if err != nil || cmd != cmdInstall {
-		t.Fatalf("install flags: got (%v,%v)", cmd, err)
-	}
-	if opts.Network != "testnet4" || !opts.Unattended {
-		t.Errorf("install flags: got %+v", opts)
-	}
-	cmd, opts, err = parseArgs([]string{"install", "--signet"})
-	if err != nil || cmd != cmdInstall ||
-		opts.Network != config.NetworkPublicSignet {
-		t.Errorf("signet install: got (%v,%+v,%v)", cmd, opts, err)
-	}
-	if _, _, err := parseArgs(
-		[]string{"install", "--testnet4", "--signet"}); err == nil {
-		t.Error("conflicting install network flags accepted")
+	cmd, opts, err = parseArgs([]string{"install", "--unattended"})
+	if err != nil || cmd != cmdInstall || !opts.Unattended {
+		t.Fatalf("install --unattended: got (%v,%+v,%v)", cmd, opts, err)
 	}
 
+	// The last three chose a Bitcoin network. There is none to choose now.
 	for _, args := range [][]string{
 		{"install", "--bogus"},
 		{"install", "--until=bake"},
 		{"install", "--allow-console-only"},
 		{"install", "mainnet"},
-		{"install", "--signet", "extra"},
+		{"install", "--unattended", "extra"},
+		{"install", "--testnet4"},
+		{"install", "--signet"},
+		{"install", "--testnet4", "--unattended"},
 	} {
 		if _, _, err := parseArgs(args); err == nil {
 			t.Errorf("install arguments %v accepted", args)
 		}
 	}
 	// A mistyped option is named the way the owner typed it.
-	for _, typed := range []string{"--sigent", "-sigent", "--sigent=1"} {
+	for _, typed := range []string{"--unatended", "-unatended", "--unatended=1"} {
 		_, _, err := parseArgs([]string{"install", typed})
 		name, _, _ := strings.Cut(typed, "=")
 		if err == nil || !strings.Contains(err.Error(), " "+name) ||
@@ -95,32 +82,13 @@ func TestParseArgs(t *testing.T) {
 		}
 	}
 
-	cmd, _, err = parseArgs([]string{"stage-lnd-cert"})
-	if err != nil || cmd != cmdStageLNDCert {
-		t.Errorf("stage-lnd-cert: got (%v,%v)", cmd, err)
-	}
-	if _, _, err := parseArgs(
-		[]string{"stage-lnd-cert", "--flag"}); err == nil {
-		t.Error("stage-lnd-cert with arguments accepted")
-	}
-
-	for _, network := range config.SupportedNetworks() {
-		cmd, opts, err = parseArgs(
-			[]string{"publish-lnd-backup", network})
-		if err != nil || cmd != cmdPublishLNDBackup ||
-			opts.Network != network {
-			t.Errorf("publisher %s: got (%v,%+v,%v)",
-				network, cmd, opts, err)
-		}
-	}
+	// Commands systemd ran for LND. No unit runs them now.
 	for _, args := range [][]string{
-		{"publish-lnd-backup"},
-		{"publish-lnd-backup", "signet"},
-		{"publish-lnd-backup", "controlled-signet-v1"},
-		{"publish-lnd-backup", "mainnet", "/tmp/destination"},
+		{"stage-lnd-cert"},
+		{"publish-lnd-backup", "mainnet"},
 	} {
-		if _, _, err := parseArgs(args); err == nil {
-			t.Errorf("invalid publisher arguments accepted: %v", args)
+		if _, _, err := parseArgs(args); err == nil || !strings.Contains(err.Error(), "unknown command") {
+			t.Errorf("%v: got %v, want an unknown command", args, err)
 		}
 	}
 }
