@@ -2,49 +2,49 @@ package host
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 )
 
-// Tor serves outgoing traffic and the installer's Tor check. vpn's torrc
-// opens the SOCKS port and the control port and no onion service.
-func TestTorConfigOpensTwoPortsAndNoOnionService(t *testing.T) {
-	content := BuildTorConfig()
-	for _, line := range []string{"SOCKSPort 9050", "ControlPort 9051", "CookieAuthentication 1"} {
-		if !strings.Contains(content, "\n"+line+"\n") {
-			t.Errorf("torrc lacks the line %q", line)
+// vpn uses Tor as Debian sets it up, so the install starts only on a torrc
+// that sets nothing. A setting in any form refuses, and the first one's line
+// is named, never its text.
+func TestTorSettingsVerdict(t *testing.T) {
+	for _, tc := range []struct {
+		name, content string
+		line          int // 0 means the file passes
+	}{
+		{"empty file", "", 0},
+		{"comments and empty lines", "## Tor's sample\n\n#SocksPort 9050\n  # indented\n\t\n", 0},
+		{"comments with Windows line ends", "# a\r\n\r\n", 0},
+		{"a setting after comments", "# a\nSocksPort 9050\n", 2},
+		{"an indented setting", "# a\n\n  HiddenServiceDir /var/lib/tor/x/\n", 3},
+		{"an include line", "%include /etc/tor/torrc.d/*.conf\n", 1},
+		{"a last line without a line end", "# a\n# b\n# c\nExitRelay 1", 4},
+		{"two settings", "# a\nUseBridges 1\n# b\nBridge 192.0.2.1:443\n", 2},
+	} {
+		err := torSettingsVerdict(tc.content)
+		if tc.line == 0 {
+			if err != nil {
+				t.Errorf("%s: refused: %v", tc.name, err)
+			}
+			continue
 		}
-	}
-	if strings.Contains(content, "HiddenService") {
-		t.Errorf("torrc sets up an onion service:\n%s", content)
-	}
-}
-
-// The install sets Debian's torrc aside before writing vpn's. If it wrote
-// first and the diversion then failed, a resumed install's diversion would
-// move vpn's file aside as if it were Debian's, and Debian's copy would be
-// gone.
-func TestInstallTorConfigIsNotWrittenWhenDiversionFails(t *testing.T) {
-	oldDivert, oldWrite := divertDebianTorConfig, writeTorConfigForInstall
-	t.Cleanup(func() {
-		divertDebianTorConfig, writeTorConfigForInstall = oldDivert, oldWrite
-	})
-	diverted := false
-	divertDebianTorConfig = func() error {
-		diverted = true
-		return errors.New("dpkg-divert: error: rename involves overwriting")
-	}
-	writes := 0
-	writeTorConfigForInstall = func([]byte) error {
-		writes++
-		return nil
-	}
-	if err := WriteTorConfig(); err == nil {
-		t.Fatal("install went on although setting Debian's torrc aside failed")
-	}
-	if !diverted || writes != 0 {
-		t.Fatalf("diversion tried=%t, torrc writes=%d, want true and 0", diverted, writes)
+		if err == nil {
+			t.Errorf("%s: passed, want a refusal", tc.name)
+			continue
+		}
+		if want := fmt.Sprintf("line %d.", tc.line); !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %q does not name %q", tc.name, err, want)
+		}
+		for _, line := range strings.Split(tc.content, "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") && strings.Contains(err.Error(), line) {
+				t.Errorf("%s: the refusal shows the setting's text: %q", tc.name, err)
+			}
+		}
 	}
 }
 

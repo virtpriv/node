@@ -92,7 +92,6 @@ func productionLifecycleFS() lifecycleFS {
 			paths.JournaldDropIn,
 			paths.LogRotate,
 			paths.Fail2banJail,
-			paths.TorrcDistrib,
 			paths.VPNDSocketUnit,
 			paths.VPNDServiceUnit,
 			paths.OldSSHDDropIn,

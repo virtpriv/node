@@ -106,10 +106,10 @@ back and check its state before you request another restart.
 
 | Path | Contents |
 | --- | --- |
-| /etc/tor/torrc | Tor's configuration, written by vpn. Debian's own copy is kept as /etc/tor/torrc.distrib |
+| /etc/tor/torrc | Tor's configuration, Debian's own file. vpn does not write it |
 | /etc/vpn/config.json | Written when the install finishes. This release has no setting to keep in it |
 | /home/vpn/releases/ | Release files you bring to the node yourself, see [Updating Your Node](updating.md#updating-from-files) |
 | /var/log/vpn.log | vpn's log (the install, release checks, the TUI and the node's root work). Past 10 MB, once a day, it moves to vpn.log.1.gz. Four such files are kept |
 
-vpn writes `/etc/tor/torrc` itself. Changes made by hand are not supported.
+vpn does not write `/etc/tor/torrc`. Changes made by hand are not supported.
 The full layout is in [How vpn Works Inside](developing.md#directory-layout).

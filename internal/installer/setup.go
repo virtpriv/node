@@ -444,12 +444,7 @@ func buildInstallSteps(dec *InstallDecisions, holdRestarts func() error) []Insta
 		{Key: "mptcp.disable", Name: "Turning off Multipath TCP",
 			Fn: host.DisableMPTCP},
 		{Key: "tor.configure", Name: "Setting up Tor",
-			Fn: func() error {
-				if err := host.WriteTorConfig(); err != nil {
-					return err
-				}
-				return host.EnableAndRestartTor()
-			}},
+			Fn: host.EnableAndRestartTor},
 		// Hard gate. No step below that sends apt through Tor runs unless
 		// Tor routing is verified. See torgate.go. As a StepGate it is
 		// checked again on every pass, resumes included, so no package comes

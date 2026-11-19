@@ -87,7 +87,7 @@ For maintainers and contributors: [How vpn Works Inside](docs/developing.md),
 - Fail2ban: SSH brute-force protection on the same ports. A port you add to sshd later needs its own ufw rule and jail port
 - Root SSH disabled by the installer
 - SSH password controls apply to `vpn`. Other accounts retain their host password-authentication policy. Keyboard-interactive authentication and X11 forwarding are disabled for `vpn`. Native password changes require the current account password.
-- Tor's control port listens on the node itself only and asks for Tor's cookie. Only the installer's Tor check uses it
+- Tor runs with Debian's own settings. Its control socket is open only to root and to Tor itself, and only the installer's Tor check uses it
 - vpn is checked by its release signature, before the install and at every update. Everything else the install adds comes from Debian's packages, which apt checks against Debian's keys
 - Unattended upgrades of Debian's packages, security fixes included, checked every day, with an automatic restart right after when an update needs one, held off while an install, Update Packages or a node update runs
 - Base packages upgraded during install, through Tor and behind the firewall, to close CVE windows on stale server images
@@ -119,7 +119,7 @@ through Tor. After that, the installer makes two types of network calls:
   traffic leaves through Tor
 
 Before the first Phase 2 download, the installer verifies Tor
-routing on Tor's own control port and refuses to continue if it
+routing on Tor's own control socket and refuses to continue if it
 cannot confirm it. It does so on every run, including resumes,
 and again after the package upgrade.
 

@@ -27,7 +27,7 @@ apt-get install -y tor torsocks gnupg wget ca-certificates
 
 These packages come from Debian's mirrors over the normal internet, because Tor
 is not on the server yet. The downloads below go through Tor. The installer
-later configures Tor for the node. Before it does, it refreshes Debian's
+later restarts Tor and checks it. Before it does, it refreshes Debian's
 package list and installs its base tools over the normal internet once more,
 as listed in the README under
 [Privacy & Network Traffic](../README.md#privacy--network-traffic).

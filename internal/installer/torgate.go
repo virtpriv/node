@@ -9,8 +9,8 @@
 // Two layers:
 //
 //  1. The gate, with no outside dependency. Wait until Tor reports
-//     bootstrap PROGRESS=100 on its own control port (127.0.0.1:9051,
-//     cookie authentication). A started unit only says Tor runs.
+//     bootstrap PROGRESS=100 on its own control socket (cookie
+//     authentication). A started unit only says Tor runs.
 //     PROGRESS=100 says Tor can route.
 //
 //  2. A best-effort outside check: check.torproject.org/api/ip fetched
@@ -38,16 +38,11 @@ import (
 	"time"
 
 	"github.com/virtpriv/node/internal/logger"
+	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/system"
 )
 
-// Tor's own values, not Go logic paths. The control port matches
-// host.BuildTorConfig. The cookie path is the one set by Debian's
-// tor-service-defaults-torrc.
 const (
-	torControlAddr = "127.0.0.1:9051"
-	torCookiePath  = "/run/tor/control.authcookie"
-
 	// Fail only when Tor's bootstrap progress has not moved for the
 	// stall window. The gate runs seconds after Tor first starts, so a
 	// flat deadline would fail a slow machine that is still advancing.
@@ -71,18 +66,18 @@ func verifyTorRouting() error {
 		torStallWindow, torBootstrapCeiling); err != nil {
 		return err
 	}
-	logger.Install("Tor bootstrap 100%% CONFIRMED (via control port)")
+	logger.Install("Tor bootstrap 100%% CONFIRMED (via control socket)")
 
 	return runTorExitProbe()
 }
 
-// waitForTorBootstrap polls Tor's control port until it reports
+// waitForTorBootstrap polls Tor's control socket until it reports
 // bootstrap PROGRESS=100. It fails when the progress has not changed for
 // the stall window, or at the ceiling. Any change resets the stall clock,
 // a drop included, because Tor counts from zero again when it restarts
 // during bootstrap, and that is activity, not a stall. Poll errors are
 // retried silently within the same clocks, since right after
-// host.EnableAndRestartTor the control port may not listen yet. The
+// host.EnableAndRestartTor the control socket may not be there yet. The
 // messages name tor@default, the real Tor. Debian's tor.service only runs
 // /bin/true.
 func waitForTorBootstrap(
@@ -116,7 +111,7 @@ func waitForTorBootstrap(
 	}
 
 	if lastProgress < 0 && lastErr != nil {
-		return fmt.Errorf("Tor's control port did not answer within %s: %v. "+
+		return fmt.Errorf("Tor's control socket did not answer within %s: %v. "+
 			"Check: systemctl status tor@default and journalctl -u tor@default",
 			stallWindow, lastErr)
 	}
@@ -147,21 +142,21 @@ func keepWaitingForTor(
 	return true
 }
 
-// queryTorBootstrapProgress performs one control-port round trip:
+// queryTorBootstrapProgress performs one round trip on the control socket:
 // AUTHENTICATE with the cookie, GETINFO status/bootstrap-phase,
 // parse PROGRESS. The cookie is re-read on every attempt because Tor
 // regenerates it on restart.
 func queryTorBootstrapProgress() (int, error) {
 	// The installer runs as root, and reads the cookie through the wrapper
 	// that requires root.
-	cookie, err := system.ReadFileRoot(torCookiePath)
+	cookie, err := system.ReadFileRoot(paths.TorControlCookie)
 	if err != nil {
 		return 0, fmt.Errorf("read control cookie: %w", err)
 	}
 
-	conn, err := net.DialTimeout("tcp", torControlAddr, 5*time.Second)
+	conn, err := net.DialTimeout("unix", paths.TorControlSocket, 5*time.Second)
 	if err != nil {
-		return 0, fmt.Errorf("dial control port: %w", err)
+		return 0, fmt.Errorf("dial control socket: %w", err)
 	}
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(5 * time.Second))
@@ -202,7 +197,7 @@ func queryTorBootstrapProgress() (int, error) {
 }
 
 // parseBootstrapProgress extracts the PROGRESS=<n> value from a
-// control-port status line, e.g.:
+// status line of Tor's control protocol, e.g.:
 //
 //	250-status/bootstrap-phase=NOTICE BOOTSTRAP PROGRESS=100 TAG=done SUMMARY="Done"
 //

@@ -151,8 +151,8 @@ func WriteFileRoot(path string, content []byte, perm os.FileMode) error {
 	})
 }
 
-// WriteFileRootOwned is WriteFileRoot for a file a service account reads. The
-// file reaches its name already owned by owner and group, so the service
+// WriteFileRootOwned is WriteFileRoot for a file another account reads. The
+// file reaches its name already owned by owner and group, so that account
 // never finds a new file it cannot read. If the owner or the group cannot be
 // found, or the owner cannot be set, the old file is left as it was.
 func WriteFileRootOwned(path string, content []byte, perm os.FileMode, owner, group string) error {
