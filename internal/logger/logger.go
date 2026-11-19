@@ -2,7 +2,7 @@
 
 // Package logger provides structured logging for the vpn application.
 //
-// Log file: /var/log/vpn.log (created by the installer, owned by the admin user)
+// Log file: paths.LogFile (created by the installer, owned by the admin user)
 //
 // Log format:
 //
@@ -12,8 +12,7 @@
 //
 //	[install]  installation steps and progress
 //	[verify]   GPG signature and checksum verification
-//	[tui]      TUI actions (installs, upgrades, service management)
-//	[status]   dashboard status polling warnings
+//	[tui]      TUI actions (updates, restarts, release checks)
 //	[system]   system-level operations (firewall, tor, services)
 package logger
 
@@ -23,20 +22,20 @@ import (
 	"os"
 	"sync"
 	"time"
-)
 
-const LogPath = "/var/log/vpn.log"
+	"github.com/virtpriv/node/internal/paths"
+)
 
 var (
 	mu  sync.Mutex
 	out io.Writer
 )
 
-// Open sends the log to LogPath. Only the vpn program calls it, first thing,
-// so a tool or test that shares vpn's code never writes the node's log.
-// Until then, and when the file cannot be opened, lines go nowhere.
+// Open sends the log to paths.LogFile. Only the vpn program calls it, first
+// thing, so a tool or test that shares vpn's code never writes the node's
+// log. Until then, and when the file cannot be opened, lines go nowhere.
 func Open() {
-	f, err := os.OpenFile(LogPath,
+	f, err := os.OpenFile(paths.LogFile,
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
 	if err == nil {
 		SetOutput(f)

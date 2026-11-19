@@ -35,7 +35,7 @@ func onlyEntry(t *testing.T, dir, want string) {
 // else is left in its folder.
 func TestWriteFileReplacesContentAndMode(t *testing.T) {
 	dir := t.TempDir()
-	target := filepath.Join(dir, "lnd.conf")
+	target := filepath.Join(dir, "settings.conf")
 	if err := os.WriteFile(target, []byte("old\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestWriteFileReplacesContentAndMode(t *testing.T) {
 	if info.Mode() != 0o640 {
 		t.Fatalf("mode %v, want -rw-r-----", info.Mode())
 	}
-	onlyEntry(t, dir, "lnd.conf")
+	onlyEntry(t, dir, "settings.conf")
 }
 
 // Some targets sit in folders another account owns, which could place a link
@@ -73,7 +73,7 @@ func TestWriteFileReplacesALinkAtTheTarget(t *testing.T) {
 	if err := os.WriteFile(elsewhere, []byte("keep\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	target := filepath.Join(dir, "config.xml")
+	target := filepath.Join(dir, "settings.conf")
 	if err := os.Symlink(elsewhere, target); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestWriteFileReplacesALinkAtTheTarget(t *testing.T) {
 	if got, err := os.ReadFile(elsewhere); err != nil || string(got) != "keep\n" {
 		t.Fatalf("linked file content %q (%v), want it unchanged", got, err)
 	}
-	onlyEntry(t, dir, "config.xml")
+	onlyEntry(t, dir, "settings.conf")
 }
 
 // A write that cannot complete returns an error, leaves what was at the
@@ -103,7 +103,7 @@ func TestWriteFileReplacesALinkAtTheTarget(t *testing.T) {
 // target's name is the failure used here.
 func TestWriteFileFailureLeavesTargetAndNoTemporary(t *testing.T) {
 	dir := t.TempDir()
-	target := filepath.Join(dir, "bitcoin.conf")
+	target := filepath.Join(dir, "settings.conf")
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestWriteFileFailureLeavesTargetAndNoTemporary(t *testing.T) {
 	if names := folderEntries(t, target); len(names) != 0 {
 		t.Fatalf("folder at the target now holds %q, want it untouched", names)
 	}
-	onlyEntry(t, dir, "bitcoin.conf")
+	onlyEntry(t, dir, "settings.conf")
 }
 
 // fileOwner returns the numeric owner and group of path, without following a
@@ -183,7 +183,7 @@ func TestWriteFileWhoseOwnerCannotBeSetLeavesTarget(t *testing.T) {
 // account that wrote it.
 func TestWriteFileSetsTheRequestedOwner(t *testing.T) {
 	dir := t.TempDir()
-	target := filepath.Join(dir, "lnd.conf")
+	target := filepath.Join(dir, "settings.conf")
 	_, dirGID := fileOwner(t, dir)
 	uid, gid := 4321, 4321
 	if os.Geteuid() != 0 {
@@ -219,5 +219,5 @@ func TestWriteFileSetsTheRequestedOwner(t *testing.T) {
 	if info.Mode() != 0o640 {
 		t.Fatalf("mode %v, want -rw-r-----", info.Mode())
 	}
-	onlyEntry(t, dir, "lnd.conf")
+	onlyEntry(t, dir, "settings.conf")
 }

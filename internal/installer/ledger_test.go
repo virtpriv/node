@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,6 +96,20 @@ func TestLedgerAcceptsOnlyTheFirstStepsInOrder(t *testing.T) {
 	if err := validateLedger(l); err == nil {
 		t.Fatal("steps with a gap accepted")
 	}
+}
+
+// readLedger reads the record as a test wrote it. The installer itself reads
+// it only after checking the file's owner and mode.
+func readLedger(path string) (*installLedger, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read install ledger %s: %w", path, err)
+	}
+	l, err := parseLedger(data)
+	if err != nil {
+		return nil, fmt.Errorf("invalid install ledger %s: %w", path, err)
+	}
+	return l, nil
 }
 
 func TestLedgerRoundTripAndAtomicReplacement(t *testing.T) {

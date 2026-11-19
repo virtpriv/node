@@ -195,18 +195,6 @@ func (l *installLedger) markComplete() error {
 	return nil
 }
 
-func readLedger(path string) (*installLedger, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read install ledger %s: %w", path, err)
-	}
-	l, err := parseLedger(data)
-	if err != nil {
-		return nil, fmt.Errorf("invalid install ledger %s: %w", path, err)
-	}
-	return l, nil
-}
-
 // save publishes the complete new ledger, then synchronizes the containing
 // directory so a reported success does not depend only on cached rename state.
 func (l *installLedger) save(path string) (retErr error) {

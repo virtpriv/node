@@ -61,8 +61,7 @@ func TestActivationListenerRefusals(t *testing.T) {
 func TestMenuIsExactlyTheRuledSet(t *testing.T) {
 	want := []string{
 		api.VerbReadAccounts, api.VerbReadAccount, api.VerbReadSSHAuth,
-		api.VerbJobStatus, api.VerbVersion,
-		api.VerbStartJob,
+		api.VerbJobStatus, api.VerbStartJob,
 		api.VerbStartUpdate, api.VerbResumeUpdate, api.VerbCancelUpdate,
 	}
 	m := menu()
@@ -148,9 +147,9 @@ func TestRefusalsBeforeRunning(t *testing.T) {
 	for _, tc := range []struct{ line, code, words string }{
 		{"{not json", api.CodeNothingChanged, "malformed request"},
 		{`{"api":2,"verb":"set-user-password","params":{"user":"vpn"}}`, api.CodeNothingChanged, "unknown request"},
-		{`{"api":0,"verb":"version"}`, api.CodeUnsupportedAPI, "VPN was updated"},
-		{`{"api":999,"verb":"version"}`, api.CodeUnsupportedAPI, "VPN was updated"},
-		{`{"api":1,"verb":"version"}`, api.CodeUnsupportedAPI, "VPN was updated"},
+		{`{"api":0,"verb":"job-status"}`, api.CodeUnsupportedAPI, "VPN was updated"},
+		{`{"api":999,"verb":"job-status"}`, api.CodeUnsupportedAPI, "VPN was updated"},
+		{`{"api":1,"verb":"job-status"}`, api.CodeUnsupportedAPI, "VPN was updated"},
 		{`{"api":1,"verb":"read-wallet-state"}`, api.CodeUnsupportedAPI, "VPN was updated"},
 		{`{"api":2,"verb":"read-wallet-state"}`, api.CodeNothingChanged, "unknown request"},
 		{`{"api":2,"verb":"read-node-addresses"}`, api.CodeNothingChanged, "unknown request"},

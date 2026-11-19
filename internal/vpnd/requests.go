@@ -52,7 +52,6 @@ func menu() map[string]request {
 		api.VerbReadAccount:  {deadline: time.Minute, handle: readAccount},
 		api.VerbReadSSHAuth:  {deadline: time.Minute, handle: readSSHAuth},
 		api.VerbJobStatus:    {deadline: 30 * time.Second, quiet: true, handle: jobStatus},
-		api.VerbVersion:      {deadline: 10 * time.Second, handle: version},
 		api.VerbStartJob:     {deadline: time.Minute, handle: startJob},
 		api.VerbStartUpdate:  {deadline: time.Minute, handle: startUpdate},
 		api.VerbResumeUpdate: {deadline: time.Minute, handle: resumeUpdate},
@@ -121,13 +120,6 @@ func readSSHAuth(_ *call, params json.RawMessage) (any, error) {
 		return nil, err
 	}
 	return api.SSHAuthResult{PasswordAuthEnabled: enabled}, nil
-}
-
-func version(c *call, params json.RawMessage) (any, error) {
-	if err := noParams(params); err != nil {
-		return nil, err
-	}
-	return api.VersionResult{Version: c.server.version, MinAPI: api.MinVersion, MaxAPI: api.Version}, nil
 }
 
 // ── Jobs ─────────────────────────────────────────────────

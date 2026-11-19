@@ -4,9 +4,9 @@
 // A connection carries one request line and one answer line. Reads answer at
 // once. A change is a job: vpnd records it, starts it in its own systemd
 // service and answers with its ID, and the client then reads the job's record
-// until it ends. Every request names the API number its client speaks.
-// Within one number the API only grows: new requests, answer fields, job
-// kinds and codes. Nothing is removed or changes meaning.
+// until it ends. Every request names the API number its client speaks. Once
+// a release carries a number, the API only grows within it: new requests,
+// answer fields, job kinds and codes. Nothing is removed or changes meaning.
 package api
 
 import (
@@ -31,7 +31,6 @@ const (
 	VerbReadAccount  = "read-account"
 	VerbReadSSHAuth  = "read-ssh-auth"
 	VerbJobStatus    = "job-status"
-	VerbVersion      = "version"
 
 	// VerbStartJob starts a change. The answer names the job.
 	VerbStartJob = "start-job"
@@ -155,13 +154,6 @@ type JobStatusParams struct {
 type JobStatus struct {
 	Found bool `json:"found"`
 	Job   Job  `json:"job"`
-}
-
-// VersionResult answers the version read.
-type VersionResult struct {
-	Version string `json:"version"`
-	MinAPI  int    `json:"min_api"`
-	MaxAPI  int    `json:"max_api"`
 }
 
 // ServiceActionParams: systemctl <action> <unit>, both from closed sets.
