@@ -88,7 +88,6 @@ const (
 	SudoersDir  = "/etc/sudoers.d"
 
 	UFWDefault = "/etc/default/ufw"
-	SSHDConfig = "/etc/ssh/sshd_config"
 	// SSHDDropIn precedes ordinary provider drop-ins. Its Match blocks scope
 	// owner authentication. Effective policy is verified before SSH restarts.
 	SSHDDropIn = "/etc/ssh/sshd_config.d/00-vpn-hardening.conf"
