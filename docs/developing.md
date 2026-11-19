@@ -107,7 +107,7 @@ already accepted by systemd.
 
 | Path | Contents |
 | --- | --- |
-| /etc/tor/torrc | Tor's configuration, written at install, root:debian-tor mode 0640. Debian's own copy is kept as /etc/tor/torrc.distrib |
+| /etc/tor/torrc | Tor's configuration, Debian's own file. vpn does not write it. The install refuses a machine where it holds settings |
 | /etc/vpn/config.json | Root-owned, written when the install finishes, root:vpn mode 0640. It holds its schema number alone |
 | /home/vpn/.config/vpn/preferences.json | User-owned TUI preferences (theme), vpn:vpn mode 0600 |
 | /home/vpn/releases/ | The owner's releases folder, vpn:vpn mode 0700. Its contents are read as untrusted |

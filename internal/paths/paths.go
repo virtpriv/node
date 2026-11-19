@@ -49,8 +49,15 @@ const (
 // ── Tor ──────────────────────────────────────────────────
 
 const (
-	Torrc        = "/etc/tor/torrc"
-	TorrcDistrib = "/etc/tor/torrc.distrib"
+	// Torrc is Debian's own file. vpn reads it before an install and never
+	// writes it.
+	Torrc = "/etc/tor/torrc"
+
+	// TorControlSocket and TorControlCookie are set by Debian's
+	// tor-service-defaults-torrc. Only root and Tor's own account can use
+	// them.
+	TorControlSocket = "/run/tor/control"
+	TorControlCookie = "/run/tor/control.authcookie"
 )
 
 // ── Systemd ──────────────────────────────────────────────

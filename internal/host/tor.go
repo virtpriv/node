@@ -13,46 +13,37 @@ import (
 	"github.com/virtpriv/node/internal/update/files"
 )
 
-// BuildTorConfig gives the content of vpn's torrc. Tor serves outgoing
-// traffic only, so the file sets up no onion service.
-func BuildTorConfig() string {
-	var b strings.Builder
-	b.WriteString("# Virtual Private Node, Tor configuration\n")
-	b.WriteString("# vpn writes this file. Debian's own copy is kept as " +
-		paths.TorrcDistrib + ".\n")
-	b.WriteString("SOCKSPort 9050\n")
-
-	// The installer's Tor routing check reads bootstrap progress on the
-	// control port. It listens on loopback only and needs the cookie.
-	b.WriteString("\n# Control port, for the installer's Tor check\n")
-	b.WriteString("ControlPort 9051\n")
-	b.WriteString("CookieAuthentication 1\n")
-	return b.String()
+// CheckTorSettings is the install check "Tor's settings are Debian's own".
+// It writes nothing. vpn uses Tor as Debian's package sets it up and writes
+// no torrc, so a torrc that already sets something is refused before the
+// install changes anything. A missing file passes, since the base packages
+// step installs Tor.
+func CheckTorSettings() error {
+	data, err := os.ReadFile(paths.Torrc)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("cannot read %s: %w", paths.Torrc, err)
+	}
+	return torSettingsVerdict(string(data))
 }
 
-// WriteTorConfig writes the torrc at install. Debian's own copy is set aside
-// first, so vpn's file never overwrites it.
-func WriteTorConfig() error {
-	if err := divertDebianTorConfig(); err != nil {
-		return fmt.Errorf("set aside Debian's %s: %w", paths.Torrc, err)
+// torSettingsVerdict reads a torrc's content. Every line that is not empty
+// and not a comment counts as a setting, an include line too. The refusal
+// names the first one's line and never its text, which can hold a bridge
+// address or a password hash.
+func torSettingsVerdict(content string) error {
+	for i, raw := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		return fmt.Errorf("found settings in %s, the first on line %d. "+
+			"vpn uses Tor as Debian sets it up, so this file must hold only comments",
+			paths.Torrc, i+1)
 	}
-	return writeTorConfigForInstall([]byte(BuildTorConfig()))
-}
-
-var (
-	// A local dpkg diversion moves Debian's torrc to TorrcDistrib, and every
-	// later Tor package puts its copy there, so a Tor update never replaces
-	// vpn's file or asks about it. Adding the same diversion again changes
-	// nothing, so a resumed install runs it again safely.
-	divertDebianTorConfig = func() error {
-		return system.RunRoot("dpkg-divert", "--local", "--rename",
-			"--divert", paths.TorrcDistrib, "--add", paths.Torrc)
-	}
-	writeTorConfigForInstall = writeTorConfig
-)
-
-func writeTorConfig(content []byte) error {
-	return system.WriteFileRootOwned(paths.Torrc, content, 0640, "root", "debian-tor")
+	return nil
 }
 
 var (

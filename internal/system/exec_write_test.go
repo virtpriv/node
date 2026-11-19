@@ -137,15 +137,15 @@ func fileOwner(t *testing.T, path string) (uid, gid int) {
 	return int(st.Uid), int(st.Gid)
 }
 
-// A file handed to a service account must reach its final name already owned
+// A file handed to another account must reach its final name already owned
 // by that account. If the owner cannot be set, the old file stays exactly as
-// it was, so the service never finds a new file it cannot read.
+// it was, so the account never finds a new file it cannot read.
 func TestWriteFileWhoseOwnerCannotBeSetLeavesTarget(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can give a file any owner, so this failure needs another account")
 	}
 	dir := t.TempDir()
-	target := filepath.Join(dir, "torrc")
+	target := filepath.Join(dir, "settings.conf")
 	if err := os.WriteFile(target, []byte("old\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestWriteFileWhoseOwnerCannotBeSetLeavesTarget(t *testing.T) {
 	if info.Mode() != 0o644 {
 		t.Fatalf("mode %v, want -rw-r--r-- unchanged", info.Mode())
 	}
-	onlyEntry(t, dir, "torrc")
+	onlyEntry(t, dir, "settings.conf")
 }
 
 // The written file ends with the owner and group asked for, not those of the

@@ -57,6 +57,7 @@ const (
 	checkNameUpdates   = "every package gets Debian's security updates"
 	checkNameAptProxy  = "apt uses no proxy"
 	checkNameJournal   = "system logs can be kept on disk"
+	checkNameTor       = "Tor's settings are Debian's own"
 )
 
 // detectHardware is a variable so tests can stand in for the machine.
@@ -144,6 +145,7 @@ func runPreflightChecks() ([]PreflightResult, host.SSHObservation) {
 		PreflightResult{checkNameUpdates, apt.Updates},
 		PreflightResult{checkNameAptProxy, apt.Proxy},
 		PreflightResult{checkNameJournal, host.CheckJournalStorage()},
+		PreflightResult{checkNameTor, host.CheckTorSettings()},
 	)
 	obs, obsErr := host.ObserveInitialSSHState()
 	results = append(results,
