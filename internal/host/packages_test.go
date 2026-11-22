@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/virtpriv/node/internal/failure"
 )
 
 // ── Waiting for Debian's own apt job ─────────────────────
@@ -186,6 +188,49 @@ func TestDebianJobFailureIsNotHiddenByAStop(t *testing.T) {
 	err := job.run(ctx, "", func() error { busy = true; return failure })
 	if err != failure {
 		t.Fatalf("error %v, want the command's own and nothing else", err)
+	}
+}
+
+// The install puts a plain sentence on a command that fails. Only the
+// command's failure gets it, with the command's own error under it. A lock
+// error is still recognized by its own words, and a wait that fails or gives
+// way to a stop comes back as it is.
+func TestDebianJobGivesOnlyAFailedCommandTheSentence(t *testing.T) {
+	const text = "The package tool could not do it."
+	now := time.Unix(1_800_000_000, 0)
+	idle := func() *debianAptJob {
+		return &debianAptJob{say: func(string) {}, running: func() (bool, error) { return false, nil },
+			sleep: func(context.Context, time.Duration) error { return nil }, now: func() time.Time { return now }}
+	}
+
+	broken := errors.New("apt-get install -y -qq fail2ban: exit status 100: E: Unable to locate package fail2ban")
+	runs := 0
+	err := idle().run(context.Background(), "", sentence(text, func() error { runs++; return broken }))
+	if f, ok := errors.AsType[*failure.Failure](err); !ok || f.Text != text || f.Cause != broken || runs != 1 {
+		t.Fatalf("a failed command gave %#v after %d runs, want the sentence over the command's error after one", err, runs)
+	}
+
+	runs = 0
+	err = idle().run(context.Background(), "", sentence(text, func() error {
+		if runs++; runs == 1 {
+			return errors.New(aptLockMessages[0])
+		}
+		return nil
+	}))
+	if err != nil || runs != 2 {
+		t.Fatalf("a lock error gave %v after %d runs, want a second try that passes", err, runs)
+	}
+
+	clock := &fakeClock{now: now}
+	hour := debianAptJob{say: func(string) {}, running: func() (bool, error) { return true, nil }, sleep: clock.Sleep, now: clock.Now}
+	if err := hour.run(context.Background(), "", sentence(text, func() error { return nil })); err != errDebianJobStillRunning {
+		t.Fatalf("an hour of waiting gave %v, want its own failure and not the command's sentence", err)
+	}
+
+	ctx, stop := context.WithCancel(context.Background())
+	stop()
+	if err := idle().run(ctx, "", sentence(text, func() error { return broken })); err != context.Canceled {
+		t.Fatalf("a stop gave %v, want the stop's own error", err)
 	}
 }
 

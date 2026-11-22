@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"unicode"
 	"unicode/utf8"
@@ -335,8 +336,9 @@ const RootLoginOffNotice = "Root can no longer log in over SSH, so if you close 
 const RootLoginMayBeOffNotice = "Root's SSH login may already be off, so keep this terminal open and check in a new terminal that you can log in as " +
 	paths.AdminUser + "."
 
-// StopError reports an install that did not finish. NotStarted means no step
-// was ever recorded. Paused means it stopped with no step failed, between
+// StopError reports an install that did not finish. NotStarted means this
+// run began no step, because nothing was ever recorded or the start was
+// refused. Paused means it stopped with no step failed, between
 // two steps or in a step's wait, and a step stopped in its wait is not
 // recorded. DoneNum and DoneName name the last step recorded, and the step
 // named is the one the next run does.
@@ -344,8 +346,10 @@ const RootLoginMayBeOffNotice = "Root's SSH login may already be off, so keep th
 // finishing the install failed. StartErr is why the last start was refused
 // when the owner then left. RootLoginOff is set once root's SSH login is
 // off, RootLoginMayBeOff when the SSH step failed after it may have turned
-// it off.
+// it off. Again is the command that runs the install again, see
+// againCommand.
 type StopError struct {
+	Again             string
 	NotStarted        bool
 	Paused            bool
 	StepName          string
@@ -404,11 +408,34 @@ func runsInstalledVPN() bool {
 	return self == paths.BinaryPath
 }
 
-// Lines are what the shell shows after the install screen closes. A command
-// to type stands alone on the last line, after an empty one. The command is
-// named only when vpn is installed for certain, after a pause or when the
-// running program is the installed vpn. Otherwise the owner runs the
-// downloaded program again.
+// againCommand is the command that runs the install again, named the way
+// this run was started, or "" while it is not certain that the vpn command
+// exists. That is certain once step 1 is recorded or when the running
+// program is the installed vpn. sudo is named when this run came through
+// sudo, when step 2, which installs it, is recorded, or when the caller is
+// not root. Otherwise the caller is root on a machine that may have no sudo
+// yet, and types the command as it is. An unattended run is continued
+// unattended, since a plain run is refused while a generated password is
+// still owed.
+func againCommand(unattended bool, led *installLedger) string {
+	if !runsInstalledVPN() && (led == nil || !led.done(vpnProgramStep)) {
+		return ""
+	}
+	cmd := "vpn install"
+	if os.Geteuid() != 0 || os.Getenv("SUDO_UID") != "" || (led != nil && led.done(basePackagesStep)) {
+		cmd = "sudo " + cmd
+	}
+	if unattended {
+		cmd += " --unattended"
+	}
+	return cmd
+}
+
+// Lines are what the shell shows after the install screen closes, and what
+// an unattended install ends with. A command to type stands alone on the
+// last line, after an empty one. It is named only when vpn is installed for
+// certain. Otherwise the owner runs the downloaded program again. A failed
+// step says where the details are and how to continue.
 func (e *StopError) Lines() []string {
 	var out []string
 	if e.StartErr != nil {
@@ -420,7 +447,7 @@ func (e *StopError) Lines() []string {
 		if e.StartErr == nil {
 			out = append(out, "The install did not start.")
 		}
-		if runsInstalledVPN() {
+		if e.Again != "" {
 			run = "To try again, run:"
 		} else {
 			out = append(out, "To start it, run the installer again.")
@@ -428,6 +455,15 @@ func (e *StopError) Lines() []string {
 	case e.Paused:
 		out = append(out, fmt.Sprintf("Install paused after step %d of %d (%s).", e.DoneNum, e.Total, e.DoneName))
 		run = fmt.Sprintf("To continue with step %d (%s), run:", e.StepNum, e.StepName)
+	case e.StepName != "":
+		// A command's output ends in a line break, which would print an
+		// empty line here.
+		out = append(out, "Failed: "+strings.TrimSpace(e.Error()), "Details are in "+paths.LogFile+".")
+		if e.Again != "" {
+			run = "To continue the install, run:"
+		} else {
+			out = append(out, "To continue the install, run the installer again.")
+		}
 	default:
 		out = append(out, "Failed: "+e.Error())
 	}
@@ -437,7 +473,7 @@ func (e *StopError) Lines() []string {
 		out = append(out, RootLoginMayBeOffNotice)
 	}
 	if run != "" {
-		out = append(out, run, "", "sudo vpn install")
+		out = append(out, run, "", e.Again)
 	}
 	return out
 }
@@ -536,7 +572,8 @@ func RunInstallUnattended(
 				fmt.Printf("  [....] [%d/%d] %s", n, total, name)
 			}
 		case StepFailed:
-			fmt.Printf("  [FAIL] [%d/%d] %s: %v\n", n, total, name, err)
+			// Why it failed follows once, in the lines the run ends with.
+			fmt.Printf("  [FAIL] [%d/%d] %s\n", n, total, name)
 		case StepSkipped:
 			fmt.Printf("  [skip] [%d/%d] %s\n", n, total, name)
 		case StepDone:

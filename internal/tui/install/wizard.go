@@ -765,13 +765,7 @@ func (m wizardModel) connectDialog() []string {
 func (m wizardModel) endNotice() []string {
 	text := "Exit and inspect the reported problem. A later 'sudo vpn install' checks the saved state before resuming."
 	if m.failed {
-		// Step 1 installs vpn. When it is the step that failed, there is no
-		// vpn command to name yet.
-		again := "'sudo vpn install'"
-		if len(m.steps) > 0 && m.steps[0].Status == installer.StepFailed {
-			again = "the installer"
-		}
-		text = "Installation stopped after a step failed. Inspect the reported problem before running " + again + " again. It resumes from the first incomplete step."
+		text = "The install stopped at this step."
 	}
 	text += " Details are in " + paths.LogFile + "."
 	if m.rootLoginOff {
@@ -784,7 +778,12 @@ func (m wizardModel) endNotice() []string {
 		out = append(out, wrap(m.completeErr, contentW-4, theme.Warning)...)
 		out = append(out, "")
 	}
-	return append(out, wrap(text, contentW-4, theme.Warning)...)
+	out = append(out, wrap(text, contentW-4, theme.Warning)...)
+	if m.failed {
+		// The shell says how once the screen has closed.
+		out = append(out, "", theme.Warning.Render("Quit to see how to continue."))
+	}
+	return out
 }
 
 // helpLine names the keys that work on the screen, in the TUI's help style.

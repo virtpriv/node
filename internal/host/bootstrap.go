@@ -60,16 +60,26 @@ func InstallInitialBinary() error {
 //
 // Debian does not start a newly installed dbus before the next boot. The
 // restart hold and step 4's clock setting need it now, so it is started.
-// say tells the owner what the step is doing.
-func InstallBasePackages(say func(string)) error {
-	say("Downloading Debian's package lists")
-	if err := system.RunRoot("apt-get", "update", "-qq"); err != nil {
+//
+// Both apt commands wait while Debian's own update runs, as the later steps
+// do, since Debian starts it at hours it picks at random and after a boot
+// that missed one. The lists are refreshed in the strict form. The plain
+// form passes when Debian's servers cannot be reached, and the step then
+// fails on its packages. A stop asked through ctx ends the wait and is seen
+// before the second command, so a step paused there is done again. say tells
+// the owner what the step is doing.
+func InstallBasePackages(ctx context.Context, say func(string)) error {
+	job := newDebianAptJob(say)
+	if err := job.run(ctx, "Downloading Debian's package lists",
+		sentence("Debian's package tool did not finish downloading the package lists.", refreshPackageLists)); err != nil {
 		return err
 	}
-	say("Installing the packages")
-	if err := system.RunRoot("apt-get", "satisfy", "-y", "-qq",
-		"sudo", "gnupg", "tor", "torsocks", "apt-transport-tor", "wget", "curl", "ufw", "logrotate",
-		"ca-certificates", "default-dbus-system-bus | dbus-system-bus", "systemd-timesyncd | time-daemon"); err != nil {
+	if err := job.run(ctx, "Installing the packages",
+		sentence("Debian's package tool did not finish installing the packages.", func() error {
+			return aptGet(job, "satisfy",
+				"sudo", "gnupg", "tor", "torsocks", "apt-transport-tor", "wget", "curl", "ufw", "logrotate",
+				"ca-certificates", "default-dbus-system-bus | dbus-system-bus", "systemd-timesyncd | time-daemon")
+		})); err != nil {
 		return err
 	}
 	return system.RunRoot("systemctl", "start", "dbus.socket")
@@ -227,7 +237,9 @@ DPkg::Post-Invoke {"if [ -x ` + paths.BinaryPath + ` ]; then ` + paths.BinaryPat
 // would be recorded but never enforced. nftables' own service stays off.
 func InstallFail2ban(ctx context.Context, say func(string)) error {
 	job := newDebianAptJob(say)
-	return job.run(ctx, "Installing fail2ban", func() error { return installPackages(job, "fail2ban", "nftables") })
+	return job.run(ctx, "Installing fail2ban",
+		sentence("Debian's package tool did not finish installing fail2ban.",
+			func() error { return aptGet(job, "install", "fail2ban", "nftables") }))
 }
 
 var (

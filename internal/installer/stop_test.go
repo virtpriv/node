@@ -189,3 +189,44 @@ func TestRootSSHChangeNotConfirmedWarnsAboutRootLogin(t *testing.T) {
 		})
 	}
 }
+
+// After a failed step the shell names the command that continues the install
+// the way this run was started. It names none while vpn may not be installed,
+// and no sudo while root runs on a machine that may not have it yet.
+func TestRootAFailedStepNamesTheCommandThatContinues(t *testing.T) {
+	requireRootTestEnvironment(t)
+	for _, tc := range []struct {
+		name    string
+		done    int
+		sudoUID string
+		want    string
+	}{
+		{"step 1 failed, so vpn may not be installed", 0, "1000", ""},
+		{"step 2 failed for root, so sudo may not be installed", 1, "", "vpn install"},
+		{"step 2 failed in a run that came through sudo", 1, "1000", "sudo vpn install"},
+		{"a later step failed, after step 2 installed sudo", 2, "", "sudo vpn install"},
+		{"a step failed after root's login went off", keyIndex(t, rootLoginOffStep) + 1, "", "sudo vpn install"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SUDO_UID", tc.sudoUID)
+			run := stopFixture(t, tc.done)
+			err := run(true, goodPassword, func(_ *InstallSession, i int) error {
+				if i == tc.done {
+					return errors.New("boom")
+				}
+				return nil
+			})
+			stop, ok := errors.AsType[*StopError](err)
+			if !ok || stop.StepNum != tc.done+1 || stop.Again != tc.want {
+				t.Fatalf("got %#v, want step %d failed and the command %q", err, tc.done+1, tc.want)
+			}
+			// The command stands alone on the last line, under the notice
+			// about root's login. With no command the lines end in words.
+			lines := stop.Lines()
+			last := lines[len(lines)-1]
+			if (tc.want != "" && last != tc.want) || (tc.want == "" && last == "") {
+				t.Fatalf("the shell ends with %q in %q", last, lines)
+			}
+		})
+	}
+}

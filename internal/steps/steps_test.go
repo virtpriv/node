@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/virtpriv/node/internal/failure"
 )
 
 // recorder is a sink that keeps what the runner told it, in order.
@@ -125,4 +127,20 @@ func TestAFailedStepEndsTheRunAndKeepsItsCause(t *testing.T) {
 	if res.Outcome != Failed || res.Index != 1 || !errors.Is(res.Err, boom) || !errors.Is(res.Err, lost) || later != 0 {
 		t.Fatalf("got %+v, later ran %d times", res, later)
 	}
+}
+
+// A failure with a plain sentence logs the sentence, then the program's own
+// words line by line. Those words are shown nowhere else, so the log must
+// hold all of them. A control character in them cannot reach a terminal that
+// shows the log.
+func TestAFailuresOwnWordsFollowItsSentenceInTheLog(t *testing.T) {
+	own := errors.New("apt-get update: exit status 100: E: Failed to fetch\x1b[2J\n\nE: Some index files failed to download.")
+	sink := &recorder{}
+	Run(context.Background(), []Step{{Name: "first", Run: func(context.Context) error {
+		return &failure.Failure{Text: "The lists were not downloaded.", Cause: own}
+	}}}, sink)
+	sink.is(t, "begin 0", "log 0 "+logStarting+"first", "end 0 failed",
+		"log 0 "+logFailed+"first: The lists were not downloaded.",
+		"log 0 "+logCause+"apt-get update: exit status 100: E: Failed to fetch [2J",
+		"log 0 "+logCause+"E: Some index files failed to download.")
 }

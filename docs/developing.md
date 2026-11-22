@@ -17,8 +17,9 @@ opens.
 During interactive installation, Ctrl+C asks for a pause. A step that is
 waiting, for Tor or for Debian's own update, stops waiting at once. A command
 that is running, such as apt, is never interrupted. The pause then comes when
-the step ends, or, in the step that updates Debian, before its next command. A
-step that was paused part way is not recorded, so the next run does it again.
+the step ends, or, in the two steps that run more than one apt command, before
+the next one. A step that was paused part way is not recorded, so the next run
+does it again.
 Keep the terminal open while it pauses. The installer keeps its lock until
 that work settles, and changes are not undone. If the last step finishes, the
 installer still publishes completion. Forced process death can leave
@@ -28,6 +29,10 @@ If a step fails or installation stops, inspect the reported result before
 running it again. When the installer can prove that it is resuming the same
 recognizable fresh-install lifecycle, it continues from the incomplete work. A
 completed base installation reports already installed and stops.
+
+A failed step shows one plain sentence where the installer has one. The failing
+program's own words are in `/var/log/vpn.log`, in the lines marked "cause:"
+under the step's FAILED line.
 
 During installation, password paste preserves spaces and accepts one trailing
 newline. Input that would be altered or exceed the field's 128-character limit
@@ -82,7 +87,7 @@ request carries the API number its TUI speaks, and `vpnd` refuses a number it
 does not serve, so a TUI left open across an update may be asked to open
 again.
 
-Update Packages waits while Debian's daily update runs, at most an hour. It then
+Update Packages waits while Debian's own update runs, at most an hour. It then
 refreshes the package lists, runs Debian's `unattended-upgrade` with vpn's rules
 and ends with a `dpkg --audit` consistency check. A failed refresh stops the
 upgrade. Install step 11 and the nightly job run the same program with the same
