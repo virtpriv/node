@@ -89,6 +89,7 @@ func productionLifecycleFS() lifecycleFS {
 			paths.AptRebootCheck,
 			paths.DisableIPv6Conf,
 			paths.DisableMPTCPConf,
+			paths.TorRestartDropIn,
 			paths.JournaldDropIn,
 			paths.LogRotate,
 			paths.Fail2banJail,

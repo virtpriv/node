@@ -302,7 +302,7 @@ func TestLifecycleIgnoresAccountsThatAreNotItsOwn(t *testing.T) {
 	}
 }
 
-// The first fourteen are what this installer writes. The last four are what
+// The first fifteen are what this installer writes. The last four are what
 // v0.6.x left on a machine under its earlier name. The program and its log
 // are left out, since they exist before a fresh install starts.
 func TestProductionLifecycleEvidenceInventory(t *testing.T) {
@@ -317,6 +317,7 @@ func TestProductionLifecycleEvidenceInventory(t *testing.T) {
 		paths.AptRebootCheck,
 		paths.DisableIPv6Conf,
 		paths.DisableMPTCPConf,
+		paths.TorRestartDropIn,
 		paths.JournaldDropIn,
 		paths.LogRotate,
 		paths.Fail2banJail,
@@ -330,8 +331,8 @@ func TestProductionLifecycleEvidenceInventory(t *testing.T) {
 	if !slices.Equal(fs.unmarkedPaths, want) {
 		t.Errorf("the classifier looks for %v, want %v", fs.unmarkedPaths, want)
 	}
-	if !slices.Equal(fs.conflictPaths, want[14:]) {
-		t.Errorf("a marked install conflicts with %v, want %v", fs.conflictPaths, want[14:])
+	if !slices.Equal(fs.conflictPaths, want[15:]) {
+		t.Errorf("a marked install conflicts with %v, want %v", fs.conflictPaths, want[15:])
 	}
 	for _, allowed := range []string{paths.BinaryPath, paths.LogFile} {
 		if slices.Contains(fs.unmarkedPaths, allowed) {

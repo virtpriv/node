@@ -40,7 +40,8 @@ func torSettingsVerdict(content string) error {
 			continue
 		}
 		return fmt.Errorf("found settings in %s, the first on line %d. "+
-			"vpn uses Tor as Debian sets it up, so this file must hold only comments",
+			"vpn uses Tor as Debian sets it up, so this file must hold only comments. "+
+			"Use a fresh machine, or turn the settings into comments and run the installer again",
 			paths.Torrc, i+1)
 	}
 	return nil

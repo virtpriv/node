@@ -415,7 +415,7 @@ var (
 	upgradeDebian         = host.UpgradeDebian
 	verifyTorAfterUpgrade = func(ctx context.Context, say func(string)) error {
 		say("Checking that Tor is still connected")
-		return waitForTorBootstrap(ctx, say, torStallWindow, torBootstrapCeiling)
+		return waitForTor(ctx, say)
 	}
 )
 
