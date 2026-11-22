@@ -36,7 +36,7 @@ func stopFixture(t *testing.T, done int) (run func(start bool, password string, 
 			s.runner.ledgerPath = f.fs.ledger
 			s.complete = func() error { return errors.New("unexpected finalization") }
 			for i := range s.runner.steps {
-				s.runner.steps[i].Fn = func() error { return fn(s, i) }
+				s.runner.steps[i].Run = plain(func() error { return fn(s, i) })
 			}
 			if !start {
 				return nil

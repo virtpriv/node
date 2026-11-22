@@ -34,6 +34,7 @@ func (s *fakeSession) Start(in installer.InteractiveInput) error {
 }
 func (s *fakeSession) Stop()                                 { s.stops++ }
 func (s *fakeSession) Events() <-chan installer.InstallEvent { return s.events }
+func (s *fakeSession) Doing() (int, string)                  { return 0, "" }
 
 // loginStub stands in for the SSH log reader of the connect dialog.
 type loginStub struct {

@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -11,8 +12,11 @@ import (
 // fakeClock moves only when the code under test sleeps.
 type fakeClock struct{ now time.Time }
 
-func (c *fakeClock) Now() time.Time                      { return c.now }
-func (c *fakeClock) Sleep(d time.Duration)               { c.now = c.now.Add(d) }
+func (c *fakeClock) Now() time.Time { return c.now }
+func (c *fakeClock) Sleep(_ context.Context, d time.Duration) error {
+	c.now = c.now.Add(d)
+	return nil
+}
 func (c *fakeClock) since(start time.Time) time.Duration { return c.now.Sub(start) }
 
 // The messages apt 3.0.3 and unattended-upgrades 2.12 print, in the C
@@ -29,8 +33,8 @@ var aptLockMessages = []string{
 func TestDebianJobStillRunningAfterAnHour(t *testing.T) {
 	clock := &fakeClock{now: time.Unix(1_800_000_000, 0)}
 	start := clock.now
-	job := debianAptJob{running: func() (bool, error) { return true, nil }, sleep: clock.Sleep, now: clock.Now}
-	err := job.run(func() error {
+	job := debianAptJob{say: func(string) {}, running: func() (bool, error) { return true, nil }, sleep: clock.Sleep, now: clock.Now}
+	err := job.run(context.Background(), "", func() error {
 		t.Fatal("ran while Debian's job was running")
 		return nil
 	})
@@ -61,10 +65,11 @@ func TestDebianJobLockErrorWaitsOnceMore(t *testing.T) {
 				var busyUntil time.Time
 				runs := 0
 				job := debianAptJob{
+					say:     func(string) {},
 					running: func() (bool, error) { return clock.now.Before(busyUntil), nil },
 					sleep:   clock.Sleep, now: clock.Now,
 				}
-				err := job.run(func() error {
+				err := job.run(context.Background(), "", func() error {
 					runs++
 					if runs <= tc.failures {
 						busyUntil = clock.now.Add(5 * time.Minute)
@@ -90,10 +95,97 @@ func TestDebianJobOtherErrorsAreNotRetried(t *testing.T) {
 	clock := &fakeClock{now: time.Unix(1_800_000_000, 0)}
 	failure := errors.New("apt-get update --error-on=any -qq: exit status 100: E: Failed to fetch tor+https://deb.debian.org/debian/dists/trixie/InRelease")
 	runs := 0
-	job := debianAptJob{running: func() (bool, error) { return false, nil }, sleep: clock.Sleep, now: clock.Now}
-	err := job.run(func() error { runs++; return failure })
+	job := debianAptJob{say: func(string) {}, running: func() (bool, error) { return false, nil }, sleep: clock.Sleep, now: clock.Now}
+	err := job.run(context.Background(), "", func() error { runs++; return failure })
 	if runs != 1 || !errors.Is(err, failure) {
 		t.Fatalf("ran %d times, error %v", runs, err)
+	}
+}
+
+// A stop asked while a command ran is seen before the next command starts,
+// also when Debian's job does not run and the wait would return at once.
+func TestDebianJobSeesAStopBeforeTheNextCommand(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(1_800_000_000, 0)}
+	ctx, stop := context.WithCancel(context.Background())
+	job := debianAptJob{say: func(string) {}, running: func() (bool, error) { return false, nil }, sleep: clock.Sleep, now: clock.Now}
+	if err := job.run(ctx, "", func() error { stop(); return nil }); err != nil {
+		t.Fatalf("the command that ran when the stop came: %v", err)
+	}
+	err := job.run(ctx, "", func() error {
+		t.Fatal("a command started after the stop")
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error %v, want the stop", err)
+	}
+}
+
+// While Debian's job runs the owner is told once what vpn waits for, however
+// long the wait. Then the command's own line replaces it and the command
+// runs.
+func TestDebianJobSaysWhyItWaitsThenWhatItDoes(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(1_800_000_000, 0)}
+	busyUntil := clock.now.Add(time.Minute)
+	var said []string
+	job := debianAptJob{
+		say:     func(text string) { said = append(said, text) },
+		running: func() (bool, error) { return clock.now.Before(busyUntil), nil },
+		sleep:   clock.Sleep, now: clock.Now,
+	}
+	ran := false
+	if err := job.run(context.Background(), "what the command does", func() error { ran = true; return nil }); err != nil || !ran {
+		t.Fatalf("ran %v, error %v", ran, err)
+	}
+	if len(said) != 2 || said[0] != debianAptJobWaiting || said[1] != "what the command does" {
+		t.Fatalf("said %q, want the waiting line once, then the command's", said)
+	}
+}
+
+// A stop ends the wait for Debian's job at once and no command runs.
+func TestDebianJobWaitGivesWayToAStop(t *testing.T) {
+	ctx, stop := context.WithCancel(context.Background())
+	now := time.Unix(1_800_000_000, 0)
+	sleeps := 0
+	job := debianAptJob{
+		say:     func(string) {},
+		running: func() (bool, error) { return true, nil },
+		sleep: func(ctx context.Context, _ time.Duration) error {
+			if sleeps++; sleeps == 3 {
+				stop()
+			}
+			return ctx.Err()
+		},
+		now: func() time.Time { return now },
+	}
+	err := job.run(ctx, "", func() error {
+		t.Fatal("ran while Debian's job was running")
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) || sleeps != 3 {
+		t.Fatalf("error %v after %d sleeps, want the stop at the third", err, sleeps)
+	}
+}
+
+// A command that failed stays a failure when the stop comes in the wait
+// before its second try. Its error comes back alone, so the install's runner
+// cannot take it for a stop.
+func TestDebianJobFailureIsNotHiddenByAStop(t *testing.T) {
+	ctx, stop := context.WithCancel(context.Background())
+	busy := false
+	failure := errors.New(aptLockMessages[0])
+	now := time.Unix(1_800_000_000, 0)
+	job := debianAptJob{
+		say:     func(string) {},
+		running: func() (bool, error) { return busy, nil },
+		sleep: func(ctx context.Context, _ time.Duration) error {
+			stop()
+			return ctx.Err()
+		},
+		now: func() time.Time { return now },
+	}
+	err := job.run(ctx, "", func() error { busy = true; return failure })
+	if err != failure {
+		t.Fatalf("error %v, want the command's own and nothing else", err)
 	}
 }
 

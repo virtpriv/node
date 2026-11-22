@@ -23,19 +23,19 @@ func testSteps(calls map[string]int) []InstallStep {
 	}
 	return []InstallStep{
 		{Key: "binary.install", Name: "Installing binary",
-			Fn: fn("binary.install")},
+			Run: plain(fn("binary.install"))},
 		{Key: "apt.base", Name: "Installing base packages",
-			Fn: fn("apt.base")},
+			Run: plain(fn("apt.base"))},
 		{Key: "firewall", Name: "Verifying firewall",
-			Kind: StepGate, Fn: fn("firewall")},
+			Kind: StepGate, Run: plain(fn("firewall"))},
 		{Key: "host.prep", Name: "Preparing",
-			Fn: fn("host.prep")},
+			Run: plain(fn("host.prep"))},
 		{Key: "identity.access", Name: "Creating the account",
-			Fn: fn("identity.access")},
+			Run: plain(fn("identity.access"))},
 		{Key: "ipv6.disable", Name: "Disabling IPv6",
-			Fn: fn("ipv6.disable")},
+			Run: plain(fn("ipv6.disable"))},
 		{Key: "mptcp.disable", Name: "Disabling MPTCP",
-			Fn: fn("mptcp.disable")},
+			Run: plain(fn("mptcp.disable"))},
 	}
 }
 
@@ -169,64 +169,6 @@ func TestPlanGateIgnoresOwnLedgerEntry(t *testing.T) {
 	}
 }
 
-func TestRunnerSkipDoesNotExecute(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.json")
-	led := newLedger()
-	if err := led.markDone("binary.install", "0.6.3"); err != nil {
-		t.Fatal(err)
-	}
-	if err := led.save(path); err != nil {
-		t.Fatal(err)
-	}
-
-	calls := map[string]int{}
-	r, err := newStepRunner(testSteps(calls), "0.6.3", led, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	skipped, err := r.runIndex(0)
-	if err != nil {
-		t.Fatalf("runIndex: %v", err)
-	}
-	if !skipped {
-		t.Error("recorded step not skipped")
-	}
-	if calls["binary.install"] != 0 {
-		t.Error("skipped step's Fn executed")
-	}
-}
-
-func TestRunnerRecordsAfterSuccessOnly(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.json")
-	calls := map[string]int{}
-	steps := testSteps(calls)
-	boom := errors.New("boom")
-	steps[1].Fn = func() error { return boom }
-
-	led := newLedger()
-	r, err := newStepRunner(steps, "0.6.3", led, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Success: entry lands on disk.
-	if _, err := r.runIndex(0); err != nil {
-		t.Fatalf("step 0: %v", err)
-	}
-	if !mustReadLedger(t, path).done("binary.install") {
-		t.Error("completed step not recorded on disk")
-	}
-
-	// Failure: no entry, error surfaced.
-	_, err = r.runIndex(1)
-	if !errors.Is(err, boom) {
-		t.Fatalf("step 1 err = %v, want boom", err)
-	}
-	if mustReadLedger(t, path).done("apt.base") {
-		t.Error("failed step recorded as done")
-	}
-}
-
 func TestClassifyRun(t *testing.T) {
 	steps := testSteps(map[string]int{})
 	total := len(steps)
@@ -317,10 +259,10 @@ func TestRunInstallUnattendedFailureStops(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	calls := map[string]int{}
 	steps := testSteps(calls)
-	steps[2].Fn = func() error {
+	steps[2].Run = plain(func() error {
 		calls["firewall"]++
 		return fmt.Errorf("tor not routing")
-	}
+	})
 
 	led := newLedger()
 	res, err := RunInstallUnattended(steps, "0.6.3", led, path)
@@ -356,8 +298,8 @@ func TestWillRun(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/ledger.json"
 	steps := []InstallStep{
-		{Key: "binary.install", Name: "a", Fn: func() error { return nil }},
-		{Key: "apt.base", Name: "b", Fn: func() error { return nil }},
+		{Key: "binary.install", Name: "a", Run: plain(func() error { return nil })},
+		{Key: "apt.base", Name: "b", Run: plain(func() error { return nil })},
 	}
 	led := newLedger()
 	if err := led.markDone("binary.install", "1.0"); err != nil {

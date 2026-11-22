@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -59,10 +60,13 @@ func InstallInitialBinary() error {
 //
 // Debian does not start a newly installed dbus before the next boot. The
 // restart hold and step 4's clock setting need it now, so it is started.
-func InstallBasePackages() error {
+// say tells the owner what the step is doing.
+func InstallBasePackages(say func(string)) error {
+	say("Downloading Debian's package lists")
 	if err := system.RunRoot("apt-get", "update", "-qq"); err != nil {
 		return err
 	}
+	say("Installing the packages")
 	if err := system.RunRoot("apt-get", "satisfy", "-y", "-qq",
 		"sudo", "gnupg", "tor", "torsocks", "apt-transport-tor", "wget", "curl", "ufw", "logrotate",
 		"ca-certificates", "default-dbus-system-bus | dbus-system-bus", "systemd-timesyncd | time-daemon"); err != nil {
@@ -221,9 +225,9 @@ DPkg::Post-Invoke {"if [ -x ` + paths.BinaryPath + ` ]; then ` + paths.BinaryPat
 // through nft, which only the nftables package brings. fail2ban merely
 // recommends it, so a host that already has iptables gets none, and its bans
 // would be recorded but never enforced. nftables' own service stays off.
-func InstallFail2ban() error {
-	job := newDebianAptJob()
-	return job.run(func() error { return installPackages(job, "fail2ban", "nftables") })
+func InstallFail2ban(ctx context.Context, say func(string)) error {
+	job := newDebianAptJob(say)
+	return job.run(ctx, "Installing fail2ban", func() error { return installPackages(job, "fail2ban", "nftables") })
 }
 
 var (

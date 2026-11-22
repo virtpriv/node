@@ -2,6 +2,7 @@
 package installer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -139,6 +140,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	ledger := lifecycle.Ledger
 	defer func() { retErr = withRootLoginOff(retErr, ledger) }()
 	if lifecycle.Disposition == lifecycleCompleted {
+		logger.Install("already installed, no changes were made")
 		fmt.Println("\n  Virtual Private Node is already installed. No changes were made.")
 		return nil
 	}
@@ -398,8 +400,9 @@ func fillGeneratedPassword(dec *InstallDecisions) error {
 // restart of Tor does not change whether torsocks intercepts.
 var (
 	upgradeDebian         = host.UpgradeDebian
-	verifyTorAfterUpgrade = func() error {
-		return waitForTorBootstrap(torStallWindow, torBootstrapCeiling)
+	verifyTorAfterUpgrade = func(ctx context.Context, say func(string)) error {
+		say("Checking that Tor is still connected")
+		return waitForTorBootstrap(ctx, say, torStallWindow, torBootstrapCeiling)
 	}
 )
 
@@ -416,11 +419,11 @@ func buildInstallSteps(dec *InstallDecisions, holdRestarts func() error) []Insta
 	return []InstallStep{
 		{Key: "binary.install",
 			Name: "Installing the vpn program",
-			Fn:   host.InstallInitialBinary},
+			Run:  plain(host.InstallInitialBinary)},
 		{Key: basePackagesStep,
 			Name: "Installing Tor, the firewall, and base tools",
-			Fn: func() error {
-				if err := host.InstallBasePackages(); err != nil {
+			Run: func(_ context.Context, say func(string)) error {
+				if err := host.InstallBasePackages(say); err != nil {
 					return err
 				}
 				if err := host.ConfigureLogRotation(); err != nil {
@@ -430,21 +433,21 @@ func buildInstallSteps(dec *InstallDecisions, holdRestarts func() error) []Insta
 				return holdRestarts()
 			}},
 		{Key: "firewall", Name: "Closing every port except SSH",
-			Fn: host.ConfigureInitialFirewall},
+			Run: plain(host.ConfigureInitialFirewall)},
 		{Key: "host.prep",
 			Name: "Checking the host name and clock sync",
-			Fn:   host.PrepareBaseHost},
+			Run:  plain(host.PrepareBaseHost)},
 		{Key: "identity.access",
 			Name: "Creating your " + paths.AdminUser + " user account",
-			Fn: func() error {
+			Run: plain(func() error {
 				return applyIdentityAccess(dec)
-			}},
+			})},
 		{Key: "ipv6.disable", Name: "Turning off IPv6",
-			Fn: host.DisableIPv6},
+			Run: plain(host.DisableIPv6)},
 		{Key: "mptcp.disable", Name: "Turning off Multipath TCP",
-			Fn: host.DisableMPTCP},
+			Run: plain(host.DisableMPTCP)},
 		{Key: "tor.configure", Name: "Setting up Tor",
-			Fn: host.EnableAndRestartTor},
+			Run: plain(host.EnableAndRestartTor)},
 		// Hard gate. No step below that sends apt through Tor runs unless
 		// Tor routing is verified. See torgate.go. As a StepGate it is
 		// checked again on every pass, resumes included, so no package comes
@@ -452,9 +455,9 @@ func buildInstallSteps(dec *InstallDecisions, holdRestarts func() error) []Insta
 		// same pass. The check that torsocks is present runs inside this
 		// step, after Tor is installed.
 		{Key: "tor.gate", Name: "Verifying the Tor connection",
-			Kind: StepGate, Fn: verifyTorRouting},
+			Kind: StepGate, Run: verifyTorRouting},
 		{Key: "apt.tor", Name: "Sending apt package downloads through Tor",
-			Fn: host.ConfigureAptTor},
+			Run: plain(host.ConfigureAptTor)},
 		// Through Tor, like every later apt operation. Debian's own
 		// unattended-upgrade runs with vpn's rules, the program every later
 		// update runs, and its nightly job is turned on. An upgrade can
@@ -463,43 +466,41 @@ func buildInstallSteps(dec *InstallDecisions, holdRestarts func() error) []Insta
 		// installs a package through it.
 		{Key: "base.upgrade",
 			Name: "Updating Debian and turning on its security updates",
-			Fn: func() error {
-				if err := upgradeDebian(); err != nil {
+			Run: func(ctx context.Context, say func(string)) error {
+				if err := upgradeDebian(ctx, say); err != nil {
 					return err
 				}
-				return verifyTorAfterUpgrade()
+				return verifyTorAfterUpgrade(ctx, say)
 			}},
 		// SSH login protection as early as its package can come through
 		// Tor, on the lists the upgrade just refreshed.
 		{Key: "security", Name: "Turning on fail2ban login protection",
-			Fn: func() error {
-				if err := host.InstallFail2ban(); err != nil {
+			Run: func(ctx context.Context, say func(string)) error {
+				if err := host.InstallFail2ban(ctx, say); err != nil {
 					return err
 				}
 				return host.ConfigureFail2ban()
 			}},
 		// Debian's zram package, so it comes after apt uses Tor.
 		{Key: "swap.zram", Name: "Setting up compressed swap",
-			Fn: host.SetUpCompressedSwap},
+			Run: host.SetUpCompressedSwap},
 
 		// Checks the owner's sudo first, then turns root's SSH login off and
 		// the owner's password login on. The root session running the
 		// install stays open, so the later steps run in it.
 		{Key: rootLoginOffStep,
 			Name: "Turning off root login over SSH",
-			Fn: func() error {
-				return installSSHHardening()
-			}},
+			Run:  plain(installSSHHardening)},
 		// The unprivileged TUI uses vpnd's fixed requests. The owner can
 		// separately authenticate with sudo for general host maintenance.
 		{Key: "journal.access",
 			Name: "Keeping system logs on disk for your " + paths.AdminUser + " user to read",
-			Fn:   host.SetupJournalAccess},
+			Run:  plain(host.SetupJournalAccess)},
 		{Key: "helper.enable",
 			Name: "Starting vpnd, the node's root service",
-			Fn:   host.InstallVPNDUnits},
+			Run:  plain(host.InstallVPNDUnits)},
 		// Last. It makes a folder in the owner's home.
 		{Key: "releases.folder", Name: "Creating the releases folder",
-			Fn: host.CreateReleasesFolder},
+			Run: plain(host.CreateReleasesFolder)},
 	}
 }

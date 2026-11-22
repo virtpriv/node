@@ -8,6 +8,7 @@ package host
 // is left as it is, and zram is used before it.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -34,8 +35,9 @@ type zramOps struct {
 // SetUpCompressedSwap installs the package through apt, which goes through
 // Tor by then, and turns zram on now, without a reboot. A kernel without zram,
 // or zram switched off on the machine, installs as before. Any other failure
-// is returned, so a resume tries again.
-func SetUpCompressedSwap() error {
+// is returned, so a resume tries again. A stop asked through ctx ends the
+// wait for Debian's own job. say tells the owner what the step is doing.
+func SetUpCompressedSwap(ctx context.Context, say func(string)) error {
 	return setUpCompressedSwap(zramOps{
 		moduleAvailable: func() bool {
 			_, err := system.RunOutput("modinfo", "-n", "zram")
@@ -46,8 +48,8 @@ func SetUpCompressedSwap() error {
 			return string(data), err
 		},
 		install: func() error {
-			job := newDebianAptJob()
-			return job.run(func() error { return installPackages(job, "systemd-zram-generator") })
+			job := newDebianAptJob(say)
+			return job.run(ctx, "Installing Debian's compressed swap package", func() error { return installPackages(job, "systemd-zram-generator") })
 		},
 		unitState: func() (string, error) {
 			return system.RunOutput("systemctl", "show", "--property=LoadState", "--value", "dev-zram0.swap")

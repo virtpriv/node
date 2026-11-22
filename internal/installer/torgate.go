@@ -29,6 +29,7 @@ package installer
 
 import (
 	"bufio"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -55,20 +56,23 @@ const (
 	torProbeAttempts = 2
 )
 
-// verifyTorRouting is the "Verifying the Tor connection" install step.
-func verifyTorRouting() error {
+// verifyTorRouting is the "Verifying the Tor connection" install step. A
+// pause asked through ctx ends its waits.
+func verifyTorRouting(ctx context.Context, say func(string)) error {
 	if _, err := exec.LookPath("torsocks"); err != nil {
 		return fmt.Errorf("torsocks not found, refusing to continue: " +
 			"every download must go through Tor")
 	}
 
-	if err := waitForTorBootstrap(
+	say("Waiting for Tor to connect")
+	if err := waitForTorBootstrap(ctx, say,
 		torStallWindow, torBootstrapCeiling); err != nil {
 		return err
 	}
 	logger.Install("Tor bootstrap 100%% CONFIRMED (via control socket)")
 
-	return runTorExitProbe()
+	say("Sending a test request through Tor")
+	return runTorExitProbe(ctx)
 }
 
 // waitForTorBootstrap polls Tor's control socket until it reports
@@ -79,8 +83,11 @@ func verifyTorRouting() error {
 // retried silently within the same clocks, since right after
 // host.EnableAndRestartTor the control socket may not be there yet. The
 // messages name tor@default, the real Tor. Debian's tor.service only runs
-// /bin/true.
+// /bin/true. A pause asked through ctx ends the wait with ctx's error. Tor
+// is asked once first, so a Tor that is ready passes even then, and the
+// step it ends is recorded. say tells the owner how far Tor is.
 func waitForTorBootstrap(
+	ctx context.Context, say func(string),
 	stallWindow, ceiling time.Duration,
 ) error {
 	start := time.Now()
@@ -89,13 +96,13 @@ func waitForTorBootstrap(
 	var lastErr error
 
 	for {
-		progress, err := queryTorBootstrapProgress()
+		progress, err := torProgress()
 		if err == nil {
 			if progress >= 100 {
 				return nil
 			}
 			if progress != lastProgress {
-				logger.Install("Tor bootstrapping: %d%%", progress)
+				say(fmt.Sprintf("Waiting for Tor to connect: %d%%", progress))
 				lastProgress = progress
 				lastAdvance = time.Now()
 			}
@@ -107,7 +114,9 @@ func waitForTorBootstrap(
 			stallWindow, ceiling) {
 			break
 		}
-		time.Sleep(torBootstrapPoll)
+		if err := system.Sleep(ctx, torBootstrapPoll); err != nil {
+			return err
+		}
 	}
 
 	if lastProgress < 0 && lastErr != nil {
@@ -141,6 +150,9 @@ func keepWaitingForTor(
 	}
 	return true
 }
+
+// torProgress asks Tor how far its start is. A test stands in for Tor.
+var torProgress = queryTorBootstrapProgress
 
 // queryTorBootstrapProgress performs one round trip on the control socket:
 // AUTHENTICATE with the cookie, GETINFO status/bootstrap-phase,
@@ -248,8 +260,9 @@ func torProbeVerdict(output string, err error) torProbeResult {
 
 // runTorExitProbe runs the best-effort outside check. Only a proven
 // clearnet exit (IsTor:false) fails the step. An unreachable site warns
-// and the install continues.
-func runTorExitProbe() error {
+// and the install continues. A pause asked through ctx ends the wait between
+// two tries.
+func runTorExitProbe(ctx context.Context) error {
 	for attempt := 0; attempt < torProbeAttempts; attempt++ {
 		output, err := system.RunOutputWithTimeout(15*time.Second,
 			"torsocks", "curl", "-s", "--max-time", "10",
@@ -265,7 +278,9 @@ func runTorExitProbe() error {
 				"torsocks is not intercepting. Refusing to continue")
 		case probeUnreachable:
 			if attempt < torProbeAttempts-1 {
-				time.Sleep(5 * time.Second)
+				if err := system.Sleep(ctx, 5*time.Second); err != nil {
+					return err
+				}
 			}
 		}
 	}

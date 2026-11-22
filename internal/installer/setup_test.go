@@ -3,6 +3,7 @@
 package installer
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -415,14 +416,26 @@ func TestPackageUpgradeConfirmsTorBeforeItReportsDone(t *testing.T) {
 		{false, true, "upgrade"},
 	} {
 		var calls []string
-		upgradeDebian = func() error {
+		// The step hands its own context on, so a pause reaches both waits.
+		// Here the pause is already asked. The step itself does not look at
+		// it, so an upgrade that finished with Tor connected stays done.
+		type mark struct{}
+		ctx, stop := context.WithCancel(context.WithValue(context.Background(), mark{}, true))
+		stop()
+		upgradeDebian = func(got context.Context, _ func(string)) error {
+			if got.Value(mark{}) == nil {
+				t.Error("the upgrade did not get the step's context")
+			}
 			calls = append(calls, "upgrade")
 			if !tc.upgraded {
 				return errors.New("apt failed")
 			}
 			return nil
 		}
-		verifyTorAfterUpgrade = func() error {
+		verifyTorAfterUpgrade = func(got context.Context, _ func(string)) error {
+			if got.Value(mark{}) == nil {
+				t.Error("the Tor check did not get the step's context")
+			}
 			calls = append(calls, "verify Tor")
 			if !tc.torReturns {
 				return errors.New("Tor is not routing")
@@ -439,7 +452,7 @@ func TestPackageUpgradeConfirmsTorBeforeItReportsDone(t *testing.T) {
 		if step == nil {
 			t.Fatal("no package upgrade step")
 		}
-		err := step.Fn()
+		err := step.Run(ctx, func(string) {})
 		if strings.Join(calls, ", ") != tc.want {
 			t.Fatalf("step did %q, want %q", calls, tc.want)
 		}

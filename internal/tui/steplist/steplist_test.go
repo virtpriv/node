@@ -19,7 +19,7 @@ func TestStepTextCannotControlTheTerminal(t *testing.T) {
 	codes := []string{"\x1b[2J", "\x1b[H", "\x1b]0;title\a", "\r", "\b"}
 	bad := strings.Join(codes, "")
 	for _, state := range []State{Ahead, Running, Done, Failed, Earlier, Stopped} {
-		step := Step{Name: "Check" + bad + "node", State: state, Err: "write" + bad + "failed"}
+		step := Step{Name: "Check" + bad + "node", State: state, Err: "write" + bad + "failed", Doing: "Tor" + bad + "says"}
 		rows, _, _ := Rows([]Step{step}, 70, "*", time.Now(), 0)
 		out := strings.Join(rows, "\n")
 		for _, code := range codes {

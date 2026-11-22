@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -41,19 +42,21 @@ func runUnattendedUpgrade() error {
 // unattended-upgrades is then installed, which turns the nightly job on,
 // vpn's rules are written, and the program runs once. The reboot check runs
 // once more at the end, since with nothing to install no hook runs. A
-// resumed install repeats the whole step.
-func UpgradeDebian() error {
-	job := newDebianAptJob()
-	if err := job.run(refreshPackageLists); err != nil {
+// resumed install repeats the whole step. A stop asked through ctx takes
+// effect before the next command, never during one. say tells the owner
+// what the step is doing.
+func UpgradeDebian(ctx context.Context, say func(string)) error {
+	job := newDebianAptJob(say)
+	if err := job.run(ctx, "Downloading Debian's package lists", refreshPackageLists); err != nil {
 		return err
 	}
-	if err := job.run(func() error { return installPackages(job, "unattended-upgrades") }); err != nil {
+	if err := job.run(ctx, "Installing Debian's update program", func() error { return installPackages(job, "unattended-upgrades") }); err != nil {
 		return err
 	}
 	if err := ConfigureUnattendedUpgrades(); err != nil {
 		return err
 	}
-	if err := job.run(runUnattendedUpgrade); err != nil {
+	if err := job.run(ctx, "Installing Debian's updates", runUnattendedUpgrade); err != nil {
 		return err
 	}
 	logRebootCheck(logger.Install)
@@ -94,12 +97,13 @@ func UpdatePackages(progress func(int)) error {
 		return nothingChanged(fmt.Errorf("cannot hold off a restart: %w", err))
 	}
 	defer inhibitor.Release()
-	job := newDebianAptJob()
-	if err := job.run(refreshPackageLists); err != nil {
+	// A job cannot be stopped and its screen shows no line of its own.
+	ctx, job := context.Background(), newDebianAptJob(func(string) {})
+	if err := job.run(ctx, "", refreshPackageLists); err != nil {
 		return fmt.Errorf("refresh package lists: %w", err)
 	}
 	progress(0)
-	if err := job.run(runUnattendedUpgrade); err != nil {
+	if err := job.run(ctx, "", runUnattendedUpgrade); err != nil {
 		return fmt.Errorf("upgrade packages: %w", err)
 	}
 	logRebootCheck(logger.System)
@@ -129,19 +133,25 @@ const debianAptJobPoll = 5 * time.Second
 
 var errDebianJobStillRunning = errors.New("the daily Debian update was still running after an hour")
 
+// debianAptJobWaiting is what the owner reads while vpn waits.
+const debianAptJobWaiting = "Waiting for Debian's own update to finish"
+
 // debianAptJob waits while Debian's nightly job runs, so vpn's apt work does
 // not fail on apt's lock. The hour counts from the first wait.
 type debianAptJob struct {
+	// say tells the owner what is happening now.
+	say      func(string)
 	running  func() (bool, error)
-	sleep    func(time.Duration)
+	sleep    func(context.Context, time.Duration) error
 	now      func() time.Time
 	deadline time.Time
 }
 
-func newDebianAptJob() *debianAptJob {
+func newDebianAptJob(say func(string)) *debianAptJob {
 	return &debianAptJob{
+		say:     say,
 		running: debianAptJobRunning,
-		sleep:   time.Sleep,
+		sleep:   system.Sleep,
 		now:     time.Now,
 	}
 }
@@ -151,15 +161,24 @@ func newDebianAptJob() *debianAptJob {
 // running, waits once more and tries once more. unattended-upgrade names
 // another one holding its lock only in its own log, so its failure carries
 // no message to recognize. A second failure is returned as cmd's own.
-func (j *debianAptJob) run(cmd func() error) error {
+//
+// doing is what cmd does, in the owner's words. A stop asked through ctx
+// ends a wait, and is seen before cmd starts. It never cuts cmd. When cmd
+// has failed and the stop comes during the wait that follows, cmd's failure
+// is returned alone, so a failure is never taken for a stop.
+func (j *debianAptJob) run(ctx context.Context, doing string, cmd func() error) error {
 	if j.deadline.IsZero() {
 		j.deadline = j.now().Add(debianAptJobLimit)
 	}
 	var cmdErr error
 	for try := 0; try < 2; try++ {
-		if err := j.wait(); err != nil {
+		if err := j.wait(ctx); err != nil {
+			if cmdErr != nil && ctx.Err() != nil {
+				return cmdErr
+			}
 			return err
 		}
+		j.say(doing)
 		if cmdErr = cmd(); cmdErr == nil {
 			return nil
 		}
@@ -172,8 +191,14 @@ func (j *debianAptJob) run(cmd func() error) error {
 	return cmdErr
 }
 
-func (j *debianAptJob) wait() error {
+// wait returns once Debian's job does not run. It looks at the stop first,
+// since it returns without sleeping when the job does not run.
+func (j *debianAptJob) wait(ctx context.Context) error {
+	said := false
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		running, err := j.running()
 		if err != nil {
 			return err
@@ -184,7 +209,13 @@ func (j *debianAptJob) wait() error {
 		if !j.now().Before(j.deadline) {
 			return errDebianJobStillRunning
 		}
-		j.sleep(min(debianAptJobPoll, j.deadline.Sub(j.now())))
+		if !said {
+			j.say(debianAptJobWaiting)
+			said = true
+		}
+		if err := j.sleep(ctx, min(debianAptJobPoll, j.deadline.Sub(j.now()))); err != nil {
+			return err
+		}
 	}
 }
 
