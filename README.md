@@ -130,10 +130,10 @@ updates, vpn's release check and vpn's downloads go through Tor.
 vpn's log keeps the install's Tor checks:
 
 ```bash
-grep "Tor" /var/log/vpn.log
+grep "CONFIRMED" /var/log/vpn.log
 ```
 
-These lines show that the checks passed. They do not show where later
+Each line is a Tor check that passed. They do not show where later
 traffic went.
 
 ## Software Verification

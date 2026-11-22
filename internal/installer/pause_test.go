@@ -11,6 +11,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/virtpriv/node/internal/failure"
 	"github.com/virtpriv/node/internal/logger"
 )
 
@@ -158,16 +159,16 @@ func TestAStepThatSaysALotNeverWaitsForAReader(t *testing.T) {
 // says how far Tor is. It asks Tor once before it gives way, so that a Tor
 // that is ready passes, which after the upgrade keeps a finished step.
 func TestTheTorWaitGivesWayToAPauseButAsksTorFirst(t *testing.T) {
-	ask := torProgress
-	t.Cleanup(func() { torProgress = ask })
+	ask := askTor
+	t.Cleanup(func() { askTor = ask })
 	synctest.Test(t, func(t *testing.T) {
-		torProgress = func() (int, error) { return 52, nil }
+		askTor = func() (torStatus, error) { return torStatus{progress: 52}, nil }
 		ctx, stop := context.WithCancel(context.Background())
 		time.AfterFunc(7*time.Second, stop)
 		var said []string
 		start := time.Now()
-		err := waitForTorBootstrap(ctx, func(text string) { said = append(said, text) }, torStallWindow, torBootstrapCeiling)
-		if !errors.Is(err, context.Canceled) || time.Since(start) != 7*time.Second {
+		err := waitForTor(ctx, func(text string) { said = append(said, text) })
+		if err != context.Canceled || time.Since(start) != 7*time.Second {
 			t.Fatalf("the wait ended after %v with %v, want the pause after 7s", time.Since(start), err)
 		}
 		if len(said) != 1 || !strings.Contains(said[0], "52") {
@@ -175,24 +176,40 @@ func TestTheTorWaitGivesWayToAPauseButAsksTorFirst(t *testing.T) {
 		}
 
 		// The pause is already asked. A Tor that is ready still passes.
-		torProgress = func() (int, error) { return 100, nil }
-		if err := waitForTorBootstrap(ctx, func(string) {}, torStallWindow, torBootstrapCeiling); err != nil {
+		askTor = func() (torStatus, error) { return torStatus{progress: 100}, nil }
+		if err := waitForTor(ctx, func(string) {}); err != nil {
 			t.Fatalf("a ready Tor did not pass: %v", err)
 		}
 		// A Tor that is not ready gives way without a sleep, whether it
 		// answers or not, also in the check after the upgrade.
 		start = time.Now()
-		for _, answer := range []func() (int, error){
-			func() (int, error) { return 52, nil },
-			func() (int, error) { return 0, errors.New("no answer") },
+		for _, answer := range []func() (torStatus, error){
+			func() (torStatus, error) { return torStatus{progress: 52}, nil },
+			func() (torStatus, error) { return torStatus{}, errors.New("no answer") },
 		} {
-			torProgress = answer
-			if err := waitForTorBootstrap(ctx, func(string) {}, torStallWindow, torBootstrapCeiling); !errors.Is(err, context.Canceled) || time.Since(start) != 0 {
+			askTor = answer
+			if err := waitForTor(ctx, func(string) {}); err != context.Canceled || time.Since(start) != 0 {
 				t.Fatalf("a Tor that is not ready: %v after %v", err, time.Since(start))
 			}
-			if err := verifyTorAfterUpgrade(ctx, func(string) {}); !errors.Is(err, context.Canceled) || time.Since(start) != 0 {
+			if err := verifyTorAfterUpgrade(ctx, func(string) {}); err != context.Canceled || time.Since(start) != 0 {
 				t.Fatalf("the check after the upgrade: %v after %v", err, time.Since(start))
 			}
+		}
+
+		// A pause asked during the ask that reaches a limit ends as that
+		// failure, and the failure does not read as a pause. Each ask
+		// takes 5 seconds here, so the ask that ends at 93s is the first
+		// one 90 seconds after the start.
+		ctx, stop = context.WithCancel(context.Background())
+		time.AfterFunc(90*time.Second, stop)
+		askTor = func() (torStatus, error) {
+			time.Sleep(5 * time.Second)
+			return torStatus{}, errors.New("no answer")
+		}
+		start = time.Now()
+		err = waitForTor(ctx, func(string) {})
+		if _, sentence := errors.AsType[*failure.Failure](err); !sentence || errors.Is(err, context.Canceled) || time.Since(start) != 93*time.Second {
+			t.Fatalf("a limit reached while a pause is asked: %v after %v", err, time.Since(start))
 		}
 	})
 }
