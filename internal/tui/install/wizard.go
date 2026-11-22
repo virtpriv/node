@@ -74,6 +74,7 @@ type installSession interface {
 	Start(installer.InteractiveInput) error
 	Stop()
 	Events() <-chan installer.InstallEvent
+	Doing() (step int, text string)
 }
 
 type wizardModel struct {
@@ -110,6 +111,10 @@ type wizardModel struct {
 	finished time.Time
 	// times holds when each step began and ended, noted as events arrive.
 	times []steplist.Step
+	// doingStep and doing are the step that last said what it is doing and
+	// that line, read from the session at each tick of the spinner.
+	doingStep int
+	doing     string
 
 	login           func() (bool, error)
 	loggedIn        bool
@@ -220,6 +225,9 @@ func (m wizardModel) Update(
 	msg tea.Msg,
 ) (tea.Model, tea.Cmd) {
 	if m.spin.Owns(msg) {
+		if m.phase == wzSteps {
+			m.doingStep, m.doing = m.session.Doing()
+		}
 		return m, m.spin.Update(msg)
 	}
 	switch msg := msg.(type) {
@@ -670,6 +678,9 @@ func (m wizardModel) listSteps() []steplist.Step {
 			out[i].State = steplist.Done
 		case installer.StepRunning:
 			out[i].State = steplist.Running
+			if i == m.doingStep {
+				out[i].Doing = m.doing
+			}
 		case installer.StepFailed:
 			out[i].State = steplist.Failed
 			if s.Err != nil {
@@ -786,7 +797,7 @@ func (m wizardModel) helpLine() string {
 		return theme.HelpLine(theme.FrameWidth, theme.KeyUp+theme.KeyDown, "fields", theme.KeyLeft+theme.KeyRight, "buttons", theme.KeyEnter, "select", theme.KeyCtrlC, "quit")
 	case wzSteps:
 		if m.stopping {
-			return theme.HelpDesc.Render("Pausing after this step. Keep this terminal open.")
+			return theme.HelpDesc.Render("Pausing as soon as it is safe. Keep this terminal open.")
 		}
 		return theme.HelpLine(theme.FrameWidth, theme.KeyCtrlC, "pause install")
 	case wzDone:

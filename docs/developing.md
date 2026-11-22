@@ -14,12 +14,15 @@ sets up the machine in 17 steps, with every package after the Tor check coming
 through Tor, and then shows how to log in as `vpn` over SSH, where the TUI
 opens.
 
-During interactive installation, Ctrl+C requests a stop after the active step
-and its progress record finish. Keep the terminal open while it stops. The
-installer keeps its lock until that work settles. This does not kill an active
-subprocess or undo changes. If the last step finishes, the installer still
-publishes completion. Forced process death can leave unrecorded work that a
-later run must repeat.
+During interactive installation, Ctrl+C asks for a pause. A step that is
+waiting, for Tor or for Debian's own update, stops waiting at once. A command
+that is running, such as apt, is never interrupted. The pause then comes when
+the step ends, or, in the step that updates Debian, before its next command. A
+step that was paused part way is not recorded, so the next run does it again.
+Keep the terminal open while it pauses. The installer keeps its lock until
+that work settles, and changes are not undone. If the last step finishes, the
+installer still publishes completion. Forced process death can leave
+unrecorded work that a later run must repeat.
 
 If a step fails or installation stops, inspect the reported result before
 running it again. When the installer can prove that it is resuming the same

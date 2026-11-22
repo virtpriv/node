@@ -37,8 +37,8 @@ func TestInteractiveExitJoinsAdmittedStep(t *testing.T) {
 		entered, release := make(chan struct{}), make(chan struct{})
 		laterCalls := 0
 		s, input := interactiveFixture(t, []InstallStep{
-			{Key: "binary.install", Name: "Binary", Fn: func() error { close(entered); <-release; return nil }},
-			{Key: "apt.base", Name: "Packages", Fn: func() error { laterCalls++; return nil }},
+			{Key: "binary.install", Name: "Binary", Run: plain(func() error { close(entered); <-release; return nil })},
+			{Key: "apt.base", Name: "Packages", Run: plain(func() error { laterCalls++; return nil })},
 		}, func() error { t.Error("interrupted install finalized"); return nil })
 		uiErr := errors.New("terminal lost")
 		returned := make(chan struct{})
@@ -92,7 +92,7 @@ func TestInteractiveFinalizationDoesNotNeedObserver(t *testing.T) {
 				}
 				var s *InstallSession
 				var input InteractiveInput
-				s, input = interactiveFixture(t, []InstallStep{{Key: "binary.install", Name: "Binary", Fn: func() error { return nil }}}, func() error {
+				s, input = interactiveFixture(t, []InstallStep{{Key: "binary.install", Name: "Binary", Run: plain(func() error { return nil })}}, func() error {
 					calls++
 					ledger, err := readLedger(s.runner.ledgerPath)
 					if err != nil {
@@ -138,7 +138,7 @@ func TestInteractiveFailureAndPublicationStopExecution(t *testing.T) {
 			later := 0
 			var s *InstallSession
 			s, input := interactiveFixture(t, []InstallStep{
-				{Key: "binary.install", Name: "Binary", Fn: func() error {
+				{Key: "binary.install", Name: "Binary", Run: plain(func() error {
 					if !publicationFailure {
 						return failure
 					}
@@ -148,8 +148,8 @@ func TestInteractiveFailureAndPublicationStopExecution(t *testing.T) {
 					}
 					s.runner.ledgerPath = filepath.Join(parent, "ledger.json")
 					return nil
-				}},
-				{Key: "apt.base", Name: "Packages", Fn: func() error { later++; return nil }},
+				})},
+				{Key: "apt.base", Name: "Packages", Run: plain(func() error { later++; return nil })},
 			}, func() error { t.Error("failed run finalized"); return nil })
 			if err := s.Start(input); err != nil {
 				t.Fatal(err)
@@ -174,7 +174,7 @@ func TestInteractiveFailureAndPublicationStopExecution(t *testing.T) {
 func TestInteractiveStartRefusesABadPasswordAndCanBeRetried(t *testing.T) {
 	calls := 0
 	s, input := interactiveFixture(t, []InstallStep{
-		{Key: "binary.install", Name: "Binary", Fn: func() error { calls++; return nil }},
+		{Key: "binary.install", Name: "Binary", Run: plain(func() error { calls++; return nil })},
 	}, func() error { return nil })
 	if !s.needIdentity {
 		t.Fatal("a fresh install does not ask for the password")
@@ -199,7 +199,7 @@ func TestInteractiveStartRefusesABadPasswordAndCanBeRetried(t *testing.T) {
 
 func TestInteractiveStopBeforeStartAndLastStepCompletion(t *testing.T) {
 	t.Run("before start", func(t *testing.T) {
-		s, input := interactiveFixture(t, []InstallStep{{Key: "binary.install", Name: "Binary", Fn: func() error { t.Error("stopped step ran"); return nil }}}, func() error { t.Error("stopped run finalized"); return nil })
+		s, input := interactiveFixture(t, []InstallStep{{Key: "binary.install", Name: "Binary", Run: plain(func() error { t.Error("stopped step ran"); return nil })}}, func() error { t.Error("stopped run finalized"); return nil })
 		result, err := runInstallInteractive(s, InstallView{}, func(InstallView, *InstallSession) error { return nil })
 		if result.Outcome != RunInterrupted || err != nil {
 			t.Fatalf("result=%+v err=%v", result, err)
@@ -219,7 +219,7 @@ func TestInteractiveStopBeforeStartAndLastStepCompletion(t *testing.T) {
 	t.Run("last admitted step", func(t *testing.T) {
 		finalized := 0
 		var s *InstallSession
-		s, input := interactiveFixture(t, []InstallStep{{Key: "binary.install", Name: "Binary", Fn: func() error { s.Stop(); return nil }}}, func() error { finalized++; return nil })
+		s, input := interactiveFixture(t, []InstallStep{{Key: "binary.install", Name: "Binary", Run: plain(func() error { s.Stop(); return nil })}}, func() error { finalized++; return nil })
 		if err := s.Start(input); err != nil {
 			t.Fatal(err)
 		}
@@ -304,12 +304,12 @@ func TestRootRunInstallExitRetainsRunLock(t *testing.T) {
 					return errors.New("unexpected finalization")
 				}
 				for i := range s.runner.steps {
-					s.runner.steps[i].Fn = func() error {
+					s.runner.steps[i].Run = plain(func() error {
 						t.Error("stop admitted a later step")
 						return errors.New("unexpected host step")
-					}
+					})
 				}
-				s.runner.steps[0].Fn = func() error { close(entered); <-release; return nil }
+				s.runner.steps[0].Run = plain(func() error { close(entered); <-release; return nil })
 				if err := s.Start(InteractiveInput{Password: password}); err != nil {
 					return err
 				}
@@ -387,7 +387,7 @@ func TestRootRunInstallReportsPauseFailureAndRootLoginOff(t *testing.T) {
 			s.runner.ledgerPath = ledgerPath
 			s.complete = func() error { return errors.New("unexpected finalization") }
 			for i := range s.runner.steps {
-				s.runner.steps[i].Fn = func() error { return fn(s, i) }
+				s.runner.steps[i].Run = plain(func() error { return fn(s, i) })
 			}
 			password, err := loginpassword.New("exact-test-password")
 			if err != nil {

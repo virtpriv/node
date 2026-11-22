@@ -35,11 +35,13 @@ const (
 )
 
 // Step is one row of the list. Started and Ended are when the step began
-// and finished or failed, the zero time when unknown.
+// and finished or failed, the zero time when unknown. Doing is what a
+// running step says it is doing now, drawn on one row under its name.
 type Step struct {
 	Name    string
 	State   State
 	Err     string
+	Doing   string
 	Started time.Time
 	Ended   time.Time
 }
@@ -58,9 +60,10 @@ func Clock(d time.Duration) string {
 
 // Rows draws every step w cells wide, with spin as the running step's mark.
 // from and to are the first and last rows of the running, failed or stopped
-// step, its error included. errRows caps an error's rows, 0 for all. Names
-// and errors come from other programs, so their control characters become
-// spaces and cannot move the cursor or clear the screen.
+// step, its error or its line included. errRows caps an error's rows, 0 for
+// all. Names and errors come from other programs, so their control
+// characters become spaces and cannot move the cursor or clear the screen.
+// A step's line is cleaned the same way.
 func Rows(steps []Step, w int, spin string, now time.Time, errRows int) (rows []string, from, to int) {
 	done := lipgloss.NewStyle().Foreground(theme.ColorSuccess).Render("✓")
 	faint := lipgloss.NewStyle().Foreground(theme.ColorFaint)
@@ -99,6 +102,9 @@ func Rows(steps []Step, w int, spin string, now time.Time, errRows int) (rows []
 			for _, l := range lines {
 				rows = append(rows, "   "+theme.Warning.Render(l))
 			}
+		}
+		if s.State == Running && s.Doing != "" {
+			rows = append(rows, "   "+theme.Dim.Render(ansi.Truncate(theme.PlainText(s.Doing), w-6, "…")))
 		}
 		if s.State == Running || s.State == Failed || s.State == Stopped {
 			from, to = start, len(rows)-1

@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -56,19 +57,23 @@ type InstallEvent struct {
 }
 
 // InstallSession owns one execution, independently of progress consumption.
-// Stop prevents admission of another step. It does not kill an active subprocess
-// or undo its changes. Forced process death still relies on lifecycle resume.
+// Stop asks for a pause. It ends a step's wait and admits no other step. It
+// does not kill an active subprocess or undo its changes. Forced process
+// death still relies on lifecycle resume.
 type InstallSession struct {
 	mu               sync.Mutex
 	started, stopped bool
-	runner           *stepRunner
-	dec              *InstallDecisions
-	complete         func() error
-	needIdentity     bool
-	events           chan InstallEvent
-	done             chan struct{}
-	result           RunResult
-	completionErr    error
+	// ctx ends when Stop is called.
+	ctx           context.Context
+	cancel        context.CancelFunc
+	runner        *stepRunner
+	dec           *InstallDecisions
+	complete      func() error
+	needIdentity  bool
+	events        chan InstallEvent
+	done          chan struct{}
+	result        RunResult
+	completionErr error
 	// began bounds the SSH log read, so only a login during this run counts.
 	began time.Time
 	// startErr is why the last Start was refused, kept for the shell if
@@ -77,10 +82,12 @@ type InstallSession struct {
 }
 
 func newInstallSession(r *stepRunner, dec *InstallDecisions, complete func() error) *InstallSession {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &InstallSession{
+		ctx: ctx, cancel: cancel,
 		runner: r, dec: dec, complete: complete,
 		needIdentity: r.willRun("identity.access"),
-		// Each step emits running and finished, followed by one final event.
+		// Each step emits at most two events, followed by one final event.
 		// A closed or failed frontend cannot block the installation worker.
 		events: make(chan InstallEvent, 2*len(r.steps)+1), done: make(chan struct{}),
 		result: classifyRun(r.steps, false, false, 0),
@@ -124,7 +131,9 @@ func (s *InstallSession) refuse(err error) {
 	logger.Install("could not start the install: %v", err)
 }
 
-// Stop requests a stop after the admitted step and its ledger publication.
+// Stop asks for a pause as soon as it is safe. That is at once when the
+// running step waits, otherwise before its next command or after the step
+// and its ledger publication.
 func (s *InstallSession) Stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -132,6 +141,7 @@ func (s *InstallSession) Stop() {
 		return
 	}
 	s.stopped = true
+	s.cancel()
 	if !s.started {
 		s.events <- s.finalEvent()
 		close(s.events)
@@ -157,6 +167,11 @@ func rootLoginMayBeOff(err error) bool {
 // Events supplies one ordered stream for the frontend's single observer.
 func (s *InstallSession) Events() <-chan InstallEvent { return s.events }
 
+// Doing returns the step that last said what it is doing, counted from 0,
+// and that line, empty once the step has ended. It is read, not sent as an
+// event, so a frontend that is gone can never block a step.
+func (s *InstallSession) Doing() (step int, text string) { return s.runner.Doing() }
+
 // SSHLoginSeen reports whether SSH's log shows a login as vpn since this run
 // began. A log that cannot be read is an error, never a login.
 func (s *InstallSession) SSHLoginSeen() (bool, error) {
@@ -174,34 +189,15 @@ func (s *InstallSession) run() {
 	defer close(s.events)
 	defer func() { s.dec.Password = loginpassword.Password{} }()
 	defer func() { s.events <- s.finalEvent() }()
-	for i := range s.runner.steps {
-		s.mu.Lock()
-		if s.stopped {
-			s.mu.Unlock()
-			s.result = classifyRun(s.runner.steps, false, false, i)
-			return
-		}
-		s.events <- InstallEvent{Index: i, Status: StepRunning}
-		s.mu.Unlock()
-		skipped, err := s.runner.runIndex(i)
-		status := StepDone
-		if skipped {
-			status = StepSkipped
-		}
-		if err != nil {
-			status = StepFailed
-		}
-		s.runner.steps[i].Status = status
-		s.runner.steps[i].Err = err
+	s.runner.show = func(i int, status StepStatus, err error) {
 		s.events <- InstallEvent{Index: i, Status: status, Err: err}
-		if err != nil {
-			s.result = classifyRun(s.runner.steps, false, true, i)
-			return
-		}
+	}
+	s.result = s.runner.run(s.ctx)
+	if s.result.Outcome != RunComplete {
+		return
 	}
 	// Once every step is recorded, finish publication even if observation or
 	// a stop request raced with the last step. Completion is engine-owned.
-	s.result = classifyRun(s.runner.steps, true, false, len(s.runner.steps))
 	if err := s.complete(); err != nil {
 		s.completionErr = fmt.Errorf("install steps complete but finalization failed: %w. Run sudo vpn install again to retry", err)
 	}

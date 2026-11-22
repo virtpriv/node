@@ -3,10 +3,12 @@
 package installer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -14,6 +16,7 @@ import (
 
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/paths"
+	"github.com/virtpriv/node/internal/steps"
 	"github.com/virtpriv/node/internal/theme"
 )
 
@@ -21,8 +24,8 @@ import (
 //
 // The interactive install and the unattended install run their steps
 // through one step runner, which decides what a rerun repeats, records each
-// finished step in the ledger and logs it. The install screen only shows
-// progress.
+// finished step in the ledger and logs it. The steps themselves run through
+// internal/steps. The install screen only shows progress.
 //
 // What a rerun repeats:
 //
@@ -64,11 +67,20 @@ type InstallStep struct {
 	Key string
 	// Name is display-only.
 	Name string
-	Fn   func() error
+	// Run does the step. ctx ends when the owner asks for a pause. A step
+	// looks at it only where it waits and never hands it to a command, so a
+	// command that started runs to its end. say tells the owner what the
+	// step is doing now, in one short line.
+	Run  func(ctx context.Context, say func(string)) error
 	Kind StepKind
 
 	Status StepStatus
 	Err    error
+}
+
+// plain makes a step of work that neither waits nor says what it is doing.
+func plain(fn func() error) func(context.Context, func(string)) error {
+	return func(context.Context, func(string)) error { return fn() }
 }
 
 // validateSteps asserts the invariants the planner relies on:
@@ -119,12 +131,27 @@ func planRun(steps []InstallStep, led *installLedger) []stepPlan {
 
 // ── Runner ───────────────────────────────────────────────
 
+// stepRunner is the install's side of internal/steps, its record and its
+// log. It hands the shared runner the steps this run does and reports each
+// step, the skipped ones in their place, to the front end.
 type stepRunner struct {
 	steps      []InstallStep
 	plan       []stepPlan
 	ledger     *installLedger
 	ledgerPath string
 	version    string
+	// show tells the front end that step i changed. It must not block.
+	show func(i int, status StepStatus, err error)
+	// todo holds the steps this run does, by their place in the whole list.
+	todo []int
+	// told is the first step the front end has not heard about.
+	told int
+
+	// doingStep and doing are the step that last said a line and that line,
+	// empty once the step has ended. The install screen reads them.
+	mu        sync.Mutex
+	doingStep int
+	doing     string
 }
 
 func newStepRunner(
@@ -155,38 +182,124 @@ func newStepRunner(
 		ledger:     led,
 		ledgerPath: ledgerPath,
 		version:    version,
+		show:       func(int, StepStatus, error) {},
 	}, nil
 }
 
-// runIndex executes one step per the plan. Every path leaves a
-// log line (start, skip, complete, FAILED), so a run's trail
-// in vpn.log never just stops. The ledger entry is written only after Fn returns nil.
-// A publication failure stops the run immediately, because later steps must
-// not advance past a mutation whose completion is not durable for the next
-// pass.
-func (r *stepRunner) runIndex(i int) (skipped bool, err error) {
-	s := &r.steps[i]
-	n, total := i+1, len(r.steps)
-	if !r.plan[i].Run {
+// run does the steps the plan asks for, in order, until one fails, a pause
+// asked through ctx is honored or all are done. Every step leaves a log
+// line when it starts and when it is skipped, completes, fails or is
+// stopped. A step is recorded only after it returned without error, and a
+// record that cannot be written ends the run, because a later step must not
+// build on a step the next run would not know about. A process that is
+// killed or loses its terminal leaves no such line, so the log then ends at
+// "starting" or at the last line the step said.
+func (r *stepRunner) run(ctx context.Context) RunResult {
+	r.todo, r.told = nil, 0
+	var list []steps.Step
+	for i := range r.steps {
+		if !r.plan[i].Run {
+			continue
+		}
+		s := &r.steps[i]
+		r.todo = append(r.todo, i)
+		list = append(list, steps.Step{Name: s.Name, Run: func(ctx context.Context) error {
+			return s.Run(ctx, func(text string) { r.say(i, text) })
+		}})
+	}
+	total := len(r.steps)
+	res := steps.Run(ctx, list, r)
+	switch res.Outcome {
+	case steps.Failed:
+		return classifyRun(r.steps, false, true, r.todo[res.Index])
+	case steps.Stopped:
+		return classifyRun(r.steps, false, false, r.todo[res.Index])
+	}
+	r.skipTo(total)
+	return classifyRun(r.steps, true, false, total)
+}
+
+// skipTo reports the steps before step i that this run skips.
+func (r *stepRunner) skipTo(i int) {
+	for ; r.told < i; r.told++ {
+		s := &r.steps[r.told]
 		logger.Install("step %d/%d skipped: %s (%s)",
-			n, total, s.Name, r.plan[i].Reason)
-		return true, nil
+			r.told+1, len(r.steps), s.Name, r.plan[r.told].Reason)
+		s.Status = StepSkipped
+		r.show(r.told, StepSkipped, nil)
 	}
-	logger.Install("step %d/%d starting: %s", n, total, s.Name)
-	if err := s.Fn(); err != nil {
-		logger.Install("step %d/%d FAILED: %s: %v",
-			n, total, s.Name, err)
-		return false, err
+}
+
+// Begin, End and Log make the stepRunner the shared runner's sink. Their k
+// counts the steps this run does.
+
+func (r *stepRunner) Begin(k int) {
+	i := r.todo[k]
+	r.skipTo(i)
+	r.told = i + 1
+	r.steps[i].Status = StepRunning
+	r.show(i, StepRunning, nil)
+}
+
+// End records a step that is done. A stopped step is not recorded and goes
+// back to not begun, so the next run does it. A record that cannot be
+// written is handed back, which fails the step.
+func (r *stepRunner) End(k int, o steps.Outcome, err error) error {
+	i := r.todo[k]
+	s := &r.steps[i]
+	r.setDoing(i, "")
+	var recordErr error
+	status := StepFailed
+	switch o {
+	case steps.Stopped:
+		status = StepPending
+	case steps.Done:
+		if recordErr = r.record(s.Key); recordErr == nil {
+			status = StepDone
+		}
+		err = recordErr
 	}
-	if err := r.ledger.markDone(s.Key, r.version); err != nil {
-		return false, err
+	s.Status, s.Err = status, err
+	r.show(i, status, err)
+	return recordErr
+}
+
+func (r *stepRunner) record(key string) error {
+	if err := r.ledger.markDone(key, r.version); err != nil {
+		return err
 	}
 	if err := r.ledger.save(r.ledgerPath); err != nil {
-		return false, fmt.Errorf(
+		return fmt.Errorf(
 			"step completed but install ledger publication failed: %w", err)
 	}
-	logger.Install("step %d/%d complete: %s", n, total, s.Name)
-	return false, nil
+	return nil
+}
+
+// Log numbers a line by the whole list, so a rerun that skips steps still
+// logs "step 9/17".
+func (r *stepRunner) Log(k int, text string) {
+	logger.Install("step %d/%d %s", r.todo[k]+1, len(r.steps), text)
+}
+
+// say is what step i tells the owner it is doing now. The line goes to the
+// log, and the install screen reads the newest one.
+func (r *stepRunner) say(i int, text string) {
+	r.setDoing(i, text)
+	logger.Install("step %d/%d: %s", i+1, len(r.steps), text)
+}
+
+func (r *stepRunner) setDoing(i int, text string) {
+	r.mu.Lock()
+	r.doingStep, r.doing = i, text
+	r.mu.Unlock()
+}
+
+// Doing returns the step that last said a line, counted from 0, and that
+// line, empty once the step has ended.
+func (r *stepRunner) Doing() (step int, text string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.doingStep, r.doing
 }
 
 // ── Outcomes ─────────────────────────────────────────────
@@ -223,8 +336,9 @@ const RootLoginMayBeOffNotice = "Root's SSH login may already be off, so keep th
 	paths.AdminUser + "."
 
 // StopError reports an install that did not finish. NotStarted means no step
-// was ever recorded. Paused means it stopped between steps with no step
-// failed. DoneNum and DoneName name the last step recorded, and the step
+// was ever recorded. Paused means it stopped with no step failed, between
+// two steps or in a step's wait, and a step stopped in its wait is not
+// recorded. DoneNum and DoneName name the last step recorded, and the step
 // named is the one the next run does.
 // Otherwise the step named failed with Err, or, with no step named,
 // finishing the install failed. StartErr is why the last start was refused
@@ -396,8 +510,8 @@ func classifyRun(
 
 // RunInstallUnattended runs the steps without the install screen for
 // `vpn install --unattended`, with the same runner, ledger and log, and one
-// line per step on stdout. A killed process needs no handling here, because
-// a step is recorded only after it finished.
+// line per step on stdout. It has no pause. A process that is killed leaves
+// its running step unrecorded, so the next run does that step again.
 func RunInstallUnattended(
 	steps []InstallStep, version string, ledger *installLedger,
 	ledgerPath string,
@@ -411,33 +525,25 @@ func RunInstallUnattended(
 	// line is written again in place. Saved to a file, each line is written
 	// once, when its step ends, so the file holds no rewrites.
 	live := term.IsTerminal(int(os.Stdout.Fd()))
-	for i := range steps {
-		shown := live && r.plan[i].Run
-		if shown {
-			fmt.Printf("  [....] [%d/%d] %s", i+1, total, steps[i].Name)
-		}
-		skipped, err := r.runIndex(i)
-		if shown {
+	r.show = func(i int, status StepStatus, err error) {
+		n, name := i+1, steps[i].Name
+		if live && (status == StepDone || status == StepFailed) {
 			fmt.Print("\r")
 		}
-		switch {
-		case err != nil:
-			steps[i].Status = StepFailed
-			steps[i].Err = err
-			fmt.Printf("  [FAIL] [%d/%d] %s: %v\n",
-				i+1, total, steps[i].Name, err)
-			return classifyRun(steps, false, true, i), nil
-		case skipped:
-			steps[i].Status = StepSkipped
-			fmt.Printf("  [skip] [%d/%d] %s\n",
-				i+1, total, steps[i].Name)
-		default:
-			steps[i].Status = StepDone
-			fmt.Printf("  [done] [%d/%d] %s\n",
-				i+1, total, steps[i].Name)
+		switch status {
+		case StepRunning:
+			if live {
+				fmt.Printf("  [....] [%d/%d] %s", n, total, name)
+			}
+		case StepFailed:
+			fmt.Printf("  [FAIL] [%d/%d] %s: %v\n", n, total, name, err)
+		case StepSkipped:
+			fmt.Printf("  [skip] [%d/%d] %s\n", n, total, name)
+		case StepDone:
+			fmt.Printf("  [done] [%d/%d] %s\n", n, total, name)
 		}
 	}
-	return classifyRun(steps, true, false, total), nil
+	return r.run(context.Background()), nil
 }
 
 // willRun suppresses the password screen only when the planner proves its
