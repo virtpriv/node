@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/virtpriv/node/internal/failure"
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/system"
 )
@@ -20,8 +21,8 @@ import (
 // apt runs in the C locale here, so its lock messages can be recognized.
 var runApt = system.RunRootCLocale
 
-// refreshPackageLists fails when any source cannot be reached, so the
-// upgrade never runs on old lists or none.
+// refreshPackageLists fails when any source cannot be reached, so neither
+// an install nor the upgrade runs on old lists or none.
 func refreshPackageLists() error {
 	return runApt("apt-get", "update", "--error-on=any", "-qq")
 }
@@ -47,26 +48,30 @@ func runUnattendedUpgrade() error {
 // what the step is doing.
 func UpgradeDebian(ctx context.Context, say func(string)) error {
 	job := newDebianAptJob(say)
-	if err := job.run(ctx, "Downloading Debian's package lists", refreshPackageLists); err != nil {
+	if err := job.run(ctx, "Downloading Debian's package lists",
+		sentence("Debian's package tool did not finish downloading the package lists through Tor.", refreshPackageLists)); err != nil {
 		return err
 	}
-	if err := job.run(ctx, "Installing Debian's update program", func() error { return installPackages(job, "unattended-upgrades") }); err != nil {
+	if err := job.run(ctx, "Installing Debian's update program",
+		sentence("Debian's package tool did not finish installing Debian's update program.",
+			func() error { return aptGet(job, "install", "unattended-upgrades") })); err != nil {
 		return err
 	}
 	if err := ConfigureUnattendedUpgrades(); err != nil {
 		return err
 	}
-	if err := job.run(ctx, "Installing Debian's updates", runUnattendedUpgrade); err != nil {
+	if err := job.run(ctx, "Installing Debian's updates",
+		sentence("Debian's update program did not finish.", runUnattendedUpgrade)); err != nil {
 		return err
 	}
 	logRebootCheck(logger.Install)
 	return nil
 }
 
-// installPackages runs apt-get install, waiting for apt's lock for the rest
-// of the job's hour.
-func installPackages(job *debianAptJob, names ...string) error {
-	args := []string{"install", "-y", "-qq",
+// aptGet runs apt-get install or apt-get satisfy, waiting for apt's lock for
+// the rest of the job's hour.
+func aptGet(job *debianAptJob, verb string, names ...string) error {
+	args := []string{verb, "-y", "-qq",
 		"-o", fmt.Sprintf("DPkg::Lock::Timeout=%d", int(job.left().Seconds()))}
 	return runApt("apt-get", append(args, names...)...)
 }
@@ -131,7 +136,9 @@ const debianAptJobLimit = time.Hour
 
 const debianAptJobPoll = 5 * time.Second
 
-var errDebianJobStillRunning = errors.New("the daily Debian update was still running after an hour")
+// errDebianJobStillRunning has its plain sentence already and no words of
+// another program under it.
+var errDebianJobStillRunning error = &failure.Failure{Text: "Debian's own update was still running after an hour."}
 
 // debianAptJobWaiting is what the owner reads while vpn waits.
 const debianAptJobWaiting = "Waiting for Debian's own update to finish"
@@ -227,9 +234,25 @@ func (j *debianAptJob) left() time.Duration {
 	return max(time.Second, j.deadline.Sub(j.now()))
 }
 
+// sentence puts the install's plain sentence on a command's failure, with the
+// command's own error as its cause. It wraps the command and not the wait, so
+// a wait that fails or gives way to a stop comes back as it is.
+func sentence(text string, cmd func() error) func() error {
+	return func() error {
+		if err := cmd(); err != nil {
+			return &failure.Failure{Text: text, Cause: err}
+		}
+		return nil
+	}
+}
+
 // isAptLockError recognizes apt's and unattended-upgrade's messages, in the
-// C locale, for a lock another apt holds.
+// C locale, for a lock another apt holds. It reads the program's own words,
+// also when the install's plain sentence stands over them.
 func isAptLockError(err error) bool {
+	if f, ok := errors.AsType[*failure.Failure](err); ok && f.Cause != nil {
+		err = f.Cause
+	}
 	msg := err.Error()
 	return strings.Contains(msg, "Could not get lock") ||
 		strings.Contains(msg, "Cache lock can not be acquired")
@@ -244,7 +267,7 @@ var debianAptJobUnits = []string{"apt-daily.service", "apt-daily-upgrade.service
 func debianAptJobRunning() (bool, error) {
 	out, err := runAptTool("systemctl", append([]string{"show", "--property=Id,ActiveState"}, debianAptJobUnits...)...)
 	if err != nil {
-		return false, fmt.Errorf("cannot read whether Debian's daily update runs: %w", err)
+		return false, fmt.Errorf("cannot read whether Debian's own update runs: %w", err)
 	}
 	units := system.ParseUnitProperties(out)
 	for _, unit := range debianAptJobUnits {

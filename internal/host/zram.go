@@ -49,7 +49,9 @@ func SetUpCompressedSwap(ctx context.Context, say func(string)) error {
 		},
 		install: func() error {
 			job := newDebianAptJob(say)
-			return job.run(ctx, "Installing Debian's compressed swap package", func() error { return installPackages(job, "systemd-zram-generator") })
+			return job.run(ctx, "Installing Debian's compressed swap package",
+				sentence("Debian's package tool did not finish installing Debian's compressed swap package.",
+					func() error { return aptGet(job, "install", "systemd-zram-generator") }))
 		},
 		unitState: func() (string, error) {
 			return system.RunOutput("systemctl", "show", "--property=LoadState", "--value", "dev-zram0.swap")
@@ -78,7 +80,7 @@ func setUpCompressedSwap(ops zramOps) error {
 		return nil
 	}
 	if err := ops.install(); err != nil {
-		return fmt.Errorf("install systemd-zram-generator: %w", err)
+		return err
 	}
 	// The package makes no zram unit when zram is switched off on purpose,
 	// by the kernel option systemd.zram=0 or a settings file, or inside a

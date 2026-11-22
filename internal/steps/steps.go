@@ -1,13 +1,16 @@
 // Package steps runs a list of named steps of root work, one after another.
 // It holds what every place that does such work while an owner watches can
 // share, which is when a step begins and ends, how a stop is honored, and
-// what the log says. A place keeps its own record, its own log and its own
-// rules about what runs again. The install is the first place that uses it.
+// what the log says, a failure's own words included. A place keeps its own
+// record, its own log and its own rules about what runs again. The install is
+// the first place that uses it.
 package steps
 
 import (
 	"context"
 	"errors"
+
+	"github.com/virtpriv/node/internal/failure"
 )
 
 // A Step is one named piece of work.
@@ -42,6 +45,8 @@ const (
 	logComplete = "complete: "
 	logStopped  = "stopped: "
 	logFailed   = "FAILED: "
+	// logCause stands before each line of a failure's own words.
+	logCause = "cause: "
 )
 
 // A Sink is the place's own record and log. The runner calls it from one
@@ -87,6 +92,13 @@ func Run(ctx context.Context, list []Step, sink Sink) Result {
 		switch o {
 		case Failed:
 			sink.Log(i, logFailed+s.Name+": "+err.Error())
+			// A failure with a plain sentence keeps the program's own words
+			// out of that sentence, so they follow here, line by line.
+			if f, ok := errors.AsType[*failure.Failure](err); ok {
+				for _, line := range f.CauseLines() {
+					sink.Log(i, logCause+line)
+				}
+			}
 			return Result{Outcome: Failed, Index: i, Err: err}
 		case Stopped:
 			sink.Log(i, logStopped+s.Name)

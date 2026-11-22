@@ -13,7 +13,9 @@ import (
 // closed, indented by two spaces. A command stands alone on its line, after
 // a line that says what it does and an empty line. On a terminal a line
 // wider than the window is broken between words, as Python's argparse does
-// for help text. Saved to a file, every line is printed as it is.
+// for help text. Saved to a file, every line is printed as it is. A line may
+// hold another program's words, so its control characters become spaces and
+// cannot move the cursor or clear the screen. Line breaks are kept.
 func PrintShell(w *os.File, lines []string) {
 	width := 0
 	if cols, _, err := term.GetSize(int(w.Fd())); err == nil {
@@ -22,6 +24,7 @@ func PrintShell(w *os.File, lines []string) {
 	}
 	for _, line := range lines {
 		for _, part := range strings.Split(line, "\n") {
+			part = PlainText(part)
 			if width <= 0 || ansi.StringWidth(part) <= width {
 				fmt.Fprintln(w, strings.TrimRight("  "+part, " "))
 				continue

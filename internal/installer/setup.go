@@ -77,7 +77,11 @@ func productionInstallStartupDependencies() installStartupDependencies {
 	}
 }
 
-// basePackagesStep installs the system bus where a machine has none.
+// vpnProgramStep installs the vpn command.
+const vpnProgramStep = "binary.install"
+
+// basePackagesStep installs sudo, and the system bus where a machine has
+// none.
 const basePackagesStep = "apt.base"
 
 // restartHold holds off restarts from when it is taken to the run's end.
@@ -110,7 +114,8 @@ var newInstallStartupDependencies = productionInstallStartupDependencies
 // RunInstall is the `sudo vpn install` entry point.
 func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	if os.Geteuid() != 0 {
-		return &StopError{NotStarted: true, StartErr: errors.New("the installer must run as root")}
+		return &StopError{NotStarted: true, StartErr: errors.New("the installer must run as root"),
+			Again: againCommand(opts.Unattended, nil)}
 	}
 
 	// Package operations run without prompts for the whole run, as the
@@ -139,6 +144,13 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	// turned off, every error also says how to get back in.
 	ledger := lifecycle.Ledger
 	defer func() { retErr = withRootLoginOff(retErr, ledger) }()
+	// A pause, a refused start and a failed step name the same command to
+	// run the install again.
+	defer func() {
+		if stop, ok := errors.AsType[*StopError](retErr); ok && stop.Again == "" {
+			stop.Again = againCommand(opts.Unattended, ledger)
+		}
+	}()
 	if lifecycle.Disposition == lifecycleCompleted {
 		logger.Install("already installed, no changes were made")
 		fmt.Println("\n  Virtual Private Node is already installed. No changes were made.")
@@ -146,8 +158,8 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	}
 	if lifecycle.Disposition != lifecyclePristine &&
 		!opts.Unattended && passwordPending() {
-		return errors.New(
-			"an interrupted unattended install still owes password delivery, resume with: sudo vpn install --unattended")
+		return &StopError{NotStarted: true, Again: againCommand(true, ledger), StartErr: errors.New(
+			"an unattended install stopped before it showed its password, so it has to be continued unattended")}
 	}
 
 	if !opts.Unattended && frontend == nil {
@@ -255,10 +267,11 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 				stop.DoneNum, stop.DoneName = i+1, s.Name
 			}
 		}
+		stop.Again = againCommand(opts.Unattended, ledger)
 		logger.Install(
 			"install PAUSED after step %d of %d (%s), "+
-				"run sudo vpn install to continue with step %d",
-			stop.DoneNum, stop.Total, stop.DoneName, stop.StepNum)
+				"run %s to continue with step %d",
+			stop.DoneNum, stop.Total, stop.DoneName, stop.Again, stop.StepNum)
 		return stop
 	}
 
@@ -417,13 +430,13 @@ var (
 // old image, waits until apt goes through Tor.
 func buildInstallSteps(dec *InstallDecisions, holdRestarts func() error) []InstallStep {
 	return []InstallStep{
-		{Key: "binary.install",
+		{Key: vpnProgramStep,
 			Name: "Installing the vpn program",
 			Run:  plain(host.InstallInitialBinary)},
 		{Key: basePackagesStep,
 			Name: "Installing Tor, the firewall, and base tools",
-			Run: func(_ context.Context, say func(string)) error {
-				if err := host.InstallBasePackages(say); err != nil {
+			Run: func(ctx context.Context, say func(string)) error {
+				if err := host.InstallBasePackages(ctx, say); err != nil {
 					return err
 				}
 				if err := host.ConfigureLogRotation(); err != nil {
