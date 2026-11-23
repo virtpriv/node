@@ -21,9 +21,9 @@ type kind struct {
 	// recorded. It returns the job's title and the parameters to keep in its
 	// record.
 	accept func(params json.RawMessage) (title string, keep json.RawMessage, err error)
-	// steps is the kind's step list, or none.
-	steps func(keep json.RawMessage) []string
 	// run does the work in the job's service and returns its typed result.
+	// It owns what is around its steps, such as a hold on restarts, and runs
+	// the steps an owner watches through c.steps.
 	run func(c *runCtx, keep json.RawMessage) (any, error)
 }
 
@@ -39,9 +39,8 @@ type PrepareResult struct {
 var kinds = map[string]kind{
 	api.KindPackageUpdate: {
 		accept: noParams("Update Packages"),
-		steps:  func(json.RawMessage) []string { return api.PackageUpdateStepNames() },
 		run: func(c *runCtx, _ json.RawMessage) (any, error) {
-			return nil, host.UpdatePackages(c.step)
+			return nil, host.UpdatePackages(c.steps)
 		},
 	},
 	api.KindPrepareUpdate: {

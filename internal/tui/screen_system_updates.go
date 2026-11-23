@@ -54,7 +54,7 @@ func (s *UpdatesScreen) HandleKey(k string, _ tea.KeyPressMsg) (Screen, tea.Cmd)
 			return s, nil
 		}
 		attempt := &packageAttempt{}
-		s.home.pkgPending, s.home.pkgResult = attempt, ""
+		s.home.pkgPending, s.home.pkgResult, s.home.pkgLog = attempt, "", ""
 		return s, packageUpdateCmd(s.home, attempt)
 	}
 	buttons := s.buttons()
@@ -77,6 +77,10 @@ func (s *UpdatesScreen) HandleKey(k string, _ tea.KeyPressMsg) (Screen, tea.Cmd)
 	case "up":
 		if s.ctx.HasTabs {
 			return s, emitFocusTabBar
+		}
+	case "l":
+		if s.home.pkgLog != "" {
+			return s, showJournal(s.home.pkgLog, nil)
 		}
 	case "enter":
 		switch buttons[s.button] {
@@ -129,6 +133,9 @@ func (s *UpdatesScreen) HelpBindings() []key.Binding {
 	bindings := actionButtonBindings(s.button, s.ctx.HasTabs)
 	if s.home.pkgPending != nil && s.buttons()[min(s.button, len(s.buttons())-1)] == updatesPackagesButton {
 		bindings = slices.DeleteFunc(bindings, func(b key.Binding) bool { return slices.Contains(b.Keys(), "enter") })
+	}
+	if s.home.pkgLog != "" {
+		bindings = append(bindings, bind("l", "logs", "l"))
 	}
 	return bindings
 }

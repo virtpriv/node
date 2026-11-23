@@ -3,10 +3,12 @@ package host
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/virtpriv/node/internal/failure"
+	"github.com/virtpriv/node/internal/steps"
 )
 
 // ── Waiting for Debian's own apt job ─────────────────────
@@ -249,6 +251,141 @@ func TestPackageAuditResult(t *testing.T) {
 	} {
 		if err := packageAuditResult(tc.out, tc.err); (err != nil) != tc.want || (tc.err != nil && !errors.Is(err, failure)) {
 			t.Fatalf("audit %q, %v: %v", tc.out, tc.err, err)
+		}
+	}
+}
+
+// ── Update Packages ──────────────────────────────────────
+
+// updateTrail is a packageUpdate whose machine is a list of what happened.
+type updateTrail struct {
+	trail []string
+	// busy is what each look at Debian's own update answers, in order. Looks
+	// beyond it answer false.
+	busy                   []bool
+	askErr, holdErr        error
+	refreshErr, upgradeErr error
+}
+
+func (m *updateTrail) note(what string) { m.trail = append(m.trail, what) }
+
+func (m *updateTrail) update() packageUpdate {
+	return packageUpdate{
+		running: func() (bool, error) {
+			m.note("look")
+			if m.askErr != nil {
+				return false, m.askErr
+			}
+			if len(m.busy) == 0 {
+				return false, nil
+			}
+			now := m.busy[0]
+			m.busy = m.busy[1:]
+			return now, nil
+		},
+		hold: func() (func(), error) {
+			if m.holdErr != nil {
+				return nil, m.holdErr
+			}
+			m.note("hold")
+			return func() { m.note("release") }, nil
+		},
+		refresh:     func() error { m.note("refresh"); return m.refreshErr },
+		upgrade:     func() error { m.note("upgrade"); return m.upgradeErr },
+		rebootCheck: func() { m.note("reboot check") },
+		audit:       func() error { m.note("audit"); return nil },
+	}
+}
+
+// steps runs the steps as a job does, each under its name and only after the
+// one before it passed.
+func (m *updateTrail) steps(list ...steps.Step) error {
+	for _, s := range list {
+		m.note("step " + s.Name)
+		if err := s.Run(context.Background()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *updateTrail) is(t *testing.T, want ...string) {
+	t.Helper()
+	if !slices.Equal(m.trail, want) {
+		t.Fatalf("the update did %q, want %q", m.trail, want)
+	}
+}
+
+// The order of a package update: the look at Debian's own update, the hold
+// on restarts, the lists, the upgrade with the reboot check, the audit, and
+// the hold released last. Each of the two steps an owner watches does its
+// own work under its own name, the lists first.
+func TestPackageUpdateOrder(t *testing.T) {
+	m := &updateTrail{}
+	if err := m.update().run(m.steps); err != nil {
+		t.Fatal(err)
+	}
+	m.is(t, "look", "hold", "step "+stepRefreshLists, "refresh", "step "+stepUpgrade, "upgrade", "reboot check", "audit", "release")
+}
+
+// Update Packages refuses before it changes anything: while Debian's own
+// update runs, with a plain sentence and no other program's words, when
+// systemd cannot say whether it runs, and when restarts cannot be held off,
+// each of the last two with the failing program's words. No step runs, and
+// the refusal is marked as having changed nothing.
+func TestPackageUpdateRefusesBeforeItChangesAnything(t *testing.T) {
+	deaf := errors.New("cannot read whether Debian's own update runs: systemctl: Failed to connect to bus")
+	denied := errors.New("systemd-inhibit: Access denied")
+	for _, m := range []*updateTrail{{busy: []bool{true}}, {askErr: deaf}, {holdErr: denied}} {
+		err := m.update().run(m.steps)
+		m.is(t, "look")
+		if !errors.Is(err, ErrNothingChanged) {
+			t.Fatalf("got %v, want a refusal with nothing changed", err)
+		}
+		if own := errors.Join(m.askErr, m.holdErr); own != nil && !errors.Is(err, deaf) && !errors.Is(err, denied) {
+			t.Fatalf("a refusal for %v gave %v, want its own words", own, err)
+		}
+		if f, plain := errors.AsType[*failure.Failure](err); m.askErr == nil && m.holdErr == nil && (!plain || f.Cause != nil) {
+			t.Fatalf("the refusal is %#v, want a plain sentence with no cause", err)
+		}
+	}
+}
+
+// A failed command gets one sentence, with the command's own words under
+// it. The sentence says what a second look saw: Debian's own update had
+// started, or another program held apt's lock, or neither. Nothing is tried
+// again, nothing after the command runs, the hold is released, and the
+// failure is never marked as having changed nothing.
+func TestPackageUpdateFailureSaysWhatWasSeen(t *testing.T) {
+	plain := errors.New("apt-get update --error-on=any -qq: exit status 100: E: Failed to fetch tor+https://deb.debian.org/debian/dists/trixie/InRelease")
+	silent := errors.New("unattended-upgrade: exit status 1:  (its log is /var/log/unattended-upgrades/unattended-upgrades.log)")
+	lock := errors.New(aptLockMessages[0])
+	type tc struct {
+		name             string
+		refresh, upgrade error
+		busy             []bool
+		want             string
+	}
+	cases := []tc{
+		{"the lists", plain, nil, nil, listsNotDownloaded},
+		{"the upgrade", nil, silent, nil, upgradeNotFinished},
+		{"another program holds the lock", nil, lock, nil, aptInUse},
+		{"no message while Debian's update runs", nil, silent, []bool{false, true}, debianUpdateStarted},
+	}
+	for _, msg := range aptLockMessages {
+		cases = append(cases, tc{"Debian's update started: " + msg, errors.New(msg), nil, []bool{false, true}, debianUpdateStarted})
+	}
+	for _, c := range cases {
+		m := &updateTrail{refreshErr: c.refresh, upgradeErr: c.upgrade, busy: c.busy}
+		err := m.update().run(m.steps)
+		cause := c.refresh
+		want := []string{"look", "hold", "step " + stepRefreshLists, "refresh", "look", "release"}
+		if cause == nil {
+			cause, want = c.upgrade, []string{"look", "hold", "step " + stepRefreshLists, "refresh", "step " + stepUpgrade, "upgrade", "look", "release"}
+		}
+		m.is(t, want...)
+		if f, ok := errors.AsType[*failure.Failure](err); !ok || f.Text != c.want || f.Cause != cause || errors.Is(err, ErrNothingChanged) {
+			t.Fatalf("%s: got %#v, want %q over the command's own error", c.name, err, c.want)
 		}
 	}
 }

@@ -12,12 +12,14 @@ import (
 
 // recorder is a sink that keeps what the runner told it, in order.
 type recorder struct {
-	trail  []string
-	endErr map[int]error
+	trail    []string
+	beginErr map[int]error
+	endErr   map[int]error
 }
 
-func (r *recorder) Begin(i int) {
+func (r *recorder) Begin(i int) error {
 	r.trail = append(r.trail, fmt.Sprintf("begin %d", i))
+	return r.beginErr[i]
 }
 
 func (r *recorder) End(i int, o Outcome, err error) error {
@@ -111,6 +113,21 @@ func TestAStepWhoseRecordFailsIsNeverLoggedComplete(t *testing.T) {
 		t.Fatalf("got %+v, later ran %d times", res, later)
 	}
 	sink.is(t, "begin 0", "log 0 "+logStarting+"first", "end 0 done", "log 0 "+logFailed+"first: disk full")
+}
+
+// A step that cannot be marked as begun does not run, and no later step
+// does. The sink is not told that it ended, since it never began.
+func TestAStepThatCannotBeMarkedAsBegunDoesNotRun(t *testing.T) {
+	lost := errors.New("disk full")
+	ran := 0
+	sink := &recorder{beginErr: map[int]error{1: lost}}
+	count := func(context.Context) error { ran++; return nil }
+	res := Run(context.Background(), []Step{{Name: "first", Run: ok}, {Name: "second", Run: count}, {Name: "later", Run: count}}, sink)
+	if res.Outcome != Failed || res.Index != 1 || res.Err != lost || ran != 0 {
+		t.Fatalf("got %+v with %d later steps run, want step 1 failed with the record's error and none run", res, ran)
+	}
+	sink.is(t, "begin 0", "log 0 "+logStarting+"first", "end 0 done", "log 0 "+logComplete+"first",
+		"begin 1", "log 1 "+logFailed+"second: disk full")
 }
 
 // A failed step ends the run, keeps its cause, and a failure of the record

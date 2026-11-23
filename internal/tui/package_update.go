@@ -64,7 +64,7 @@ func (m *Model) completePackageUpdate(msg packageUpdateResultMsg) tea.Cmd {
 		return watchPackageCmd(msg.owner, msg.attempt)
 	}
 	msg.owner.pkgPending = nil
-	msg.owner.pkgResult = packageResultText(msg.update)
+	msg.owner.setPackageResult(msg.update)
 	if err := msg.update.Error(); err != nil {
 		logger.TUI("Package update: %v", err)
 	}
@@ -90,6 +90,17 @@ func packageResultText(u app.JobUpdate) string {
 	}
 	return withReason("Package update outcome unconfirmed", jobReason(u)) +
 		" Check the node before trying again."
+}
+
+// setPackageResult keeps a finished Update Packages job's words. A job that
+// failed or ended without a result gets the l key, which opens the job's own
+// journal lines, the failing program's words among them. A refusal vpnd made
+// before any job existed has no such lines.
+func (s *SystemHomeScreen) setPackageResult(u app.JobUpdate) {
+	s.pkgResult, s.pkgLog = packageResultText(u), ""
+	if (u.Outcome == app.JobFailed || u.Outcome == app.JobUnconfirmed) && u.Job.ID != "" {
+		s.pkgLog = api.JobUnit(u.Job.ID)
+	}
 }
 
 func (m *Model) invalidatePackageStatus() {

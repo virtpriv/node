@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/virtpriv/node/internal/api"
 	"github.com/virtpriv/node/internal/host"
+	"github.com/virtpriv/node/internal/steps"
 	"github.com/virtpriv/node/internal/update/files"
 )
 
@@ -72,41 +74,48 @@ func (s *Store) markStarted(id string) (Record, kind, error) {
 		}
 		return r, kind{}, errors.New(r.Error)
 	}
-	now := s.now().UTC()
-	r.State, r.Started = api.JobStarted, now
-	if k.steps != nil {
-		r.Steps = k.steps(r.Params)
-		r.StepNumber = 1
-		r.StepStarts = []time.Time{now}
-		r.StepEnds = []time.Time{{}}
-	}
+	r.State, r.Started = api.JobStarted, s.now().UTC()
 	return r, k, s.write(r)
 }
 
-// step records that step i ended and the next one began. The host's
-// operations report a step when it completes.
-func (c *runCtx) step(i int) {
+// steps runs a kind's steps through the shared runner. The job's record is
+// the runner's sink: it gets the list, then each step's start and end. A job
+// cannot be stopped, so its context never ends.
+func (c *runCtx) steps(list ...steps.Step) error {
 	r := c.r
-	if i < 0 || i >= len(r.Steps) {
-		return
+	for _, s := range list {
+		r.Steps = append(r.Steps, s.Name)
 	}
-	now := c.s.now().UTC()
-	for len(r.StepEnds) <= i {
-		r.StepEnds = append(r.StepEnds, time.Time{})
+	r.StepStarts, r.StepEnds = make([]time.Time, len(list)), make([]time.Time, len(list))
+	return steps.Run(context.Background(), list, c).Err
+}
+
+// Begin, End and Log make the job the shared runner's sink.
+
+func (c *runCtx) Begin(i int) error {
+	c.r.StepNumber, c.r.StepStarts[i] = i+1, c.s.now().UTC()
+	c.mark()
+	return nil
+}
+
+func (c *runCtx) End(i int, _ steps.Outcome, _ error) error {
+	c.r.StepEnds[i] = c.s.now().UTC()
+	c.mark()
+	return nil
+}
+
+// mark writes a step's start or end. A lost write leaves the record behind,
+// never ahead, and does not end the job, since package work must not stop
+// half way for it. The end is written either way.
+func (c *runCtx) mark() {
+	if err := c.s.write(*c.r); err != nil {
+		fmt.Fprintf(os.Stderr, "job %s: record step: %v\n", c.r.ID, err)
 	}
-	r.StepEnds[i] = now
-	if i+1 < len(r.Steps) {
-		r.StepNumber = i + 2
-		for len(r.StepStarts) <= i+1 {
-			r.StepStarts = append(r.StepStarts, time.Time{})
-		}
-		r.StepStarts[i+1] = now
-	}
-	// A lost progress write leaves the record behind, never ahead. The end
-	// is written either way.
-	if err := c.s.write(*r); err != nil {
-		fmt.Fprintf(os.Stderr, "job %s: record step: %v\n", r.ID, err)
-	}
+}
+
+// Log writes a step's line to the journal, with the step's number.
+func (c *runCtx) Log(i int, text string) {
+	logJob(*c.r, "step", fmt.Sprintf("step %d/%d %s", i+1, len(c.r.Steps), text))
 }
 
 // finish writes the job's end.
@@ -117,15 +126,6 @@ func (c *runCtx) finish(result any, runErr error) error {
 	if runErr != nil {
 		r.State, r.Error = api.JobFailed, runErr.Error()
 		r.NothingChanged = errors.Is(runErr, host.ErrNothingChanged)
-		// The step in progress ends where the job failed.
-		if n := r.StepNumber; n >= 1 && n <= len(r.Steps) {
-			for len(r.StepEnds) < n {
-				r.StepEnds = append(r.StepEnds, time.Time{})
-			}
-			if r.StepEnds[n-1].IsZero() {
-				r.StepEnds[n-1] = now
-			}
-		}
 	} else {
 		r.State = api.JobDone
 	}

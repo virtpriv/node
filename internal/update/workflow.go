@@ -2,12 +2,12 @@
 package update
 
 import (
-	"errors"
+	"context"
 	"fmt"
 	"os"
-	"slices"
 	"time"
 
+	"github.com/virtpriv/node/internal/steps"
 	"github.com/virtpriv/node/internal/update/protocol"
 )
 
@@ -34,8 +34,6 @@ const (
 	stepFinish    = "Finish VPN update"
 )
 
-func stepList() []string { return []string{stepCheckNode, stepSpace, stepFinish} }
-
 // runJob runs an update from its saved record. Every run does the same three
 // steps: it checks the node, checks the free space and replaces the program.
 // The two checks change nothing, so a run after a power cut or a Retry does
@@ -44,78 +42,73 @@ func runJob(j *job, ops workflowOps) error {
 	if !j.active() || j.Phase == "failed" {
 		return nil
 	}
-	// mark makes step the one in progress. A step that begins gets its start
-	// and a journal line, the step in progress before it ends then, and the
-	// steps after it have not begun. Steps before it keep their times.
-	mark := func(step string) {
-		n := slices.Index(j.Steps, step) + 1
-		at := now().UTC()
-		starts, ends := make([]time.Time, len(j.Steps)), make([]time.Time, len(j.Steps))
-		copy(starts, j.StepStarts[:min(len(j.StepStarts), n-1)])
-		copy(ends, j.StepEnds[:min(len(j.StepEnds), n-1)])
-		if was := j.StepNumber; was >= 1 && was < n && !starts[was-1].IsZero() && ends[was-1].IsZero() {
-			ends[was-1] = at
-		}
-		starts[n-1] = at
-		j.StepNumber, j.StepStarts, j.StepEnds = n, starts, ends
-		fmt.Fprintf(os.Stderr, "step %d of %d: %s\n", n, len(j.Steps), step)
-	}
-	// end notes that the step in progress finished or failed.
-	end := func() {
-		if n := j.StepNumber; n >= 1 && n <= len(j.StepEnds) {
-			j.StepEnds[n-1] = now().UTC()
-		}
-	}
-	// begin saves the step that is now in progress, with the step text a
-	// screen without the list shows.
-	begin := func(step string) error {
-		j.Step = step
-		mark(step)
-		return ops.save(j)
-	}
-	// fail saves a failure with the screen's next step and words for it,
-	// which say whether the program may have been replaced.
-	fail := func(cause error) error {
-		end()
-		j.Phase = "failed"
-		j.Error = cause.Error()
-		j.Next, j.Advice = protocol.Advise(!j.HostChanges)
-		return errors.Join(cause, ops.save(j))
-	}
-
 	// This run's own list and its own times. A list another worker wrote, or
 	// the times of a run that was cut or failed, would mark the wrong step.
-	j.Steps, j.StepNumber, j.StepStarts, j.StepEnds = stepList(), 0, nil, nil
+	list := []steps.Step{
+		{Name: stepCheckNode, Run: func(context.Context) error { return ops.check(j) }},
+		{Name: stepSpace, Run: func(context.Context) error { return ops.capacity(j) }},
+		{Name: stepFinish, Run: func(context.Context) error { return ops.commit(j) }},
+	}
+	j.Steps, j.StepNumber = nil, 0
+	for _, s := range list {
+		j.Steps = append(j.Steps, s.Name)
+	}
+	j.StepStarts, j.StepEnds = make([]time.Time, len(list)), make([]time.Time, len(list))
 	// The installed side only records a Retry. Once the program may have been
 	// replaced, the record keeps saying so.
 	j.Phase = "accepted"
 	if j.HostChanges {
 		j.Phase = "committing"
 	}
-
-	if err := begin(stepCheckNode); err != nil {
-		return err
-	}
-	if err := ops.check(j); err != nil {
-		return fail(err)
-	}
-	if err := begin(stepSpace); err != nil {
-		return err
-	}
-	if err := ops.capacity(j); err != nil {
-		return fail(err)
-	}
-	// Saved before the program is replaced. From here Cancel is refused.
-	j.Phase, j.HostChanges = "committing", true
-	if err := begin(stepFinish); err != nil {
-		return err
-	}
-	if err := ops.commit(j); err != nil {
-		return fail(err)
+	// Nothing stops an update between its steps, so its context never ends.
+	res := steps.Run(context.Background(), list, &workerSink{j: j, save: ops.save})
+	if res.Outcome != steps.Done {
+		return res.Err
 	}
 	j.Error, j.Next, j.Advice = "", "", ""
 	j.Ended = time.Now().UTC()
-	end()
 	j.Phase, j.Step = "complete", "Update complete"
 	return ops.save(j)
+}
+
+// workerSink is the update's side of internal/steps: its record and its
+// journal lines.
+type workerSink struct {
+	j    *job
+	save func(*job) error
+}
+
+// Begin saves the step that is now in progress, with the step text a screen
+// without the list shows. The last step replaces the program. It is saved
+// together with the word that the machine may now change, so the program is
+// never replaced without that on record. From there Cancel is refused.
+func (s *workerSink) Begin(i int) error {
+	j := s.j
+	if i == len(j.Steps)-1 {
+		j.Phase, j.HostChanges = "committing", true
+	}
+	j.Step, j.StepNumber, j.StepStarts[i] = j.Steps[i], i+1, now().UTC()
+	return s.save(j)
+}
+
+// End notes when the step finished or failed. A finished step's end is
+// saved with the next step's start, or with the update's end. A failure is
+// saved at once, with the screen's next step and words for it, which say
+// whether the program may have been replaced.
+func (s *workerSink) End(i int, o steps.Outcome, err error) error {
+	j := s.j
+	j.StepEnds[i] = now().UTC()
+	if o != steps.Failed {
+		return nil
+	}
+	j.Phase = "failed"
+	j.Error = err.Error()
+	j.Next, j.Advice = protocol.Advise(!j.HostChanges)
+	return s.save(j)
+}
+
+// Log writes a line to the update unit's journal, which the l key on Node
+// Updates opens.
+func (s *workerSink) Log(i int, text string) {
+	fmt.Fprintf(os.Stderr, "step %d/%d %s\n", i+1, len(s.j.Steps), text)
 }

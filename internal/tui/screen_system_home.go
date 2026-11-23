@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os/exec"
 	"slices"
 	"strings"
 	"time"
@@ -64,8 +63,12 @@ type SystemHomeScreen struct {
 	svcPending *serviceAttempt
 	svcResult  string
 	// The package update the Updates tab started and shows.
-	pkgPending     *packageAttempt
-	pkgResult      string
+	pkgPending *packageAttempt
+	pkgResult  string
+	// pkgLog is the service of a package update that failed or ended
+	// without a result. Its journal says more than the screen does, and the
+	// Updates tab offers the l key for it.
+	pkgLog         string
 	rebootPending  *rebootAttempt
 	rebootResult   string
 	rebootAccepted bool
@@ -192,16 +195,7 @@ func (s *SystemHomeScreen) HandleKey(
 			if svc == "" {
 				return s, nil
 			}
-			c := exec.Command("bash", "-c",
-				"clear && journalctl -u "+svc+
-					" -n 100 --no-pager"+
-					" && echo && echo "+
-					"'  Press Enter to return...'"+
-					" && read && clear")
-			return s, tea.ExecProcess(c,
-				func(err error) tea.Msg {
-					return systemRefreshMsg{}
-				})
+			return s, showJournal(svc, systemRefreshMsg{})
 		}
 		return s, nil
 	case "backspace":

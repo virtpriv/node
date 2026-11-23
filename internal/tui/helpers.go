@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"os/exec"
 	"strings"
 
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/virtpriv/node/internal/theme"
 )
@@ -89,4 +91,14 @@ func renderViewport(
 	}
 
 	return strings.Join(vpLines, "\n")
+}
+
+// showJournal opens the newest 100 lines of a unit's journal in the terminal
+// and comes back to the TUI at Enter. The unit's name is handed to
+// journalctl as one argument and is never part of the shell's text.
+func showJournal(unit string, back tea.Msg) tea.Cmd {
+	c := exec.Command("bash", "-c",
+		`clear && journalctl -u "$1" -n 100 --no-pager`+
+			" && echo && echo '  Press Enter to return...' && read && clear", "vpn", unit)
+	return tea.ExecProcess(c, func(error) tea.Msg { return back })
 }
