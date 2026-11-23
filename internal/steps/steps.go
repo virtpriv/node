@@ -2,8 +2,8 @@
 // It holds what every place that does such work while an owner watches can
 // share, which is when a step begins and ends, how a stop is honored, and
 // what the log says, a failure's own words included. A place keeps its own
-// record, its own log and its own rules about what runs again. The install is
-// the first place that uses it.
+// record, its own log and its own rules about what runs again. The install, a
+// job and a Node Update use it.
 package steps
 
 import (
@@ -30,9 +30,10 @@ type Step struct {
 type Outcome int
 
 const (
-	// Done: the step finished and its record was written.
+	// Done: the step finished and the sink took its end.
 	Done Outcome = iota
-	// Failed: the step, or the write of its record, returned an error.
+	// Failed: the step returned an error, or the sink did at the step's
+	// start or end.
 	Failed
 	// Stopped: a stop was asked and the step gave way in a wait, or the
 	// stop came before the step began.
@@ -52,10 +53,12 @@ const (
 // A Sink is the place's own record and log. The runner calls it from one
 // goroutine, in order.
 type Sink interface {
-	// Begin marks step i as begun.
-	Begin(i int)
+	// Begin marks step i as begun. When Begin fails, the step does not run
+	// and End is not called for it.
+	Begin(i int) error
 	// End tells how step i ended, with its error when it failed. A sink
-	// records only a step that is Done. When End fails, the step failed.
+	// that keeps which steps are done records only a step that is Done.
+	// When End fails, the step failed.
 	End(i int, o Outcome, err error) error
 	// Log writes one line about step i. The sink puts the step's number
 	// before it, since only the place knows the numbers an owner sees.
@@ -77,15 +80,20 @@ func Run(ctx context.Context, list []Step, sink Sink) Result {
 		if ctx.Err() != nil {
 			return Result{Outcome: Stopped, Index: i}
 		}
-		sink.Begin(i)
+		// A step that cannot be marked as begun does not run. A place whose
+		// record must say what is about to happen relies on that.
+		if err := sink.Begin(i); err != nil {
+			sink.Log(i, logFailed+s.Name+": "+err.Error())
+			return Result{Outcome: Failed, Index: i, Err: err}
+		}
 		sink.Log(i, logStarting+s.Name)
 		err := s.Run(ctx)
 		o := outcome(ctx, err)
 		if o == Stopped {
 			err = nil
 		}
-		// The record comes before the log, so the log never says more than
-		// the record holds.
+		// The sink hears of the end before the log does, so a step whose end
+		// the sink refuses is never logged as complete.
 		if recErr := sink.End(i, o, err); recErr != nil {
 			o, err = Failed, errors.Join(err, recErr)
 		}

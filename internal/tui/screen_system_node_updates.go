@@ -3,7 +3,6 @@ package tui
 import (
 	"errors"
 	"fmt"
-	"os/exec"
 	"slices"
 	"strings"
 	"time"
@@ -435,10 +434,7 @@ func (s *NodeUpdateScreen) hasLog() bool {
 // showLog opens the update's journal in the terminal, as the System screen
 // does for services, and refreshes the status on return.
 func (s *NodeUpdateScreen) showLog() tea.Cmd {
-	c := exec.Command("bash", "-c",
-		"clear && journalctl -u "+protocol.WorkerUnit+" -n 100 --no-pager"+
-			" && echo && echo '  Press Enter to return...' && read && clear")
-	return tea.ExecProcess(c, func(error) tea.Msg { return nodeUpdateTick{owner: s} })
+	return showJournal(protocol.WorkerUnit, nodeUpdateTick{owner: s})
 }
 
 // nodeUpdateAdviceRows is the most rows a failure's advice takes, so advice

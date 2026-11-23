@@ -117,7 +117,7 @@ func (m *Model) restoreSystemJobs(msg restoredJobsMsg) tea.Cmd {
 	var cmds []tea.Cmd
 	if j, ok := msg.jobs[api.KindPackageUpdate]; ok && s.pkgPending == nil && s.pkgResult == "" {
 		if j.Finished() {
-			s.pkgResult = packageResultText(finalUpdate(j))
+			s.setPackageResult(finalUpdate(j))
 		} else {
 			attempt := &packageAttempt{updates: m.screenCtx.jobs().Watch(j.ID), job: j}
 			s.pkgPending = attempt

@@ -87,11 +87,14 @@ request carries the API number its TUI speaks, and `vpnd` refuses a number it
 does not serve, so a TUI left open across an update may be asked to open
 again.
 
-Update Packages waits while Debian's own update runs, at most an hour. It then
+Update Packages does not start while Debian's own update runs. It says so,
+changes nothing, and the owner tries again a few minutes later. Otherwise it
 refreshes the package lists, runs Debian's `unattended-upgrade` with vpn's rules
 and ends with a `dpkg --audit` consistency check. A failed refresh stops the
-upgrade. Install step 11 and the nightly job run the same program with the same
-rules, which keep a configuration file the owner changed.
+upgrade. A failed step shows one plain sentence where vpn has one. The failing
+program's own words are in `journalctl -t vpnd`, in the lines marked "cause:"
+under the step's FAILED line. Install step 11 and the nightly job run the same
+program with the same rules, which keep a configuration file the owner changed.
 
 After every package change apt runs `vpn reboot-check`, from
 `/etc/apt/apt.conf.d/99-vpn-reboot-check`. It raises Debian's restart flag,

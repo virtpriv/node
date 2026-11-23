@@ -234,12 +234,13 @@ func (r *stepRunner) skipTo(i int) {
 // Begin, End and Log make the stepRunner the shared runner's sink. Their k
 // counts the steps this run does.
 
-func (r *stepRunner) Begin(k int) {
+func (r *stepRunner) Begin(k int) error {
 	i := r.todo[k]
 	r.skipTo(i)
 	r.told = i + 1
 	r.steps[i].Status = StepRunning
 	r.show(i, StepRunning, nil)
+	return nil
 }
 
 // End records a step that is done. A stopped step is not recorded and goes

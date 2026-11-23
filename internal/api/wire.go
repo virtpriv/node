@@ -120,6 +120,10 @@ type Job struct {
 	Result json.RawMessage `json:"result,omitempty"`
 }
 
+// JobUnit is the systemd service a job runs in. Its journal holds the job's
+// own lines.
+func JobUnit(id string) string { return "vpn-job-" + id + ".service" }
+
 // Finished reports whether the job has ended, with or without a result.
 func (j Job) Finished() bool {
 	return j.State == JobDone || j.State == JobFailed || j.State == JobUnknown
@@ -195,17 +199,4 @@ type UpdateResumeParams struct {
 // SSH key, so callers treat an error as unavailable and refuse that action.
 type SSHAuthResult struct {
 	PasswordAuthEnabled bool `json:"password_auth_enabled"`
-}
-
-// ── Step lists ───────────────────────────────────────────
-//
-// A kind's step names are fixed and known to both sides. The job writes the
-// list into its record and marks each step as it goes.
-
-// PackageUpdateStepNames are Update Packages' steps.
-func PackageUpdateStepNames() []string {
-	return []string{
-		"Refreshing package lists",
-		"Upgrading packages",
-	}
 }

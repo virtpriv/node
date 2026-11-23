@@ -10,6 +10,7 @@ import (
 
 	"github.com/virtpriv/node/internal/failure"
 	"github.com/virtpriv/node/internal/logger"
+	"github.com/virtpriv/node/internal/steps"
 	"github.com/virtpriv/node/internal/system"
 )
 
@@ -38,6 +39,19 @@ func runUnattendedUpgrade() error {
 	return nil
 }
 
+// What an owner reads when one of the two package commands fails. Install
+// step 11 and Update Packages share the sentences.
+const (
+	listsNotDownloaded = "Debian's package tool did not finish downloading the package lists through Tor."
+	upgradeNotFinished = "Debian's update program did not finish."
+)
+
+// The names of Update Packages' two steps, as the Updates screen shows them.
+const (
+	stepRefreshLists = "Refreshing package lists"
+	stepUpgrade      = "Upgrading packages"
+)
+
 // UpgradeDebian is install step 11's package work. The lists come first,
 // since step 10 replaced the sources and apt has no lists for vpn's yet.
 // unattended-upgrades is then installed, which turns the nightly job on,
@@ -49,7 +63,7 @@ func runUnattendedUpgrade() error {
 func UpgradeDebian(ctx context.Context, say func(string)) error {
 	job := newDebianAptJob(say)
 	if err := job.run(ctx, "Downloading Debian's package lists",
-		sentence("Debian's package tool did not finish downloading the package lists through Tor.", refreshPackageLists)); err != nil {
+		sentence(listsNotDownloaded, refreshPackageLists)); err != nil {
 		return err
 	}
 	if err := job.run(ctx, "Installing Debian's update program",
@@ -61,7 +75,7 @@ func UpgradeDebian(ctx context.Context, say func(string)) error {
 		return err
 	}
 	if err := job.run(ctx, "Installing Debian's updates",
-		sentence("Debian's update program did not finish.", runUnattendedUpgrade)); err != nil {
+		sentence(upgradeNotFinished, runUnattendedUpgrade)); err != nil {
 		return err
 	}
 	logRebootCheck(logger.Install)
@@ -88,32 +102,117 @@ func logRebootCheck(log func(string, ...any)) {
 	}
 }
 
-// UpdatePackages is Update Packages. It completes accepted package work
-// independently of the observer. Do not attach the terminal's cancellation
-// to apt or dpkg: a lost connection must not interrupt package
-// configuration. Only the read-only final audit has a deadline. A restart is
-// refused until it ends, so one an update asks for waits for the next night.
-func UpdatePackages(progress func(int)) error {
+// UpdatePackages is Update Packages. While Debian's own update runs it
+// refuses at once with nothing changed, so the owner can try again in a few
+// minutes and no other change waits behind it. It never waits for that
+// update. The install does, since an install has to go on.
+//
+// run runs the two steps an owner watches, the list refresh and the
+// upgrade, and hands back the first failure. The hold on restarts and the
+// final audit stay here, around the steps, and the reboot check at the end
+// of the second. Nothing here can be stopped: a lost connection must not
+// interrupt package configuration, and the refresh and the upgrade have no
+// time limit. A restart is refused until the update ends, so one an update
+// asks for waits for the next night.
+func UpdatePackages(run func(...steps.Step) error) error {
 	if os.Geteuid() != 0 {
 		return errors.New("package updates require root")
 	}
-	inhibitor, err := system.InhibitShutdown("updating Debian's packages")
+	return packageUpdate{
+		running: debianAptJobRunning,
+		hold: func() (func(), error) {
+			inhibitor, err := system.InhibitShutdown("updating Debian's packages")
+			if err != nil {
+				return nil, err
+			}
+			return func() { inhibitor.Release() }, nil
+		},
+		refresh:     refreshPackageLists,
+		upgrade:     runUnattendedUpgrade,
+		rebootCheck: func() { logRebootCheck(logger.System) },
+		audit: func() error {
+			return packageAuditResult(system.RunOutputWithTimeout(10*time.Second, "dpkg", "--audit"))
+		},
+	}.run(run)
+}
+
+// errDebianUpdateRunning refuses Update Packages. It is the whole of what
+// the owner reads after the screen's own words. It says "was", since the
+// result stays on the screen until the next package update.
+var errDebianUpdateRunning error = &failure.Failure{Text: "Debian's own update was running. Try again in a few minutes."}
+
+// What the owner reads when a command failed and vpn can say more. A second
+// look found Debian's own update running, or the command's own words name
+// apt's lock while that update does not run, as with an apt the owner runs.
+// Each says what was seen, not a cause.
+const (
+	debianUpdateStarted = "Debian's own update started at the same time."
+	aptInUse            = "Another program was using Debian's package tool."
+)
+
+// packageUpdate is Update Packages' order of work, with the machine behind
+// functions so the order can be tested.
+type packageUpdate struct {
+	// running reports whether Debian's own update runs.
+	running func() (bool, error)
+	// hold holds off a restart until release is called.
+	hold             func() (release func(), err error)
+	refresh, upgrade func() error
+	rebootCheck      func()
+	audit            func() error
+}
+
+func (u packageUpdate) run(run func(...steps.Step) error) error {
+	// The look comes before the hold on restarts, so a refusal has changed
+	// nothing at all.
+	running, err := u.running()
+	if err != nil {
+		return nothingChanged(err)
+	}
+	if running {
+		return nothingChanged(errDebianUpdateRunning)
+	}
+	release, err := u.hold()
 	if err != nil {
 		return nothingChanged(fmt.Errorf("cannot hold off a restart: %w", err))
 	}
-	defer inhibitor.Release()
-	// A job cannot be stopped and its screen shows no line of its own.
-	ctx, job := context.Background(), newDebianAptJob(func(string) {})
-	if err := job.run(ctx, "", refreshPackageLists); err != nil {
-		return fmt.Errorf("refresh package lists: %w", err)
+	defer release()
+	err = run(
+		steps.Step{Name: stepRefreshLists, Run: u.command(listsNotDownloaded, u.refresh)},
+		steps.Step{Name: stepUpgrade, Run: u.command(upgradeNotFinished, func() error {
+			if err := u.upgrade(); err != nil {
+				return err
+			}
+			// With nothing to install no apt hook runs, so the check runs here.
+			u.rebootCheck()
+			return nil
+		})})
+	if err != nil {
+		return err
 	}
-	progress(0)
-	if err := job.run(ctx, "", runUnattendedUpgrade); err != nil {
-		return fmt.Errorf("upgrade packages: %w", err)
+	return u.audit()
+}
+
+// command makes a step's body of a command. It puts a plain sentence on the
+// command's failure, with the command's own error as its cause. Debian's own
+// update can start in the moment after the look. The command then fails on
+// apt's lock, or fails with no message, and a second look finds that update
+// running. A lock error without it means another program held the lock.
+// Each has its own sentence. Nothing is tried again.
+func (u packageUpdate) command(text string, cmd func() error) func(context.Context) error {
+	return func(context.Context) error {
+		err := cmd()
+		if err == nil {
+			return nil
+		}
+		said := text
+		if running, askErr := u.running(); askErr == nil && running {
+			said = debianUpdateStarted
+		} else if isAptLockError(err) {
+			said = aptInUse
+		}
+		return &failure.Failure{Text: said, Cause: err}
 	}
-	logRebootCheck(logger.System)
-	progress(1)
-	return packageAuditResult(system.RunOutputWithTimeout(10*time.Second, "dpkg", "--audit"))
 }
 
 // packageAuditResult reads dpkg --audit, which prints nothing on a healthy
@@ -136,15 +235,15 @@ const debianAptJobLimit = time.Hour
 
 const debianAptJobPoll = 5 * time.Second
 
-// errDebianJobStillRunning has its plain sentence already and no words of
-// another program under it.
+// errDebianJobStillRunning ends an install step whose wait ran out. It has
+// its plain sentence already and no words of another program under it.
 var errDebianJobStillRunning error = &failure.Failure{Text: "Debian's own update was still running after an hour."}
 
 // debianAptJobWaiting is what the owner reads while vpn waits.
 const debianAptJobWaiting = "Waiting for Debian's own update to finish"
 
-// debianAptJob waits while Debian's nightly job runs, so vpn's apt work does
-// not fail on apt's lock. The hour counts from the first wait.
+// debianAptJob waits while Debian's own update runs, so the install's apt
+// work does not fail on apt's lock. The hour counts from the first wait.
 type debianAptJob struct {
 	// say tells the owner what is happening now.
 	say      func(string)

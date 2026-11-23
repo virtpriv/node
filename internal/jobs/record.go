@@ -70,7 +70,7 @@ func newID(now time.Time) (string, error) {
 }
 
 // UnitName is the systemd service a job runs in.
-func UnitName(id string) string { return "vpn-job-" + id + ".service" }
+func UnitName(id string) string { return api.JobUnit(id) }
 
 // Store is the jobs folder and the lock that makes acceptance one step.
 type Store struct {

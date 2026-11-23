@@ -80,7 +80,7 @@ TUI does not undo an action the server accepted.
 
 - **Node Updates** installs a new release of vpn. See
   [Updating Your Node](updating.md).
-- **Update Packages** runs Debian's daily update now and keeps your existing
+- **Update Packages** installs Debian's updates now and keeps your existing
   configuration. If an update needs a restart, the Updates screen says so, and
   the node restarts during its next daily update, between 06:00 and 07:00
   server time. Select **Reboot** on System to restart sooner. The package
@@ -89,7 +89,9 @@ TUI does not undo an action the server accepted.
   those commands succeeded. It does not mean every service is healthy or that
   no restart is needed. Closing the TUI does not stop a package update the
   server already started. If the outcome is unconfirmed, check the package
-  state and log before you try again.
+  state and the log, which `l` opens on the Updates screen, before you try
+  again. While Debian's own update runs, Update Packages does not start and
+  says so. Nothing is changed then, and you can try again a few minutes later.
 
 System shows a Security updates box only when something needs you, such as a
 restart that waits or is late, no successful nightly update for two days, or
