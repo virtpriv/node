@@ -172,7 +172,7 @@ func TestRootSSHChangeNotConfirmedWarnsAboutRootLogin(t *testing.T) {
 		may  bool
 	}{
 		{"restart failed after the write", fmt.Errorf("restart sshd: %w", host.ErrSSHSettingNotConfirmed), true},
-		{"setting refused and restored", errors.New("sshd rejected the config, previous drop-in restored"), false},
+		{"setting refused and restored", errors.New("sshd did not confirm vpn's SSH settings, so the earlier file is back and sshd was not restarted"), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			run := stopFixture(t, off)

@@ -58,6 +58,7 @@ const (
 	checkNameAptProxy  = "apt uses no proxy"
 	checkNameJournal   = "system logs can be kept on disk"
 	checkNameTor       = "Tor's settings are Debian's own"
+	checkNameSSHOrder  = "sshd reads vpn's SSH settings first"
 )
 
 // detectHardware is a variable so tests can stand in for the machine.
@@ -121,7 +122,7 @@ func RunPreflight() (host.SSHObservation, error) {
 		}
 	}
 	return obs, fmt.Errorf(
-		"preflight: %d of %d checks failed, nothing was changed",
+		"preflight: %d of %d checks failed, this run changed nothing",
 		failed, len(results))
 }
 
@@ -146,6 +147,7 @@ func runPreflightChecks() ([]PreflightResult, host.SSHObservation) {
 		PreflightResult{checkNameAptProxy, apt.Proxy},
 		PreflightResult{checkNameJournal, host.CheckJournalStorage()},
 		PreflightResult{checkNameTor, host.CheckTorSettings()},
+		PreflightResult{checkNameSSHOrder, host.CheckSSHReadsVPNFirst()},
 	)
 	obs, obsErr := host.ObserveInitialSSHState()
 	results = append(results,
@@ -501,8 +503,8 @@ func FormatPreflightReport(results []PreflightResult) string {
 		}
 	}
 	if failed > 0 {
-		b.WriteString("\n  Refusing to install. Nothing on this " +
-			"system has been changed.\n")
+		b.WriteString("\n  Refusing to install. This run changed " +
+			"nothing on this system.\n")
 	}
 	return b.String()
 }
