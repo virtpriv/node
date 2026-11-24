@@ -475,8 +475,8 @@ func buildInstallSteps(dec *InstallDecisions, holdRestarts func() error) []Insta
 		// unattended-upgrade runs with vpn's rules, the program every later
 		// update runs, and its nightly job is turned on. An upgrade can
 		// restart Tor, for example with a library Tor uses, so the step
-		// reports done only once Tor is ready again. The next step
-		// installs a package through it.
+		// reports done only once Tor is ready again. Later steps install
+		// packages through it.
 		{Key: "base.upgrade",
 			Name: "Updating Debian and turning on its security updates",
 			Run: func(ctx context.Context, say func(string)) error {
@@ -485,8 +485,16 @@ func buildInstallSteps(dec *InstallDecisions, holdRestarts func() error) []Insta
 				}
 				return verifyTorAfterUpgrade(ctx, say)
 			}},
+		// Before fail2ban. fail2ban reads sshd's failed logins from the
+		// journal and finds the journal's folders only when it starts. Started
+		// while a provider's image keeps the journal in memory, it hears
+		// nothing once the journal moves to disk, until it is restarted.
+		{Key: "journal.access",
+			Name: "Keeping system logs on disk for your " + paths.AdminUser + " user to read",
+			Run:  plain(host.SetupJournalAccess)},
 		// SSH login protection as early as its package can come through
-		// Tor, on the lists the upgrade just refreshed.
+		// Tor, once the journal is on disk, on the lists the upgrade just
+		// refreshed.
 		{Key: "security", Name: "Turning on fail2ban login protection",
 			Run: func(ctx context.Context, say func(string)) error {
 				if err := host.InstallFail2ban(ctx, say); err != nil {
@@ -504,11 +512,6 @@ func buildInstallSteps(dec *InstallDecisions, holdRestarts func() error) []Insta
 		{Key: rootLoginOffStep,
 			Name: "Turning off root login over SSH",
 			Run:  plain(installSSHHardening)},
-		// The unprivileged TUI uses vpnd's fixed requests. The owner can
-		// separately authenticate with sudo for general host maintenance.
-		{Key: "journal.access",
-			Name: "Keeping system logs on disk for your " + paths.AdminUser + " user to read",
-			Run:  plain(host.SetupJournalAccess)},
 		{Key: "helper.enable",
 			Name: "Starting vpnd, the node's root service",
 			Run:  plain(host.InstallVPNDUnits)},
