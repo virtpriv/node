@@ -401,6 +401,14 @@ func TestDebianPackagesComeAfterTheUpgrade(t *testing.T) {
 	}
 }
 
+// fail2ban started before the journal moves to disk hears no failed login
+// until it is restarted, and nothing in the install says so.
+func TestFail2banStartsAfterTheJournalIsOnDisk(t *testing.T) {
+	if stepIndex(t, "security") < stepIndex(t, "journal.access") {
+		t.Fatal("fail2ban starts before the journal is kept on disk")
+	}
+}
+
 // An upgrade can restart Tor. The step must not report done until Tor routes
 // again, or the next download starts into a Tor that is still coming back.
 func TestPackageUpgradeConfirmsTorBeforeItReportsDone(t *testing.T) {

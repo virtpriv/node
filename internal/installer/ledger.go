@@ -42,10 +42,10 @@ var baseInstallStepKeys = []string{
 	"tor.gate",
 	"apt.tor",
 	"base.upgrade",
+	"journal.access",
 	"security",
 	"swap.zram",
 	"ssh.harden",
-	"journal.access",
 	"helper.enable",
 	"releases.folder",
 }
