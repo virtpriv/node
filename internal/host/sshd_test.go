@@ -282,23 +282,34 @@ func TestSSHSwitchSaysNothingChangedOnlyWhenCertain(t *testing.T) {
 		keys      string
 		applyErr  error
 		observed  bool
+		readErr   error
 		unchanged bool
 	}{
 		{name: "no key", keys: "", unchanged: true},
 		{name: "no SSH folder yet", keys: "missing", unchanged: true},
+		{name: "key file cannot be read", keys: "unreadable", unchanged: true},
 		{name: "refused and put back", keys: valid, applyErr: errors.New("sshd did not confirm vpn's SSH settings"), unchanged: true},
 		{name: "may be written", keys: valid, applyErr: notConfirmed{errors.New("restart sshd: failed")}},
 		{name: "restarted, answer does not match", keys: valid, observed: true},
+		{name: "restarted, answer cannot be read", keys: valid, readErr: errors.New("sshd -T failed")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := sshkeys.Store{Path: filepath.Join(t.TempDir(), "authorized_keys")}
-			if tc.keys == "missing" {
+			switch tc.keys {
+			case "missing":
 				// A fresh install has no ~/.ssh until the owner adds a key.
 				store.Path = filepath.Join(t.TempDir(), ".ssh", "authorized_keys")
-			} else if err := os.WriteFile(store.Path, []byte(tc.keys), 0600); err != nil {
-				t.Fatal(err)
+			case "unreadable":
+				// A folder where the key file should be cannot be read as one.
+				if err := os.Mkdir(store.Path, 0700); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				if err := os.WriteFile(store.Path, []byte(tc.keys), 0600); err != nil {
+					t.Fatal(err)
+				}
 			}
-			err := rebuildSSHConfig(true, store, func(string) error { return tc.applyErr }, func() (bool, error) { return tc.observed, nil })
+			err := rebuildSSHConfig(true, store, func(string) error { return tc.applyErr }, func() (bool, error) { return tc.observed, tc.readErr })
 			if err == nil {
 				t.Fatal("reported success")
 			}
