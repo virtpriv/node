@@ -54,6 +54,30 @@ func TestParsePasswordAuth(t *testing.T) {
 	}
 }
 
+// The screens' read counts keyboard-interactive as password login: Debian's
+// keyboard-interactive asks PAM for the same password.
+func TestOwnerPasswordLogin(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		output  string
+		want    bool
+		wantErr bool
+	}{
+		{"both off", sshdTFixture, false, false},
+		{"password on", strings.Replace(sshdTFixture, "passwordauthentication no", "passwordauthentication yes", 1), true, false},
+		{"keyboard-interactive on", strings.Replace(sshdTFixture, "kbdinteractiveauthentication no", "kbdinteractiveauthentication yes", 1), true, false},
+		{"keyboard-interactive on without PAM", strings.Replace(strings.Replace(sshdTFixture, "kbdinteractiveauthentication no", "kbdinteractiveauthentication yes", 1), "usepam yes", "usepam no", 1), false, false},
+		{"keyboard-interactive missing", strings.Replace(sshdTFixture, "kbdinteractiveauthentication no\n", "", 1), false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ownerPasswordLogin(tc.output)
+			if (err != nil) != tc.wantErr || got != tc.want {
+				t.Fatalf("got %v, error %v, want %v, error %v", got, err, tc.want, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestSSHApplyValidatesRestoresAndDoesNotRestartOnFailure(t *testing.T) {
 	for _, tc := range []struct {
 		name                                                     string
@@ -107,7 +131,7 @@ func TestSSHApplyValidatesRestoresAndDoesNotRestartOnFailure(t *testing.T) {
 			if (err != nil) != (tc.name != "success") {
 				t.Fatalf("unexpected result %v", err)
 			}
-			if tc.restoreErr != nil && !strings.Contains(err.Error(), "restoring") {
+			if tc.restoreErr != nil && !strings.Contains(err.Error(), tc.restoreErr.Error()) {
 				t.Fatal("restore failure hidden")
 			}
 			if errors.Is(err, ErrSSHSettingNotConfirmed) != tc.notConfirmed {
@@ -201,35 +225,108 @@ func TestOwnerSSHPolicyWithNativeParser(t *testing.T) {
 				t.Fatal("changed deployment account policy")
 			}
 			// An earlier matching provider rule must cause refusal, not false success.
-			conflict := "Match User vpn\n PasswordAuthentication " + map[string]string{"yes": "no", "no": "yes"}[setting] + "\nMatch all\n"
-			// Includes restore global parsing state, so the conflict goes in an earlier include.
+			// Includes restore global parsing state, so each conflict goes in an earlier include.
+			// A list of accounts refuses wherever it stands.
 			earlier := filepath.Join(dir, "earlier.conf")
-			if err := os.WriteFile(earlier, []byte(conflict), 0600); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(config, []byte("Include "+earlier+"\n"+body), 0600); err != nil {
-				t.Fatal(err)
-			}
-			out, err := exec.Command(sshd, "-T", "-f", config, "-C", "user=vpn,host=example,addr=192.0.2.1").CombinedOutput()
-			if err != nil {
-				t.Fatalf("conflict fixture invalid: %s %v", out, err)
-			}
-			if verifySSHPolicy(setting, string(out), outputs["root"]) == nil {
-				t.Fatal("conflicting effective authentication accepted")
+			for _, conflict := range []struct{ earlier, later string }{
+				{earlier: "Match User vpn\n PasswordAuthentication " + map[string]string{"yes": "no", "no": "yes"}[setting] + "\nMatch all\n"},
+				{earlier: "Match User vpn\n KbdInteractiveAuthentication yes\nMatch all\n"},
+				{earlier: "Match all\n X11Forwarding yes\n"},
+				{later: "AllowUsers root\n"},
+			} {
+				if err := os.WriteFile(earlier, []byte(conflict.earlier), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(config, []byte("Include "+earlier+"\n"+body+conflict.later), 0600); err != nil {
+					t.Fatal(err)
+				}
+				out, err := exec.Command(sshd, "-T", "-f", config, "-C", "user=vpn,host=example,addr=192.0.2.1").CombinedOutput()
+				if err != nil {
+					t.Fatalf("conflict fixture invalid: %s %v", out, err)
+				}
+				if verifySSHPolicy(setting, string(out), outputs["root"]) == nil {
+					t.Fatalf("conflicting effective policy accepted: %q", conflict)
+				}
 			}
 		}
 	}
 }
 
 func TestSSHPolicyRefusesRestrictionsBeforeActivation(t *testing.T) {
-	owner := "passwordauthentication yes\npubkeyauthentication yes\npermittty yes\nforcecommand none\nchrootdirectory none\nauthenticationmethods any\n"
+	owner := "passwordauthentication yes\nkbdinteractiveauthentication no\npubkeyauthentication yes\npermittty yes\nx11forwarding no\nforcecommand none\nchrootdirectory none\nauthenticationmethods any\n"
 	root := "permitrootlogin no\n"
-	for _, pair := range [][2]string{{"pubkeyauthentication yes", "pubkeyauthentication no"}, {"permittty yes", "permittty no"}, {"forcecommand none", "forcecommand /bin/false"}, {"chrootdirectory none", "chrootdirectory /srv/jail"}, {"authenticationmethods any", "authenticationmethods publickey,password"}} {
+	if err := verifySSHPolicy("yes", owner, root); err != nil {
+		t.Fatalf("refused the policy vpn writes: %v", err)
+	}
+	for _, pair := range [][2]string{{"pubkeyauthentication yes", "pubkeyauthentication no"}, {"permittty yes", "permittty no"}, {"forcecommand none", "forcecommand /bin/false"}, {"chrootdirectory none", "chrootdirectory /srv/jail"}, {"authenticationmethods any", "authenticationmethods publickey,password"},
+		{"kbdinteractiveauthentication no", "kbdinteractiveauthentication yes"}, {"x11forwarding no", "x11forwarding yes"},
+		{"authenticationmethods any", "authenticationmethods any\nallowusers root"}, {"authenticationmethods any", "authenticationmethods any\ndenyusers vpn"},
+		{"authenticationmethods any", "authenticationmethods any\nallowgroups sudo"}, {"authenticationmethods any", "authenticationmethods any\ndenygroups users"}} {
 		if verifySSHPolicy("yes", strings.Replace(owner, pair[0], pair[1], 1), root) == nil {
 			t.Fatalf("accepted %s", pair[1])
 		}
 	}
 	if verifySSHPolicy("yes", owner, "permitrootlogin yes\n") == nil {
 		t.Fatal("accepted root SSH")
+	}
+}
+
+// The screen says nothing changed only when that is certain: before the
+// write, or when vpn's file was put back and sshd was not restarted. After a
+// failed write, a failed put back, a failed restart or a restart whose answer
+// does not match, sshd may use the new setting.
+func TestSSHSwitchSaysNothingChangedOnlyWhenCertain(t *testing.T) {
+	valid := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n"
+	for _, tc := range []struct {
+		name      string
+		keys      string
+		applyErr  error
+		observed  bool
+		readErr   error
+		unchanged bool
+	}{
+		{name: "no key", keys: "", unchanged: true},
+		{name: "no SSH folder yet", keys: "missing", unchanged: true},
+		{name: "key file cannot be read", keys: "unreadable", unchanged: true},
+		{name: "refused and put back", keys: valid, applyErr: errors.New("sshd did not confirm vpn's SSH settings"), unchanged: true},
+		{name: "may be written", keys: valid, applyErr: notConfirmed{errors.New("restart sshd: failed")}},
+		{name: "restarted, answer does not match", keys: valid, observed: true},
+		{name: "restarted, answer cannot be read", keys: valid, readErr: errors.New("sshd -T failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := sshkeys.Store{Path: filepath.Join(t.TempDir(), "authorized_keys")}
+			switch tc.keys {
+			case "missing":
+				// A fresh install has no ~/.ssh until the owner adds a key.
+				store.Path = filepath.Join(t.TempDir(), ".ssh", "authorized_keys")
+			case "unreadable":
+				// A folder where the key file should be cannot be read as one.
+				if err := os.Mkdir(store.Path, 0700); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				if err := os.WriteFile(store.Path, []byte(tc.keys), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := rebuildSSHConfig(true, store, func(string) error { return tc.applyErr }, func() (bool, error) { return tc.observed, tc.readErr })
+			if err == nil {
+				t.Fatal("reported success")
+			}
+			if errors.Is(err, ErrNothingChanged) != tc.unchanged {
+				t.Fatalf("nothing changed %v, want %v: %v", !tc.unchanged, tc.unchanged, err)
+			}
+		})
+	}
+	// Another change holds the key lock, so this one never ran.
+	store := sshkeys.Store{Path: filepath.Join(t.TempDir(), "authorized_keys")}
+	if err := store.WithLock(func() error {
+		err := rebuildSSHConfig(true, store, func(string) error { return nil }, func() (bool, error) { return false, nil })
+		if !errors.Is(err, ErrNothingChanged) {
+			t.Errorf("a busy lock reads as %v, want nothing changed", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

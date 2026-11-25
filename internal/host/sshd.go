@@ -4,6 +4,7 @@ package host
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/netip"
 	"os"
 	"strconv"
@@ -92,9 +93,16 @@ func applySSHHardening(passwordAuth string, ops sshdOps) error {
 			restoreErr = ops.remove()
 		}
 		if restoreErr != nil {
-			return notConfirmed{fmt.Errorf("sshd rejected the config (%s), restoring %s failed (%v), sshd was not restarted. Inspect the file before restarting", strings.TrimSpace(out), paths.SSHDDropIn, restoreErr)}
+			undo := "putting " + paths.SSHDDropIn + " back"
+			if !existed {
+				undo = "removing " + paths.SSHDDropIn
+			}
+			return notConfirmed{fmt.Errorf("sshd did not confirm vpn's SSH settings (%s), and %s failed (%v). sshd was not restarted. Inspect the file before restarting sshd", strings.TrimSpace(out), undo, restoreErr)}
 		}
-		return fmt.Errorf("sshd rejected the config, previous drop-in restored, sshd not restarted: %s", strings.TrimSpace(out))
+		if existed {
+			return fmt.Errorf("sshd did not confirm vpn's SSH settings, so the earlier file is back and sshd was not restarted: %s", strings.TrimSpace(out))
+		}
+		return fmt.Errorf("sshd did not confirm vpn's SSH settings, so vpn's file is removed and sshd was not restarted: %s", strings.TrimSpace(out))
 	}
 	if err := ops.restart(); err != nil {
 		return notConfirmed{err}
@@ -112,21 +120,29 @@ func RebuildSSHHardeningConfig(disabled bool) error {
 	return rebuildSSHConfig(disabled, store, ApplySSHHardening, EffectiveSSHPasswordAuth)
 }
 
+// errNoKeys refuses to turn password login off with no key to log in with.
+var errNoKeys = errors.New("refusing to disable password authentication with no supported SSH keys, add and test a key first")
+
+// A refusal before the write, or one where vpn's file was put back and sshd
+// was not restarted, changed nothing, and the screen may say so.
 func rebuildSSHConfig(disabled bool, store sshkeys.Store, apply func(string) error, observe func() (bool, error)) error {
 	change := func() error {
 		auth := "yes"
 		if disabled {
 			data, err := store.Read()
 			if err != nil {
-				return err
+				return nothingChanged(err)
 			}
 			if len(sshkeys.Keys(data)) == 0 {
-				return errors.New("refusing to disable password authentication with no supported SSH keys, add and test a key first")
+				return nothingChanged(errNoKeys)
 			}
 			auth = "no"
 		}
 		if err := apply(auth); err != nil {
-			return err
+			if errors.Is(err, ErrSSHSettingNotConfirmed) {
+				return err
+			}
+			return nothingChanged(err)
 		}
 		enabled, err := observe()
 		if err != nil {
@@ -138,7 +154,18 @@ func rebuildSSHConfig(disabled bool, store sshkeys.Store, apply func(string) err
 		return nil
 	}
 	if disabled {
-		return store.WithLock(change)
+		ran := false
+		err := store.WithLock(func() error { ran = true; return change() })
+		switch {
+		case ran:
+			return err
+		case errors.Is(err, fs.ErrNotExist):
+			// A fresh install has no ~/.ssh until the owner adds a key.
+			return nothingChanged(errNoKeys)
+		default:
+			// The lock failed, so the change never ran.
+			return nothingChanged(err)
+		}
 	}
 	return change()
 }
@@ -154,7 +181,25 @@ func EffectiveSSHPasswordAuth() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("query effective sshd config: %w", err)
 	}
-	return parsePasswordAuth(out)
+	return ownerPasswordLogin(out)
+}
+
+// ownerPasswordLogin reports whether the password logs in. Debian's
+// keyboard-interactive login asks PAM for the same password, so it counts.
+// Without PAM it has nothing to ask on Linux. A second factor set up in PAM
+// would make it untrue, and vpn does not read PAM.
+func ownerPasswordLogin(output string) (bool, error) {
+	password, err := parsePasswordAuth(output)
+	if err != nil {
+		return false, err
+	}
+	switch sshdValue(output, "kbdinteractiveauthentication") {
+	case "yes":
+		return password || sshdValue(output, "usepam") == "yes", nil
+	case "no":
+		return password, nil
+	}
+	return false, errors.New("kbdinteractiveauthentication not present in sshd output")
 }
 
 func parsePasswordAuth(output string) (bool, error) {
@@ -189,6 +234,9 @@ func validateSSHPolicy(passwordAuth string) (string, error) {
 	out, err := system.RunRootCombinedOutput("sshd", "-t")
 	if err != nil {
 		return out, err
+	}
+	if err := CheckSSHReadsVPNFirst(); err != nil {
+		return err.Error(), err
 	}
 	contexts := []string{"host=localhost,addr=127.0.0.1"}
 	if connection := os.Getenv("SSH_CONNECTION"); connection != "" {
@@ -228,25 +276,52 @@ func verifySSHPolicy(passwordAuth, owner, root string) error {
 	if enabled != (passwordAuth == "yes") {
 		return errors.New("effective owner password authentication conflicts with requested policy")
 	}
-	value := func(out, key string) string {
-		for _, line := range strings.Split(out, "\n") {
-			fields := strings.Fields(line)
-			if len(fields) > 1 && fields[0] == key {
-				return strings.Join(fields[1:], " ")
-			}
-		}
-		return ""
+	// vpn turns both off for its account in every case, and the password
+	// switch covers neither.
+	if sshdValue(owner, "kbdinteractiveauthentication") != "no" {
+		return errors.New("sshd would turn on keyboard-interactive login for the vpn account, which vpn turns off")
 	}
-	if value(root, "permitrootlogin") != "no" {
+	if sshdValue(owner, "x11forwarding") != "no" {
+		return errors.New("sshd would forward X11 for the vpn account, which vpn turns off")
+	}
+	if sshdValue(root, "permitrootlogin") != "no" {
 		return errors.New("effective SSH policy still permits root login")
 	}
-	if value(owner, "pubkeyauthentication") != "yes" || value(owner, "permittty") != "yes" || value(owner, "forcecommand") != "none" || value(owner, "chrootdirectory") != "none" {
+	if sshdValue(owner, "pubkeyauthentication") != "yes" || sshdValue(owner, "permittty") != "yes" || sshdValue(owner, "forcecommand") != "none" || sshdValue(owner, "chrootdirectory") != "none" {
 		return errors.New("effective SSH policy does not permit the ordinary owner console")
 	}
-	if enabled && value(owner, "authenticationmethods") != "any" {
+	if enabled && sshdValue(owner, "authenticationmethods") != "any" {
 		return errors.New("effective SSH authentication methods do not permit password-only owner login")
 	}
+	// sshd's answer prints a list of accounts but not whether it lets vpn in.
+	for _, list := range []struct{ key, name string }{
+		{"allowusers", "AllowUsers"}, {"denyusers", "DenyUsers"}, {"allowgroups", "AllowGroups"}, {"denygroups", "DenyGroups"},
+	} {
+		if names := sshdValues(owner, list.key); len(names) > 0 {
+			return fmt.Errorf("found %s %s in sshd's settings. vpn refuses any list of accounts in sshd's settings, since sshd's answer does not say whom it lets in. Remove the line from the file in /etc/ssh that holds it", list.name, strings.Join(names, " "))
+		}
+	}
 	return nil
+}
+
+// sshdValue is the first value sshd -T prints for key, or "".
+func sshdValue(output, key string) string {
+	if values := sshdValues(output, key); len(values) > 0 {
+		return values[0]
+	}
+	return ""
+}
+
+// sshdValues is every value sshd -T prints for key, one line each.
+func sshdValues(output, key string) []string {
+	var values []string
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 1 && fields[0] == key {
+			values = append(values, strings.Join(fields[1:], " "))
+		}
+	}
+	return values
 }
 
 // VerifyInitialOwnerSSH rechecks the installation postcondition on completion,

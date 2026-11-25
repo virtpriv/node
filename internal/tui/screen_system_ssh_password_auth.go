@@ -127,7 +127,7 @@ func (s *SSHPasswordAuthScreen) HandleMsg(
 		if msg.err != nil {
 			s.resultErr = msg.err.Error()
 			if reason, ok := app.ChangeNotStarted(msg.err); ok {
-				s.resultErr = withReason("The change was not started", reason)
+				s.resultErr = withReason("Password login was not changed", reason)
 			}
 			s.resultMsg = ""
 			return s, nil
@@ -405,7 +405,10 @@ func (s *SSHPasswordAuthScreen) viewResult(
 
 	if s.resultErr != "" {
 		p.title(theme.Warning, "Error")
-		p.warnWrap(s.resultErr)
+		// Whole words, and a finding's fix on its own line.
+		for _, line := range theme.Wrap(s.resultErr, w-2) {
+			p.warn(line)
+		}
 	} else {
 		p.title(theme.Success, s.resultMsg)
 	}
