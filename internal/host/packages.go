@@ -15,7 +15,7 @@ import (
 )
 
 // Every package update runs Debian's own unattended-upgrade with vpn's rules:
-// install step 11, Update Packages and the nightly job. It installs the new
+// install step 10, Update Packages and the nightly job. It installs the new
 // packages a fix needs, a new kernel among them, and keeps configuration
 // files an owner changed. apt goes through Tor by then.
 
@@ -40,7 +40,7 @@ func runUnattendedUpgrade() error {
 }
 
 // What an owner reads when one of the two package commands fails. Install
-// step 11 and Update Packages share the sentences.
+// step 10 and Update Packages share the sentences.
 const (
 	listsNotDownloaded = "Debian's package tool did not finish downloading the package lists through Tor."
 	upgradeNotFinished = "Debian's update program did not finish."
@@ -52,8 +52,8 @@ const (
 	stepUpgrade      = "Upgrading packages"
 )
 
-// UpgradeDebian is install step 11's package work. The lists come first,
-// since step 10 replaced the sources and apt has no lists for vpn's yet.
+// UpgradeDebian is install step 10's package work. The lists come first,
+// since step 9 pointed apt at vpn's sources and apt has no lists for them yet.
 // unattended-upgrades is then installed, which turns the nightly job on,
 // vpn's rules are written, and the program runs once. The reboot check runs
 // once more at the end, since with nothing to install no hook runs. A

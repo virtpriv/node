@@ -13,7 +13,8 @@ import (
 var (
 	observeSSHForFirewall     = ObserveInitialSSHState
 	readUFWDefaultForFirewall = func() (string, error) {
-		return system.RunRootOutput("cat", paths.UFWDefault)
+		data, err := system.ReadFileRoot(paths.UFWDefault)
+		return string(data), err
 	}
 	writeUFWDefaultForFirewall = func(data []byte) error {
 		return system.WriteFileRoot(paths.UFWDefault, data, 0o644)
@@ -38,7 +39,9 @@ func ConfigureInitialFirewall() error {
 
 	// Debian's ufw ships IPV6=yes. vpn sets IPV6=no: ufw then drops all IPv6
 	// traffic in and out except loopback, so nothing leaves over IPv6 even if
-	// IPv6 is turned on again later.
+	// IPv6 is turned on again later. This is the one file of Debian's that
+	// vpn changes. The file's bytes are read and written back as they are but
+	// for that value, so IPV6=yes and ufw reload give Debian's file again.
 	ufwDefault, err := readUFWDefaultForFirewall()
 	if err == nil {
 		content := strings.ReplaceAll(

@@ -10,7 +10,7 @@ the owner guides, where an owner guide says only what to do. Releases and manage
 The installer takes a transient whole-run lock, checks the environment, and
 refuses with a full report before starting durable installation work if the
 machine is not one it can trust. It then asks for the owner account's password,
-sets up the machine in 17 steps, with every package after the Tor check coming
+sets up the machine in 16 steps, with every package after the Tor check coming
 through Tor, and then shows how to log in as `vpn` over SSH, where the TUI
 opens.
 
@@ -93,7 +93,7 @@ refreshes the package lists, runs Debian's `unattended-upgrade` with vpn's rules
 and ends with a `dpkg --audit` consistency check. A failed refresh stops the
 upgrade. A failed step shows one plain sentence where vpn has one. The failing
 program's own words are in `journalctl -t vpnd`, in the lines marked "cause:"
-under the step's FAILED line. Install step 11 and the nightly job run the same
+under the step's FAILED line. Install step 10 and the nightly job run the same
 program with the same rules, which keep a configuration file the owner changed.
 
 After every package change apt runs `vpn reboot-check`, from
@@ -101,7 +101,7 @@ After every package change apt runs `vpn reboot-check`, from
 `/var/run/reboot-required`, when the running kernel is older than the newest one
 installed, or when Tor, SSH or fail2ban still runs a program or library file an
 update replaced. vpn carries its libraries inside its program, so it is not
-checked. Install step 11 and Update Packages also run the check directly,
+checked. Install step 10 and Update Packages also run the check directly,
 since with nothing to install apt runs no hook. The check never makes apt fail. When the flag is up, Debian's nightly job
 restarts the node right after its run. The install, Update Packages and a node
 update hold a systemd block inhibitor, so a restart then waits for the next
@@ -116,20 +116,67 @@ already accepted by systemd.
 
 ## Directory layout
 
+Everything vpn writes on the machine is in the three tables below. They hold
+vpn's own files, what Debian's packages and tools set up when vpn asks them,
+and the one file of Debian's that vpn changes.
+
+vpn's own files.
+
 | Path | Contents |
 | --- | --- |
-| /etc/tor/torrc | Tor's configuration, Debian's own file. vpn does not write it. The install refuses a machine where it holds settings |
+| /usr/local/bin/vpn | The program. A Node Update replaces it |
 | /etc/vpn/config.json | Root-owned, written when the install finishes, root:vpn mode 0640. It holds its schema number alone |
+| /etc/apt/apt.conf.d/99-vpn-apt-tor | apt through Tor only, with plain http and https off, and apt pointed at vpn's folder of sources |
+| /etc/apt/vpn.sources.d/vpn-debian.sources | Debian's archives over tor+https, the only sources apt reads. The machine's own source files stay as they were, unread |
+| /etc/apt/apt.conf.d/99-vpn-nightly | vpn's values for Debian's nightly job. It is read after the two files of Debian's unattended-upgrades package, which stay as they were, and clears what they set for the job first |
+| /etc/apt/apt.conf.d/99-vpn-reboot-check | apt's hook for the reboot check |
+| /etc/sysctl.d/99-disable-ipv6.conf | IPv6 turned off |
+| /etc/logrotate.d/vpn | Rotation of vpn's log |
+| /etc/fail2ban/jail.local | The SSH jail |
+| /etc/ssh/sshd_config.d/00-vpn-hardening.conf | Root's SSH login off, and the `vpn` account's logins |
+| /etc/sudoers.d/vpn | sudo for the `vpn` account, with its password |
+| /etc/systemd/system/tor@default.service.d/90-vpn-restart.conf | Tor restarted 30 seconds after a crash |
+| /etc/systemd/journald.conf.d/zz-vpn-journal.conf | System logs kept on disk |
+| /etc/systemd/system/vpnd.socket and vpnd.service | The units of vpnd, the node's root service |
+| /etc/systemd/system/vpn-update.service | The unit a Node Update runs in, written by the first Node Update |
+| /home/vpn/.bash_profile | Opens the TUI at an SSH login |
+| /home/vpn/.ssh/authorized_keys | The SSH keys the owner adds on System, Accounts |
 | /home/vpn/.config/vpn/preferences.json | User-owned TUI preferences (theme), vpn:vpn mode 0600 |
+| /home/vpn/.cache/vpn/latest-version | The newest stable release found, kept for a while so the next look does not ask again |
 | /home/vpn/releases/ | The owner's releases folder, vpn:vpn mode 0700. Its contents are read as untrusted |
 | /var/lib/vpn-install-bootstrap-service-layout-2 | Short-lived root-only indication while initial lifecycle authority is published |
 | /var/lib/vpn/private/layout-version | Root-only supported-layout generation record |
 | /var/lib/vpn/private/install-state.json | Root-only bounded base-install progress and completion ledger |
 | /var/lib/vpn/private/password-pending | Root-only interrupted unattended-password delivery marker, present only while needed |
+| /var/lib/vpn/private/firewall-rules | Root-only copy of the firewall's rules as the install set them, to compare with |
 | /var/lib/vpn/private/jobs/ | Root-only records of the vpn API's jobs |
 | /var/lib/vpn/private/updates/ | Root-only managed update jobs and their records |
 | /run/vpn/install.lock | Stable root-only runtime lock for one active base installer |
+| /run/vpnd.sock | vpnd's socket, root:vpn mode 0660, made by systemd from vpnd.socket |
+| /run/vpn/operations.lock | Root-only lock for accepting one change at a time, held by a Node Update while it runs |
 | /var/log/vpn.log | Application log, its lines marked install, verify, tui or system, rotated by /etc/logrotate.d/vpn past 10 MB, copied then emptied in place, four compressed copies |
+
+Set up by Debian's packages and tools when vpn asks, and two places of
+Debian's own that vpn writes the way Debian does.
+
+| What vpn asks | What Debian sets up |
+| --- | --- |
+| `apt-get` installs sudo, gnupg, tor, torsocks, apt-transport-tor, wget, curl, ufw, logrotate, ca-certificates, a system bus and a clock service where the machine has none, libnss-myhostname, unattended-upgrades, fail2ban, nftables and systemd-zram-generator | Each package's own files and settings. libnss-myhostname adds itself to /etc/nsswitch.conf, so the machine's name resolves with no line in /etc/hosts. unattended-upgrades keeps its /etc/apt/apt.conf.d/20auto-upgrades and 50unattended-upgrades |
+| `adduser`, `chpasswd` and `usermod` | The `vpn` account, its group, its home /home/vpn, its password and its place in the systemd-journal group, in Debian's account files |
+| `ufw default`, `ufw allow` and `ufw enable` | ufw's rules and state under /etc/ufw, and the default policies in /etc/default/ufw |
+| `systemctl enable` for Tor, fail2ban and vpnd's socket, and `timedatectl set-ntp` | systemd's links under /etc/systemd/system |
+| vpn makes /var/log/journal where it is missing, then `systemd-tmpfiles` and a restart of journald | The journal's folder with its group and rights, as Debian's systemd README has it |
+| `sysctl --system` | The settings of /etc/sysctl.d applied |
+| vpn's reboot check writes /run/reboot-required and /run/reboot-required.pkgs | Debian's own restart flag, which Debian's kernel packages raise too. Debian's nightly job restarts the machine when it is up |
+
+The one file of Debian's that vpn changes.
+
+| Path | Change |
+| --- | --- |
+| /etc/default/ufw | `IPV6=yes` becomes `IPV6=no`, so the firewall drops all IPv6. To undo it, set `IPV6=yes` there and run `ufw reload` |
+
+vpn does not write /etc/tor/torrc, Debian's own file. The install refuses a
+machine where it holds settings.
 
 `/etc/vpn/config.json` is written once every install step is recorded. It is
 how the TUI and the update tell a finished install. The install record,

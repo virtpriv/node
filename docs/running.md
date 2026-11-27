@@ -93,6 +93,9 @@ TUI does not undo an action the server accepted.
   again. While Debian's own update runs, Update Packages does not start and
   says so. Nothing is changed then, and you can try again a few minutes later.
 
+apt reads its sources only in `/etc/apt/vpn.sources.d`. A source added
+anywhere else is not read.
+
 System shows a Security updates box only when something needs you, such as a
 restart that waits or is late, no successful nightly update for two days, or
 the nightly updates switched off. Its red lines and a stopped service put a

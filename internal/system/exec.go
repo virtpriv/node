@@ -72,15 +72,6 @@ func RunOutput(name string, args ...string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-// RunRootOutput requires root and returns trimmed stdout on success.
-// Output is discarded on error.
-func RunRootOutput(name string, args ...string) (string, error) {
-	if err := requireRoot(name); err != nil {
-		return "", err
-	}
-	return RunOutput(name, args...)
-}
-
 // commandWaitDelay bounds how long a command's output is still read after
 // its timeout, or after it exits, when a child process it left behind keeps
 // the output open.

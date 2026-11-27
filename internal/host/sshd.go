@@ -254,7 +254,7 @@ func sshContexts() ([]string, error) {
 // asks sshd for the vpn account, before the account or vpn's file exists, for
 // the settings vpn's file does not set. sshd answers for a name it does not
 // know, but a Match on a group the account will join shows only once it is
-// there, so step 15 asks again.
+// there, so step 14 asks again.
 func CheckSSHLetsOwnerIn() error {
 	contexts, err := sshContexts()
 	if err != nil {

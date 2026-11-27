@@ -97,7 +97,7 @@ func NewStatusCollector() *StatusCollector {
 		reboot: system.ReadRebootFlag,
 		timers: system.ReadAptTimers,
 		updates: func() (system.SecurityUpdates, error) {
-			return system.ReadSecurityUpdates(paths.AutoUpgrades)
+			return system.ReadSecurityUpdates(paths.AptNightly)
 		},
 	}}
 }

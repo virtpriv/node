@@ -51,7 +51,7 @@ func InstallInitialBinary() error {
 
 // InstallBasePackages prepares the packages needed before Tor routing is
 // configured. Installer keeps this initial clearnet phase before its Tor gate.
-// apt-transport-tor comes here with Tor, so step 10 only writes files.
+// apt-transport-tor comes here with Tor, so step 9 only writes files.
 //
 // An image may install no recommended packages, so the ones vpn uses are
 // named. logrotate otherwise comes only with Debian's tor, and without it
@@ -60,6 +60,11 @@ func InstallInitialBinary() error {
 // clock service are named as Debian's systemd recommends them, each with its
 // alternatives. apt-get satisfy then installs one only when the machine has
 // none, so an image's own dbus-broker or chrony stays.
+//
+// libnss-myhostname makes the machine's own name resolve by Debian's own
+// means, so vpn writes no line to /etc/hosts. Debian's cloud images have it.
+// On an image without it sudo warns that it cannot resolve the name, or
+// waits for a name server that does not answer.
 //
 // Debian does not start a newly installed dbus before the next boot. The
 // restart hold and step 4's clock setting need it now, so it is started.
@@ -81,7 +86,8 @@ func InstallBasePackages(ctx context.Context, say func(string)) error {
 		sentence("Debian's package tool did not finish installing the packages.", func() error {
 			return aptGet(job, "satisfy",
 				"sudo", "gnupg", "tor", "torsocks", "apt-transport-tor", "wget", "curl", "ufw", "logrotate",
-				"ca-certificates", "default-dbus-system-bus | dbus-system-bus", "systemd-timesyncd | time-daemon")
+				"ca-certificates", "default-dbus-system-bus | dbus-system-bus", "systemd-timesyncd | time-daemon",
+				"libnss-myhostname")
 		})); err != nil {
 		return err
 	}
@@ -116,26 +122,15 @@ func ConfigureLogRotation() error {
 	return system.WriteFileRoot(paths.LogRotate, []byte(logRotation), 0644)
 }
 
-// PrepareBaseHost repairs unresolved local hostname lookup when possible and
-// requests NTP synchronization. Failure to enable NTP remains a logged warning.
+// PrepareBaseHost asks whether the machine's own name resolves and requests
+// NTP synchronization. Neither stops the install. The name resolves through
+// libnss-myhostname, which step 2 installs. Debian's package adds itself to
+// /etc/nsswitch.conf only where that file names "files" for hosts, so a name
+// that still does not resolve is logged. vpn does not write /etc/hosts.
 func PrepareBaseHost() error {
 	if name, err := os.Hostname(); err == nil && name != "" {
-		if err := system.RunSilent(
-			"getent", "hosts", name); err != nil {
-			hosts, readErr := os.ReadFile("/etc/hosts")
-			if readErr == nil {
-				content := string(hosts)
-				if !strings.HasSuffix(content, "\n") {
-					content += "\n"
-				}
-				content += "127.0.0.1 " + name + "\n"
-				if err := system.WriteFileRoot("/etc/hosts",
-					[]byte(content), 0644); err != nil {
-					return fmt.Errorf(
-						"fix hostname resolution: %w", err)
-				}
-				logger.Install("hostname resolution fixed (%s)", name)
-			}
+		if err := system.RunSilent("getent", "hosts", name); err != nil {
+			logger.Install("the machine's name %s does not resolve, so sudo may warn or wait", name)
 		}
 	}
 	// NTP stays best effort. A failure to turn it on is logged.
@@ -161,23 +156,8 @@ net.ipv6.conf.lo.disable_ipv6 = 1
 	return system.RunRootSilent("sysctl", "--system")
 }
 
-// DisableMPTCP turns Multipath TCP off for the whole machine. The published
-// attack on CVE-2026-98432 needs an MPTCP listener, and a Go program that
-// listens on TCP opens one by default. This closes that attack only. The
-// kernel update is the fix.
-func DisableMPTCP() error {
-	content := `# Virtual Private Node turns Multipath TCP off.
-net.mptcp.enabled = 0
-`
-	if err := system.WriteFileRoot(
-		paths.DisableMPTCPConf, []byte(content), 0644); err != nil {
-		return err
-	}
-	return system.RunRootSilent("sysctl", "--system")
-}
-
 // nightlyValues are vpn's settings for Debian's nightly job and its
-// unattended-upgrade, in the order the two files hold them. Step 11 writes
+// unattended-upgrade, in the order vpn's file holds them. Step 10 writes
 // them and CheckNightlyValues asks apt for them.
 var nightlyValues = []struct{ key, value string }{
 	{"APT::Periodic::Update-Package-Lists", "1"},
@@ -199,10 +179,19 @@ var vpnOrigins = []string{
 
 // ConfigureUnattendedUpgrades writes vpn's rules for Debian's
 // unattended-upgrade, which every package update runs, and apt's hook for
-// the reboot check. The three origin lines are Debian's own, from the
-// template in its unattended-upgrades package. Debian's security archive has
-// the suite stable-security and the codename <codename>-security, so it is
-// matched by codename. Backports are left out, as in Debian's template.
+// the reboot check.
+//
+// The rules go into a file of vpn's own. Debian's unattended-upgrades package
+// keeps its two settings files, 20auto-upgrades and 50unattended-upgrades,
+// and vpn does not write them. Its own file is read after them, as the
+// package's README asks of local settings. It first clears every setting of
+// the nightly job, so what an image or a later version of Debian's files sets
+// never mixes with vpn's values, then sets its own.
+//
+// The three origin lines are Debian's own, from the template in its
+// unattended-upgrades package. Debian's security archive has the suite
+// stable-security and the codename <codename>-security, so it is matched by
+// codename. Backports are left out, as in Debian's template.
 //
 // The machine restarts right after the nightly run when an update needs it.
 // vpn's install, Update Packages and a node update hold a block inhibitor,
@@ -214,40 +203,38 @@ var vpnOrigins = []string{
 //
 // Both dpkg options keep a configuration file the owner changed, with
 // Debian's new one saved beside it, and update an untouched one. Without
-// them a changed file holds its package back for good.
+// them a changed file holds its package back for good. They count for every
+// apt run on the machine.
 func ConfigureUnattendedUpgrades() error {
-	var autoConf, upgradeConf strings.Builder
-	for _, v := range nightlyValues {
-		if strings.HasPrefix(v.key, "APT::Periodic::") {
-			fmt.Fprintf(&autoConf, "%s %q;\n", v.key, v.value)
-		}
-	}
-	if err := system.WriteFileRoot(paths.AutoUpgrades,
-		[]byte(autoConf.String()), 0644); err != nil {
-		return err
-	}
-
-	upgradeConf.WriteString(`// Virtual Private Node installs Debian's updates by itself.
-Unattended-Upgrade::Origins-Pattern {
-        "` + strings.Join(vpnOrigins, `";
-        "`) + `";
-};
-`)
-	for _, v := range nightlyValues {
-		if strings.HasPrefix(v.key, "Unattended-Upgrade::") {
-			fmt.Fprintf(&upgradeConf, "%s %q;\n", v.key, v.value)
-		}
-	}
-	upgradeConf.WriteString(`Dpkg::Options {
-        "--force-confdef";
-        "--force-confold";
-};
-`)
-	if err := system.WriteFileRoot(paths.UnattendedUpgrades,
-		[]byte(upgradeConf.String()), 0644); err != nil {
+	if err := system.WriteFileRoot(paths.AptNightly, []byte(nightlySettings()), 0644); err != nil {
 		return err
 	}
 	return system.WriteFileRoot(paths.AptRebootCheck, []byte(aptRebootCheckHook), 0644)
+}
+
+// nightlySettings is the text of vpn's nightly file.
+func nightlySettings() string {
+	var periodic, upgrade strings.Builder
+	for _, v := range nightlyValues {
+		if strings.HasPrefix(v.key, "APT::Periodic::") {
+			fmt.Fprintf(&periodic, "%s %q;\n", v.key, v.value)
+		} else {
+			fmt.Fprintf(&upgrade, "%s %q;\n", v.key, v.value)
+		}
+	}
+	return `// Virtual Private Node installs Debian's updates by itself. Debian's own two files stay
+// as they were. What an earlier file set for the nightly job is cleared first.
+#clear APT::Periodic;
+#clear Unattended-Upgrade;
+` + periodic.String() + `Unattended-Upgrade::Origins-Pattern {
+        "` + strings.Join(vpnOrigins, `";
+        "`) + `";
+};
+` + upgrade.String() + `Dpkg::Options {
+        "--force-confdef";
+        "--force-confold";
+};
+`
 }
 
 // aptRebootCheckHook runs the reboot check after every package change. It
