@@ -28,8 +28,8 @@ func stopFixture(t *testing.T, done int) (run func(start bool, password string, 
 	if err := ledger.save(f.fs.ledger); err != nil {
 		t.Fatal(err)
 	}
-	installStartupFixture(t, f, func() (host.SSHObservation, error) {
-		return host.SSHObservation{PasswordAuth: true}, nil
+	installStartupFixture(t, f, func() error {
+		return nil
 	})
 	return func(start bool, password string, fn func(s *InstallSession, i int) error) error {
 		return RunInstall(InstallOptions{}, func(_ InstallView, s *InstallSession) error {

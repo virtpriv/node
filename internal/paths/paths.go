@@ -26,6 +26,9 @@ const (
 	PasswordPendingMarker = PrivateDir + "/password-pending"
 	// JobsDir holds one folder per job of the vpn API, root only.
 	JobsDir = PrivateDir + "/jobs"
+	// FirewallRules is the firewall's rules as the install's firewall step
+	// left them, kept to compare with.
+	FirewallRules = PrivateDir + "/firewall-rules"
 
 	// InstallBootstrap is a short-lived, root-owned indication that
 	// lifecycle authority is being published. Its name carries the layout

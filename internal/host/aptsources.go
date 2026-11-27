@@ -3,19 +3,16 @@ package host
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/virtpriv/node/internal/paths"
 	"github.com/virtpriv/node/internal/system"
@@ -39,7 +36,6 @@ const (
 	aptTorProxy         = "socks5h://apt-transport-tor@127.0.0.1:9050"
 	aptDebianMain       = "tor+https://deb.debian.org/debian"
 	aptDebianSecurity   = "tor+https://deb.debian.org/debian-security"
-	aptToolTimeout      = 60 * time.Second
 	aptFixDebian        = "or use a machine whose software comes only from Debian"
 	aptFixUpdates       = "or use a fresh Debian 13 machine"
 	aptFixProxy         = "so apt reaches Debian only through Tor"
@@ -116,28 +112,6 @@ type aptHost struct {
 
 func productionAptHost() aptHost { return aptHost{run: runAptTool} }
 
-// runAptTool runs one of Debian's tools in the C locale, and systemd's tools
-// without colors or links, whatever the caller's environment asks. When it
-// fails, the error carries the tool's own message, which names the file at
-// fault.
-func runAptTool(name string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), aptToolTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Env = append(os.Environ(), "LC_ALL=C", "SYSTEMD_COLORS=0", "SYSTEMD_URLIFY=0")
-	cmd.WaitDelay = 2 * time.Second
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		if msg := strings.Join(strings.Fields(stderr.String()), " "); msg != "" {
-			return "", fmt.Errorf("%s: %s", name, msg)
-		}
-		return "", fmt.Errorf("%s: %w", name, err)
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
 // aptCacheInMemory keeps the package caches apt builds in memory, so a
 // read-only apt command never saves them to /var/cache/apt.
 var aptCacheInMemory = []string{"-o", "Dir::Cache::pkgcache=", "-o", "Dir::Cache::srcpkgcache="}
@@ -164,16 +138,6 @@ func (h aptHost) baseline() AptBaseline {
 	}
 }
 
-// findings collects one check's findings, each a paragraph of its own.
-type findings []string
-
-func (f *findings) add(format string, args ...any) {
-	s := fmt.Sprintf(format, args...)
-	if !slices.Contains(*f, s) {
-		*f = append(*f, s)
-	}
-}
-
 // addFor adds one finding for each file that sets key, or one for apt's
 // settings when no file the checks read does.
 func (f *findings) addFor(s aptSettingFiles, key, why string) {
@@ -184,29 +148,6 @@ func (f *findings) addFor(s aptSettingFiles, key, why string) {
 	for _, file := range files {
 		f.add("found %s in %s, which %s", key, file, why)
 	}
-}
-
-// err joins the findings and then the fix, which starts with undo, the word
-// for what to do with a finding. A file or answer that could not be read gets
-// no fix, since undoing it is not the advice.
-func (f findings) err(undo, fix string) error {
-	if len(f) == 0 {
-		return nil
-	}
-	found := 0
-	for _, s := range f {
-		if !strings.HasPrefix(s, "cannot read ") {
-			found++
-		}
-	}
-	text := strings.Join(f, "\n\n")
-	switch {
-	case found == 1:
-		text += "\n\n" + undo + " it, " + fix
-	case found > 1:
-		text += "\n\n" + undo + " them, " + fix
-	}
-	return errors.New(text)
 }
 
 // ── Software comes only from Debian ──────────────────────
@@ -957,7 +898,8 @@ func (h aptHost) checkUpdates(settings aptSettingFiles) error {
 	for _, file := range settings.files {
 		for _, k := range settings.keys[file] {
 			lk := strings.ToLower(k)
-			if strings.HasPrefix(lk, "apt::periodic::") || strings.HasPrefix(lk, "unattended-upgrade::") {
+			// "#clear APT::Periodic" names the whole tree, "#clear APT" its parent.
+			if lk == "apt" || lk == "apt::periodic" || lk == "unattended-upgrade" || strings.HasPrefix(lk, "apt::periodic::") || strings.HasPrefix(lk, "unattended-upgrade::") {
 				f.add("found %s in %s, which stops or narrows the nightly updates", strings.TrimSuffix(k, "::"), file)
 			}
 		}
@@ -968,11 +910,12 @@ func (h aptHost) checkUpdates(settings aptSettingFiles) error {
 	// job before it. The job's own units have no install section, so they
 	// are never enabled, but a masked one never runs.
 	units := append(slices.Clone(system.AptTimers), debianAptJobUnits...)
-	states, err := h.run("systemctl", append([]string{"show", "--property=" + system.AptTimerProperties}, units...)...)
+	states, err := h.run("systemctl", append([]string{"show", "--property=" + system.AptTimerProperties + ",ExecStart,DropInPaths"}, units...)...)
 	if err != nil {
 		f.add("cannot read the nightly update timers: %v", err)
 	} else {
 		parsed := system.ParseUnitProperties(states)
+		starts := jobStarts(states)
 		for _, timer := range system.AptTimers {
 			switch state, err := system.JudgeAptTimer(parsed[timer]); {
 			case err != nil:
@@ -986,6 +929,14 @@ func (h aptHost) checkUpdates(settings aptSettingFiles) error {
 		for _, unit := range debianAptJobUnits {
 			if strings.HasPrefix(parsed[unit]["UnitFileState"], "masked") {
 				f.add("found %s switched off, which stops the nightly updates", unit)
+				continue
+			}
+			if got := starts[unit]; !slices.Equal(got, []string{debianAptJobStart[unit]}) {
+				where := "in its settings"
+				if dropIns := parsed[unit]["DropInPaths"]; dropIns != "" {
+					where = "in " + strings.Join(strings.Fields(dropIns), " and ")
+				}
+				f.add("found %s set to start %q %s, where Debian's nightly job starts %q", unit, strings.Join(got, " and "), where, debianAptJobStart[unit])
 			}
 		}
 	}
@@ -1007,6 +958,114 @@ func (h aptHost) checkUpdates(settings aptSettingFiles) error {
 		f.add("found packages from Debian's backports, which get no security team updates (%s)", strings.Join(backports, ", "))
 	}
 	return f.err("undo", aptFixUpdates)
+}
+
+// CheckNightlyValues is the fact "Debian's nightly job runs with vpn's
+// values", asked of apt's merged settings right after step 11 writes them and
+// when the install finishes. The start check reads the machine's files
+// instead, since Debian's own 20auto-upgrades can hold "0" before step 11
+// replaces it.
+func CheckNightlyValues() error {
+	h := productionAptHost()
+	settings, err := h.aptSettings()
+	var dump []aptSetting
+	if err == nil {
+		dump, err = h.aptDump()
+	}
+	if err != nil {
+		return err
+	}
+	return nightlyVerdict(settings, dump)
+}
+
+// nightlyVerdict holds when the nightly settings in apt's answer are
+// exactly vpn's: each of its values, its origins, and no other
+// APT::Periodic:: or Unattended-Upgrade:: setting, the rule the start check
+// applies to the machine's files. Other settings of unattended-upgrade stop
+// the job (APT::Periodic::Enable "0", InstallOnShutdown) or narrow it
+// (Package-Blacklist, Package-Whitelist, Update-Days).
+func nightlyVerdict(settings aptSettingFiles, dump []aptSetting) error {
+	const why = "stops or narrows the nightly updates"
+	want := map[string]string{}
+	for _, v := range nightlyValues {
+		want[v.key] = v.value
+	}
+	var f findings
+	var origins []string
+	seen := map[string]bool{}
+	for _, s := range dump {
+		lk := strings.ToLower(s.key)
+		if !strings.HasPrefix(lk, "apt::periodic::") && !strings.HasPrefix(lk, "unattended-upgrade::") {
+			continue
+		}
+		switch {
+		case s.key == "Unattended-Upgrade::Origins-Pattern::":
+			origins = append(origins, s.value)
+		case s.key == "Unattended-Upgrade::Origins-Pattern" && s.value == "":
+		case s.value != "" && want[s.key] == s.value && !seen[s.key]:
+			// None of vpn's values is empty, so an empty one is another
+			// setting's.
+			seen[s.key] = true
+		default:
+			// A list's entries are named by the list.
+			name := strings.TrimSuffix(s.key, "::")
+			files := append(settings.filesSetting(name), settings.filesSetting(name+"::")...)
+			if len(files) == 0 {
+				files = []string{"apt's settings"}
+			}
+			for _, file := range files {
+				f.add("found %s in %s, which %s", name, file, why)
+			}
+		}
+	}
+	for _, v := range nightlyValues {
+		if !seen[v.key] && len(settings.filesSetting(v.key)) == 0 {
+			f.add("found no %s in apt's settings, which vpn sets to %s", v.key, v.value)
+		}
+	}
+	if !slices.Equal(origins, vpnOrigins) {
+		f.addFor(settings, "Unattended-Upgrade::Origins-Pattern", why)
+	}
+	return f.err("undo", aptFixUpdates)
+}
+
+// debianAptJobStart is the one command each of the nightly job's services
+// starts in Debian's apt package.
+var debianAptJobStart = map[string]string{
+	"apt-daily.service":         "/usr/lib/apt/apt.systemd.daily update",
+	"apt-daily-upgrade.service": "/usr/lib/apt/apt.systemd.daily install",
+}
+
+// jobStarts reads each unit's commands from systemctl show, which prints one
+// ExecStart line for each command, holding the program's path and then the
+// command line it runs with.
+// A drop-in adds a command to a oneshot service unless it first empties the
+// list, so a service can hold more than one.
+func jobStarts(out string) map[string][]string {
+	starts := map[string][]string{}
+	for block := range strings.SplitSeq(out, "\n\n") {
+		var id string
+		var cmds []string
+		for line := range strings.SplitSeq(block, "\n") {
+			if v, ok := strings.CutPrefix(line, "Id="); ok {
+				id = v
+			}
+			if v, ok := strings.CutPrefix(line, "ExecStart="); ok {
+				path, argv, _ := strings.Cut(v, " ; argv[]=")
+				path = strings.TrimPrefix(path, "{ path=")
+				argv, _, _ = strings.Cut(argv, " ; ")
+				// "ExecStart=@path argv" runs path under another name.
+				if first, _, _ := strings.Cut(argv, " "); first != path {
+					argv = "@" + path + " " + argv
+				}
+				cmds = append(cmds, argv)
+			}
+		}
+		if id != "" {
+			starts[id] = cmds
+		}
+	}
+	return starts
 }
 
 // ── apt uses no proxy ────────────────────────────────────
@@ -1111,6 +1170,12 @@ func (h aptHost) configureAptTor(write func(string, []byte, os.FileMode) error) 
 		return err
 	}
 	return h.verifyAptTor()
+}
+
+// CheckAptThroughTor is the fact "apt reaches Debian through Tor only", step
+// 10's own check, asked again when the install finishes.
+func CheckAptThroughTor() error {
+	return productionAptHost().verifyAptTor()
 }
 
 // switchOffMachineSources adds .disabled to every source file apt reads but

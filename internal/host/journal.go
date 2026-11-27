@@ -143,6 +143,16 @@ func keepJournalOnDisk() error {
 	if err := system.RunRoot("journalctl", "--flush"); err != nil {
 		return err
 	}
+	if err := CheckJournalOnDisk(); err != nil {
+		return err
+	}
+	logger.Install("System logs are kept on disk in %s", paths.JournalDir)
+	return nil
+}
+
+// CheckJournalOnDisk is the fact "system logs are kept on disk": this boot's
+// journal file is on disk and journald no longer keeps one in memory.
+func CheckJournalOnDisk() error {
 	id, err := os.ReadFile(paths.MachineID)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", paths.MachineID, err)
@@ -150,16 +160,15 @@ func keepJournalOnDisk() error {
 	machine := strings.TrimSpace(string(id))
 	file := filepath.Join(paths.JournalDir, machine, "system.journal")
 	if _, err := os.Stat(file); err != nil {
-		return fmt.Errorf("system logs are still kept in memory after restarting journald, %s is missing", file)
+		return fmt.Errorf("system logs are still kept in memory, %s is missing", file)
 	}
 	// A journal file can be left from an earlier boot. journald removes the
 	// folder it keeps in memory only when the flush to disk worked.
 	memory := filepath.Join(paths.JournalRuntimeDir, machine)
 	if _, err := os.Stat(memory); err == nil {
-		return fmt.Errorf("system logs are still kept in memory after restarting journald, %s is still there", memory)
+		return fmt.Errorf("system logs are still kept in memory, %s is still there", memory)
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("check %s: %w", memory, err)
 	}
-	logger.Install("System logs are kept on disk in %s", paths.JournalDir)
 	return nil
 }

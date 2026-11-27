@@ -19,8 +19,18 @@ import (
 // install changes anything. A missing file passes, since the base packages
 // step installs Tor.
 func CheckTorSettings() error {
+	return torSettings(true)
+}
+
+// CheckTorSettingsInstalled is the same fact once Tor is installed, when a
+// missing file cannot be read as Debian's own.
+func CheckTorSettingsInstalled() error {
+	return torSettings(false)
+}
+
+func torSettings(missingPasses bool) error {
 	data, err := os.ReadFile(paths.Torrc)
-	if errors.Is(err, fs.ErrNotExist) {
+	if missingPasses && errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {

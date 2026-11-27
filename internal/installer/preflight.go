@@ -27,6 +27,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/virtpriv/node/internal/bytesize"
 	"github.com/virtpriv/node/internal/host"
@@ -59,6 +61,7 @@ const (
 	checkNameJournal   = "system logs can be kept on disk"
 	checkNameTor       = "Tor's settings are Debian's own"
 	checkNameSSHOrder  = "sshd reads vpn's SSH settings first"
+	checkNameSSHOwner  = "sshd lets the vpn account log in"
 )
 
 // detectHardware is a variable so tests can stand in for the machine.
@@ -98,10 +101,8 @@ func measured(bytes uint64) string {
 }
 
 // RunPreflight reports all failed checks before lifecycle initialization.
-// The returned SSH observation describes preflight time, not the effective
-// owner policy that installation will establish and verify later.
-func RunPreflight() (host.SSHObservation, error) {
-	results, obs := runPreflightChecks()
+func RunPreflight() error {
+	results := runPreflightChecks()
 
 	failed := 0
 	for _, r := range results {
@@ -112,23 +113,19 @@ func RunPreflight() (host.SSHObservation, error) {
 	if failed == 0 {
 		logger.Install("Preflight passed (%d/%d checks)",
 			len(results), len(results))
-		return obs, nil
+		return nil
 	}
 
 	fmt.Fprint(os.Stderr, "\n"+FormatPreflightReport(results))
-	for _, r := range results {
-		if r.Err != nil {
-			logger.Install("Preflight FAIL: %s: %s", r.Name, strings.ReplaceAll(r.Err.Error(), "\n\n", " "))
-		}
-	}
-	return obs, fmt.Errorf(
+	logFailures("Preflight FAIL", results)
+	return fmt.Errorf(
 		"preflight: %d of %d checks failed, this run changed nothing",
 		failed, len(results))
 }
 
 // runPreflightChecks runs every check in order. Running as root removed the
 // sudo dependency that once made a failed check skip the checks after it.
-func runPreflightChecks() ([]PreflightResult, host.SSHObservation) {
+func runPreflightChecks() []PreflightResult {
 	results := []PreflightResult{
 		{checkNameDebian, checkDebian13()},
 		{checkNameArch, checkDebianArchitecture()},
@@ -140,19 +137,112 @@ func runPreflightChecks() ([]PreflightResult, host.SSHObservation) {
 		PreflightResult{checkNameDpkg, checkDpkgAudit()},
 		PreflightResult{checkNameUfw, checkUfwInstallable()},
 	)
+	return append(results, foundFacts()...)
+}
+
+// foundFacts are the start checks that ask a fact of a promise about the
+// machine as vpn finds it. The install's end asks them again.
+func foundFacts() []PreflightResult {
 	apt := host.CheckAptBaseline()
-	results = append(results,
-		PreflightResult{checkNameSources, apt.Sources},
-		PreflightResult{checkNameUpdates, apt.Updates},
-		PreflightResult{checkNameAptProxy, apt.Proxy},
-		PreflightResult{checkNameJournal, host.CheckJournalStorage()},
-		PreflightResult{checkNameTor, host.CheckTorSettings()},
-		PreflightResult{checkNameSSHOrder, host.CheckSSHReadsVPNFirst()},
-	)
-	obs, obsErr := host.ObserveInitialSSHState()
-	results = append(results,
-		PreflightResult{checkNameSSHState, obsErr})
-	return results, obs
+	results := []PreflightResult{
+		{checkNameSources, apt.Sources},
+		{checkNameUpdates, apt.Updates},
+		{checkNameAptProxy, apt.Proxy},
+		{checkNameJournal, host.CheckJournalStorage()},
+		{checkNameTor, host.CheckTorSettings()},
+		{checkNameSSHOrder, host.CheckSSHReadsVPNFirst()},
+		{checkNameSSHOwner, host.CheckSSHLetsOwnerIn()},
+	}
+	_, obsErr := host.ObserveInitialSSHState()
+	return append(results, PreflightResult{checkNameSSHState, obsErr})
+}
+
+// The facts of what vpn's steps wrote. Each step asks its own right after
+// its write, and the install's end asks them all.
+const (
+	factNameOnlySSH       = "only SSH answers from outside the machine"
+	factNameFirewall      = "the firewall's rules are as the install set them"
+	factNameJail          = "fail2ban's SSH jail is on as vpn set it"
+	factNameJournalOnDisk = "system logs are kept on disk"
+	factNameAptTor        = "apt reaches Debian through Tor only"
+	factNameNightly       = "Debian's nightly job runs with vpn's values"
+	factNameSudo          = "the vpn account has sudo with its password"
+	factNameSSH           = "sshd keeps vpn's SSH settings"
+)
+
+// finishFacts asks every fact of the promises again, so a resumed install
+// that skipped recorded steps finishes only where every one holds. sshd's
+// order and the vpn account's way in are part of the last fact, so they are
+// not asked alone.
+func finishFacts() []PreflightResult {
+	apt := host.CheckAptBaseline()
+	_, obsErr := host.ObserveInitialSSHState()
+	return []PreflightResult{
+		{checkNameSources, apt.Sources},
+		{checkNameUpdates, apt.Updates},
+		{checkNameAptProxy, apt.Proxy},
+		{checkNameJournal, host.CheckJournalStorage()},
+		{checkNameTor, host.CheckTorSettingsInstalled()},
+		{checkNameSSHState, obsErr},
+		{factNameOnlySSH, host.CheckOnlySSHAnswers()},
+		{factNameFirewall, host.CheckFirewallRules()},
+		{factNameJail, host.CheckFail2banJail()},
+		{factNameJournalOnDisk, host.CheckJournalOnDisk()},
+		{factNameAptTor, host.CheckAptThroughTor()},
+		{factNameNightly, host.CheckNightlyValues()},
+		{factNameSudo, host.VerifyOperatorSudo()},
+		{factNameSSH, host.VerifyInitialOwnerSSH()},
+	}
+}
+
+// factsFailed is the install's end refusing to finish, with every fact
+// asked and the findings of those that do not hold.
+type factsFailed struct{ results []PreflightResult }
+
+func (e factsFailed) Error() string {
+	failed := 0
+	for _, r := range e.results {
+		if r.Err != nil {
+			failed++
+		}
+	}
+	return fmt.Sprintf("%d of %d checks failed after the last step", failed, len(e.results))
+}
+
+// factFailures is nil when every fact holds. The log gets each failure.
+func factFailures(results []PreflightResult) error {
+	for _, r := range results {
+		if r.Err != nil {
+			logFailures("Finish FAIL", results)
+			return factsFailed{results}
+		}
+	}
+	return nil
+}
+
+// logFailures writes each failed check to the install log on one line.
+func logFailures(label string, results []PreflightResult) {
+	for _, r := range results {
+		if r.Err != nil {
+			logger.Install("%s: %s: %s", label, r.Name, oneLine(r.Err.Error()))
+		}
+	}
+}
+
+// oneLine joins a message's paragraphs as sentences.
+func oneLine(msg string) string {
+	paras := strings.Split(msg, "\n\n")
+	for i, p := range paras {
+		if i > 0 && p != "" {
+			r, n := utf8.DecodeRuneInString(p)
+			p = string(unicode.ToUpper(r)) + p[n:]
+		}
+		if i < len(paras)-1 && !strings.HasSuffix(p, ".") {
+			p += "."
+		}
+		paras[i] = p
+	}
+	return strings.Join(paras, " ")
 }
 
 // detectContainer asks systemd which container the machine runs in. It is a
@@ -484,27 +574,34 @@ func ufwCandidateVerdict(output string) error {
 // FormatPreflightReport renders the full check list with every failure's
 // reason. A reason of several findings has an empty line between them.
 func FormatPreflightReport(results []PreflightResult) string {
+	report, failed := formatChecks("  ", "Checking this machine before changing anything", results)
+	if failed > 0 {
+		report += "\n  Refusing to install. This run changed " +
+			"nothing on this system.\n"
+	}
+	return report
+}
+
+// formatChecks renders a heading and each check with its findings, every
+// line but an empty one after indent, and counts the failures.
+func formatChecks(indent, heading string, results []PreflightResult) (string, int) {
 	var b strings.Builder
-	b.WriteString("  Checking this machine before changing anything\n\n")
+	b.WriteString(indent + heading + "\n\n")
 	failed := 0
 	for _, r := range results {
 		if r.Err == nil {
-			fmt.Fprintf(&b, "    [ OK ] %s\n", r.Name)
+			fmt.Fprintf(&b, "%s  [ OK ] %s\n", indent, r.Name)
 			continue
 		}
 		failed++
-		fmt.Fprintf(&b, "    [FAIL] %s\n", r.Name)
+		fmt.Fprintf(&b, "%s  [FAIL] %s\n", indent, r.Name)
 		for _, line := range theme.Wrap(r.Err.Error(), 56) {
 			if line == "" {
 				b.WriteString("\n")
 				continue
 			}
-			fmt.Fprintf(&b, "           %s\n", line)
+			fmt.Fprintf(&b, "%s         %s\n", indent, line)
 		}
 	}
-	if failed > 0 {
-		b.WriteString("\n  Refusing to install. This run changed " +
-			"nothing on this system.\n")
-	}
-	return b.String()
+	return b.String(), failed
 }

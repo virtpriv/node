@@ -48,7 +48,7 @@ type installStartupDependencies struct {
 	lookup              identityLookup
 	acquireRunLock      func(string, string) (*os.File, error)
 	classifyLifecycle   func(lifecycleFS, identityLookup) (lifecycleState, error)
-	runPreflight        func() (host.SSHObservation, error)
+	runPreflight        func() error
 	initializeLifecycle func(lifecycleFS, identityLookup) (*installLedger, error)
 	// inhibitShutdown holds off restarts until the returned release runs.
 	inhibitShutdown func(why string) (release func(), err error)
@@ -143,14 +143,14 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	// From here the install record is known. Once it shows root's SSH login
 	// turned off, every error also says how to get back in.
 	ledger := lifecycle.Ledger
-	defer func() { retErr = withRootLoginOff(retErr, ledger) }()
-	// A pause, a refused start and a failed step name the same command to
-	// run the install again.
+	// A pause, a refused start, a failed step and a refused finish name the
+	// same command to run the install again.
 	defer func() {
 		if stop, ok := errors.AsType[*StopError](retErr); ok && stop.Again == "" {
 			stop.Again = againCommand(opts.Unattended, ledger)
 		}
 	}()
+	defer func() { retErr = withRootLoginOff(retErr, ledger) }()
 	if lifecycle.Disposition == lifecycleCompleted {
 		logger.Install("already installed, no changes were made")
 		fmt.Println("\n  Virtual Private Node is already installed. No changes were made.")
@@ -181,7 +181,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	}
 
 	// Preflight is read-only and precedes every durable initialization.
-	_, err = deps.runPreflight()
+	err = deps.runPreflight()
 	if err != nil {
 		return err
 	}
@@ -352,10 +352,7 @@ func prepareInstallCompletion(ledger *installLedger, stepCount int) error {
 	if !ledger.allBaseStepsDone() {
 		return errors.New("cannot finalize installation before every base step is recorded")
 	}
-	if err := host.VerifyOperatorSudo(); err != nil {
-		return err
-	}
-	if err := host.VerifyInitialOwnerSSH(); err != nil {
+	if err := factFailures(finishFacts()); err != nil {
 		return err
 	}
 	logger.Install("all %d install steps complete", stepCount)
@@ -419,6 +416,22 @@ var (
 	}
 )
 
+// thenAsk runs a step's write and then asks the facts of what it wrote. A
+// fact that does not hold fails the step, so the next run does it again.
+func thenAsk(write func() error, facts ...func() error) func() error {
+	return func() error {
+		if err := write(); err != nil {
+			return err
+		}
+		for _, fact := range facts {
+			if err := fact(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
 // buildInstallSteps returns the initial install step list. Every step
 // carries a stable Key, its identity in the ledger without a version, and a
 // Kind (gates run again on every pass, see engine.go).
@@ -446,7 +459,12 @@ func buildInstallSteps(dec *InstallDecisions, holdRestarts func() error) []Insta
 				return holdRestarts()
 			}},
 		{Key: "firewall", Name: "Closing every port except SSH",
-			Run: plain(host.ConfigureInitialFirewall)},
+			Run: plain(thenAsk(func() error {
+				if err := host.ConfigureInitialFirewall(); err != nil {
+					return err
+				}
+				return host.SaveFirewallRules()
+			}, host.CheckOnlySSHAnswers))},
 		{Key: "host.prep",
 			Name: "Checking the host name and clock sync",
 			Run:  plain(host.PrepareBaseHost)},
@@ -500,7 +518,7 @@ func buildInstallSteps(dec *InstallDecisions, holdRestarts func() error) []Insta
 				if err := host.InstallFail2ban(ctx, say); err != nil {
 					return err
 				}
-				return host.ConfigureFail2ban()
+				return thenAsk(host.ConfigureFail2ban, host.CheckFail2banJail)()
 			}},
 		// Debian's zram package, so it comes after apt uses Tor.
 		{Key: "swap.zram", Name: "Setting up compressed swap",

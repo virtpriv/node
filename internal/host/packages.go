@@ -74,6 +74,10 @@ func UpgradeDebian(ctx context.Context, say func(string)) error {
 	if err := ConfigureUnattendedUpgrades(); err != nil {
 		return err
 	}
+	// Before the run, so it never installs with values that are not vpn's.
+	if err := CheckNightlyValues(); err != nil {
+		return err
+	}
 	if err := job.run(ctx, "Installing Debian's updates",
 		sentence(upgradeNotFinished, runUnattendedUpgrade)); err != nil {
 		return err
