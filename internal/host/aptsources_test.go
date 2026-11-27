@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,10 +32,12 @@ type fakeAptMachine struct {
 	dump    []string          // apt-config dump lines beyond Debian's defaults
 	folders map[string]string // apt-config shell answers that differ from Debian's
 	targets []fakeTarget
-	pkgs    []string          // dpkg-query lines, each status, package and version
-	env     []string          // systemctl show-environment lines
-	timers  map[string]string // the nightly timers' UnitFileState
-	active  map[string]string // their ActiveState, left out when missing
+	pkgs    []string            // dpkg-query lines, each status, package and version
+	env     []string            // systemctl show-environment lines
+	timers  map[string]string   // the nightly timers' UnitFileState
+	active  map[string]string   // their ActiveState, left out when missing
+	starts  map[string][]string // the services' commands, as systemctl show prints them
+	dropIns map[string]string   // their DropInPaths
 }
 
 type fakeTarget struct {
@@ -62,7 +65,17 @@ func newFakeApt(t *testing.T) *fakeAptMachine {
 		"apt-daily.service": "static", "apt-daily-upgrade.service": "static"}
 	m.active = map[string]string{"apt-daily.timer": "active", "apt-daily-upgrade.timer": "active",
 		"apt-daily.service": "inactive", "apt-daily-upgrade.service": "inactive"}
+	// Debian 13.8's own, from a booted VM.
+	m.starts = map[string][]string{
+		"apt-daily.service":         {execStart("/usr/lib/apt/apt.systemd.daily", "/usr/lib/apt/apt.systemd.daily update")},
+		"apt-daily-upgrade.service": {execStart("/usr/lib/apt/apt.systemd.daily", "/usr/lib/apt/apt.systemd.daily install")},
+	}
+	m.dropIns = map[string]string{}
 	return m
+}
+
+func execStart(path, argv string) string {
+	return "{ path=" + path + " ; argv[]=" + argv + " ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }"
 }
 
 func md5hex(s string) string {
@@ -225,6 +238,14 @@ func (m *fakeAptMachine) run(name string, args ...string) (string, error) {
 			for _, p := range props {
 				if v, ok := values[p]; ok {
 					lines = append(lines, p+"="+v)
+				}
+				if p == "ExecStart" {
+					for _, c := range m.starts[a] {
+						lines = append(lines, "ExecStart="+c)
+					}
+				}
+				if p == "DropInPaths" && strings.HasSuffix(a, ".service") {
+					lines = append(lines, "DropInPaths="+m.dropIns[a])
 				}
 			}
 			blocks = append(blocks, strings.Join(lines, "\n"))
@@ -547,6 +568,7 @@ func TestAptUpdatesRefusesNightlySettings(t *testing.T) {
 		"/etc/apt/apt.conf.d/70note":       "/* a note */ APT::Periodic::Enable \"0\";\n",
 		"/etc/apt/apt.conf":                "Unattended-Upgrade::Package-Blacklist { \"openssl\"; };\n",
 		"/etc/apt/apt.conf.d/52clear":      "#clear Unattended-Upgrade::Origins-Pattern;\n",
+		"/etc/apt/apt.conf.d/52clear-all":  "#clear APT::Periodic;\n",
 		"/etc/apt/apt.conf.d/52only":       "Unattended-Upgrade::Package-Whitelist-Strict \"true\";\n",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -753,4 +775,70 @@ func TestStepTenRefusesARouteOutsideTor(t *testing.T) {
 		}))
 		wantRefused(t, err, "deb.debian.org")
 	})
+}
+
+// A drop-in can replace the nightly job's command, or add one to it, and
+// systemd reports success either way (a booted VM).
+func TestAptUpdatesRefusesAnotherNightlyStart(t *testing.T) {
+	debian := execStart("/usr/lib/apt/apt.systemd.daily", "/usr/lib/apt/apt.systemd.daily install")
+	for name, starts := range map[string][]string{
+		"replaced": {execStart("/bin/true", "/bin/true")},
+		"added":    {debian, execStart("/bin/true", "/bin/true")},
+		// ExecStart=@/bin/true /usr/lib/apt/apt.systemd.daily install
+		"another program": {execStart("/bin/true", "/usr/lib/apt/apt.systemd.daily install")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := newFakeApt(t)
+			m.debianImage()
+			m.starts["apt-daily-upgrade.service"] = starts
+			m.dropIns["apt-daily-upgrade.service"] = "/etc/systemd/system/apt-daily-upgrade.service.d/zz.conf"
+			wantRefused(t, m.baseline().Updates, "apt-daily-upgrade.service", "zz.conf")
+		})
+	}
+}
+
+// apt's answer after vpn's step 11 on Debian 13.8 (a booted VM).
+var vpnNightlyDump = []string{
+	`APT::Periodic "";`,
+	`APT::Periodic::Update-Package-Lists "1";`,
+	`APT::Periodic::Unattended-Upgrade "1";`,
+	`APT::Periodic::AutocleanInterval "7";`,
+	`Unattended-Upgrade "";`,
+	`Unattended-Upgrade::Origins-Pattern "";`,
+	`Unattended-Upgrade::Origins-Pattern:: "origin=Debian,codename=${distro_codename},label=Debian";`,
+	`Unattended-Upgrade::Origins-Pattern:: "origin=Debian,codename=${distro_codename},label=Debian-Security";`,
+	`Unattended-Upgrade::Origins-Pattern:: "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";`,
+	`Unattended-Upgrade::Automatic-Reboot "true";`,
+	`Unattended-Upgrade::Automatic-Reboot-Time "now";`,
+	`Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";`,
+	`Unattended-Upgrade::OnlyOnACPower "false";`,
+	`Unattended-Upgrade::Skip-Updates-On-Metered-Connections "false";`,
+}
+
+func TestNightlyValues(t *testing.T) {
+	verdict := func(lines []string) error {
+		dump, err := aptHost{run: func(string, ...string) (string, error) {
+			return strings.Join(lines, "\n"), nil
+		}}.aptDump()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return nightlyVerdict(aptSettingFiles{}, dump)
+	}
+	if err := verdict(vpnNightlyDump); err != nil {
+		t.Fatalf("refused vpn's values: %v", err)
+	}
+	without := func(i int) []string { return slices.Delete(slices.Clone(vpnNightlyDump), i, i+1) }
+	for name, lines := range map[string][]string{
+		"job off":         append(slices.Clone(vpnNightlyDump), `APT::Periodic::Enable "0";`),
+		"a blacklist":     append(slices.Clone(vpnNightlyDump), `Unattended-Upgrade::Package-Blacklist:: "openssl";`),
+		"some days only":  append(slices.Clone(vpnNightlyDump), `Unattended-Upgrade::Update-Days:: "Sun";`),
+		"a value changed": append(without(1), `APT::Periodic::Update-Package-Lists "0";`),
+		"a value missing": without(12),
+		"an origin gone":  without(7),
+	} {
+		if verdict(lines) == nil {
+			t.Errorf("%s: passed", name)
+		}
+	}
 }

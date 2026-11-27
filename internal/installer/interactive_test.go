@@ -8,7 +8,6 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/virtpriv/node/internal/host"
 	"github.com/virtpriv/node/internal/loginpassword"
 )
 
@@ -282,8 +281,8 @@ func TestRootRunInstallExitRetainsRunLock(t *testing.T) {
 	requireRootTestEnvironment(t)
 	f := newLifecycleFixture(t)
 	f.initialize(t)
-	installStartupFixture(t, f, func() (host.SSHObservation, error) {
-		return host.SSHObservation{PasswordAuth: true}, nil
+	installStartupFixture(t, f, func() error {
+		return nil
 	})
 	deps := newInstallStartupDependencies()
 	password, err := loginpassword.New("exact-test-password")
@@ -372,8 +371,8 @@ func TestRootRunInstallReportsPauseFailureAndRootLoginOff(t *testing.T) {
 		if err := ledger.save(f.fs.ledger); err != nil {
 			t.Fatal(err)
 		}
-		installStartupFixture(t, f, func() (host.SSHObservation, error) {
-			return host.SSHObservation{PasswordAuth: true}, preflightErr
+		installStartupFixture(t, f, func() error {
+			return preflightErr
 		})
 		return f.fs.ledger
 	}

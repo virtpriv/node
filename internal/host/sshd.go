@@ -177,7 +177,7 @@ func EffectiveSSHPasswordAuth() (bool, error) {
 	if os.Geteuid() != 0 {
 		return false, errors.New("SSH configuration requires root")
 	}
-	out, err := system.RunRootOutput("sshd", "-T", "-C", "user="+paths.AdminUser+",host=localhost,addr=127.0.0.1")
+	out, err := askTool(questionTimeout, "sshd", "-T", "-C", "user="+paths.AdminUser+",host=localhost,addr=127.0.0.1")
 	if err != nil {
 		return false, fmt.Errorf("query effective sshd config: %w", err)
 	}
@@ -228,36 +228,68 @@ func restartSSHD() error {
 	return system.RunRoot("systemctl", "restart", "ssh")
 }
 
-// Check localhost and, when inherited from SSH, the current remote connection.
+// sshContexts are the logins sshd is asked about: one from the machine
+// itself and, when the caller came in over SSH, the owner's own connection.
 // These samples detect conflicting Match rules. Only a new login proves access.
-func validateSSHPolicy(passwordAuth string) (string, error) {
-	out, err := system.RunRootCombinedOutput("sshd", "-t")
+func sshContexts() ([]string, error) {
+	contexts := []string{"host=localhost,addr=127.0.0.1"}
+	connection := os.Getenv("SSH_CONNECTION")
+	if connection == "" {
+		return contexts, nil
+	}
+	fields := strings.Fields(connection)
+	if len(fields) != 4 {
+		return nil, errors.New("invalid SSH_CONNECTION, cannot verify connection policy")
+	}
+	remote, e1 := netip.ParseAddr(fields[0])
+	local, e2 := netip.ParseAddr(fields[2])
+	port, e3 := strconv.Atoi(fields[3])
+	if e1 != nil || e2 != nil || e3 != nil || port < 1 || port > 65535 {
+		return nil, errors.New("invalid SSH_CONNECTION, cannot verify connection policy")
+	}
+	return append(contexts, "host="+remote.String()+",addr="+remote.String()+",laddr="+local.String()+",lport="+fields[3]), nil
+}
+
+// CheckSSHLetsOwnerIn is the check "sshd lets the vpn account log in". It
+// asks sshd for the vpn account, before the account or vpn's file exists, for
+// the settings vpn's file does not set. sshd answers for a name it does not
+// know, but a Match on a group the account will join shows only once it is
+// there, so step 15 asks again.
+func CheckSSHLetsOwnerIn() error {
+	contexts, err := sshContexts()
 	if err != nil {
-		return out, err
+		return err
+	}
+	for _, connection := range contexts {
+		owner, err := askTool(questionTimeout, "sshd", "-T", "-C", "user="+paths.AdminUser+","+connection)
+		if err != nil {
+			return fmt.Errorf("cannot read sshd's settings: %w", err)
+		}
+		if err := ownerWayIn(owner, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateSSHPolicy asks sshd whether vpn's SSH settings hold.
+func validateSSHPolicy(passwordAuth string) (string, error) {
+	if _, err := askTool(questionTimeout, "sshd", "-t"); err != nil {
+		return err.Error(), err
 	}
 	if err := CheckSSHReadsVPNFirst(); err != nil {
 		return err.Error(), err
 	}
-	contexts := []string{"host=localhost,addr=127.0.0.1"}
-	if connection := os.Getenv("SSH_CONNECTION"); connection != "" {
-		fields := strings.Fields(connection)
-		if len(fields) != 4 {
-			return "invalid SSH_CONNECTION, cannot verify connection policy", errors.New("invalid SSH connection")
-		}
-		remote, e1 := netip.ParseAddr(fields[0])
-		local, e2 := netip.ParseAddr(fields[2])
-		port, e3 := strconv.Atoi(fields[3])
-		if e1 != nil || e2 != nil || e3 != nil || port < 1 || port > 65535 {
-			return "invalid SSH_CONNECTION, cannot verify connection policy", errors.New("invalid SSH connection")
-		}
-		contexts = append(contexts, "host="+remote.String()+",addr="+remote.String()+",laddr="+local.String()+",lport="+fields[3])
+	contexts, err := sshContexts()
+	if err != nil {
+		return err.Error(), err
 	}
 	for _, connection := range contexts {
-		owner, err := system.RunRootOutput("sshd", "-T", "-C", "user="+paths.AdminUser+","+connection)
+		owner, err := askTool(questionTimeout, "sshd", "-T", "-C", "user="+paths.AdminUser+","+connection)
 		if err != nil {
 			return err.Error(), err
 		}
-		root, err := system.RunRootOutput("sshd", "-T", "-C", "user=root,"+connection)
+		root, err := askTool(questionTimeout, "sshd", "-T", "-C", "user=root,"+connection)
 		if err != nil {
 			return err.Error(), err
 		}
@@ -287,21 +319,42 @@ func verifySSHPolicy(passwordAuth, owner, root string) error {
 	if sshdValue(root, "permitrootlogin") != "no" {
 		return errors.New("effective SSH policy still permits root login")
 	}
-	if sshdValue(owner, "pubkeyauthentication") != "yes" || sshdValue(owner, "permittty") != "yes" || sshdValue(owner, "forcecommand") != "none" || sshdValue(owner, "chrootdirectory") != "none" {
-		return errors.New("effective SSH policy does not permit the ordinary owner console")
+	if sshdValue(owner, "pubkeyauthentication") != "yes" {
+		return errors.New("sshd would turn off key login for the vpn account, which vpn turns on")
 	}
-	if enabled && sshdValue(owner, "authenticationmethods") != "any" {
-		return errors.New("effective SSH authentication methods do not permit password-only owner login")
+	return ownerWayIn(owner, enabled)
+}
+
+// ownerWayIn checks the settings of sshd's answer for the vpn account that
+// vpn's file does not set, so any file of the machine decides them. Each
+// finding names the setting and ends with its fix.
+func ownerWayIn(owner string, password bool) error {
+	const fix = "Remove the line from the file in /etc/ssh that holds it"
+	var f findings
+	if v := sshdValue(owner, "permittty"); v != "yes" {
+		f.add("found PermitTTY %s in sshd's settings for the vpn account, which takes away its terminal. %s", v, fix)
+	}
+	if v := sshdValue(owner, "forcecommand"); v != "none" {
+		f.add("found ForceCommand %s in sshd's settings for the vpn account, which runs that command instead of a shell. %s", v, fix)
+	}
+	if v := sshdValue(owner, "chrootdirectory"); v != "none" {
+		f.add("found ChrootDirectory %s in sshd's settings for the vpn account, which shuts it in that folder. %s", v, fix)
+	}
+	if v := sshdValue(owner, "authenticationmethods"); password && v != "any" {
+		f.add("found AuthenticationMethods %s in sshd's settings for the vpn account, which would refuse its password login. %s", v, fix)
 	}
 	// sshd's answer prints a list of accounts but not whether it lets vpn in.
 	for _, list := range []struct{ key, name string }{
 		{"allowusers", "AllowUsers"}, {"denyusers", "DenyUsers"}, {"allowgroups", "AllowGroups"}, {"denygroups", "DenyGroups"},
 	} {
 		if names := sshdValues(owner, list.key); len(names) > 0 {
-			return fmt.Errorf("found %s %s in sshd's settings. vpn refuses any list of accounts in sshd's settings, since sshd's answer does not say whom it lets in. Remove the line from the file in /etc/ssh that holds it", list.name, strings.Join(names, " "))
+			f.add("found %s %s in sshd's settings. vpn refuses any list of accounts in sshd's settings, since sshd's answer does not say whom it lets in. %s", list.name, strings.Join(names, " "), fix)
 		}
 	}
-	return nil
+	if len(f) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(f, "\n\n"))
 }
 
 // sshdValue is the first value sshd -T prints for key, or "".

@@ -199,7 +199,7 @@ func (s *InstallSession) run() {
 	// Once every step is recorded, finish publication even if observation or
 	// a stop request raced with the last step. Completion is engine-owned.
 	if err := s.complete(); err != nil {
-		s.completionErr = fmt.Errorf("install steps complete but finalization failed: %w. Run sudo vpn install again to retry", err)
+		s.completionErr = fmt.Errorf("every step is done, but the install did not finish: %w. Run sudo vpn install again to finish it", err)
 	}
 }
 

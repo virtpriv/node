@@ -1,11 +1,9 @@
 package host
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -43,14 +41,14 @@ func provisionOperatorSudo(path string, run func(string, ...string) (string, err
 	if info, err := os.Lstat(path); err == nil {
 		st, ok := info.Sys().(*syscall.Stat_t)
 		if !info.Mode().IsRegular() || !ok || st.Uid != 0 || st.Gid != 0 || st.Nlink != 1 || info.Mode().Perm() != 0440 || info.Size() != int64(len(operatorSudoPolicy)) {
-			return errors.New("existing owner sudo policy has unexpected metadata; inspect before resuming installation")
+			return fmt.Errorf("found %s with an owner, mode or size vpn does not give it. Inspect it before you continue the install", path)
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
 		if string(data) != operatorSudoPolicy {
-			return errors.New("existing owner sudo policy differs; inspect before resuming installation")
+			return fmt.Errorf("found %s changed. Inspect it before you continue the install", path)
 		}
 		return verify()
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -107,11 +105,11 @@ func VerifyOperatorSudo() error {
 		return errors.New("owner sudo verification requires root")
 	}
 	if _, err := sudoOutput("/usr/sbin/visudo", "-c"); err != nil {
-		return fmt.Errorf("validate merged sudo policy: %w", err)
+		return fmt.Errorf("cannot confirm sudo's settings with visudo -c: %w", err)
 	}
 	out, err := sudoOutput("/usr/bin/sudo", "-n", "-ll", "-U", paths.AdminUser)
 	if err != nil {
-		return fmt.Errorf("inspect owner sudo policy: %w", err)
+		return fmt.Errorf("cannot read sudo's rules for the vpn account: %w", err)
 	}
 	return verifyOperatorSudoListing(out)
 }
@@ -120,7 +118,7 @@ var unsafeSudoAuthentication = regexp.MustCompile(`(^|[\s,])(!authenticate|rootp
 
 func verifyOperatorSudoListing(out string) error {
 	if unsafeSudoAuthentication.MatchString(out) {
-		return errors.New("host sudo policy contains conflicting authentication settings; inspect sudo -ll -U vpn")
+		return errors.New("found a sudo setting that changes which password sudo asks the vpn account for. Inspect sudo -ll -U vpn")
 	}
 	grant := false
 	for _, entry := range strings.Split(out, "Sudoers entry:")[1:] {
@@ -142,7 +140,7 @@ func verifyOperatorSudoListing(out string) error {
 			case line == "Commands:":
 				commands = true
 			case commands && strings.HasPrefix(line, "!"):
-				return errors.New("host sudo policy contains an owner command denial; inspect sudo -ll -U vpn")
+				return errors.New("found a sudo rule that denies the vpn account a command. Inspect sudo -ll -U vpn")
 			case commands && line == "ALL":
 				all = true
 			}
@@ -150,23 +148,13 @@ func verifyOperatorSudoListing(out string) error {
 		grant = grant || users && groups && authenticate && all
 	}
 	if !grant {
-		return errors.New("password-required unrestricted owner sudo was not found in effective policy")
+		return errors.New("found no sudo rule that lets the vpn account run every command with its password. Inspect sudo -ll -U vpn")
 	}
 	return nil
 }
 
+// sudoOutput runs visudo or sudo, stopped after 15 seconds, with the
+// program's own message when it fails.
 func sudoOutput(name string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Env = append(os.Environ(), "LC_ALL=C")
-	cmd.WaitDelay = 2 * time.Second
-	out, err := cmd.Output()
-	if ctx.Err() != nil {
-		return "", ctx.Err()
-	}
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
+	return askTool(15*time.Second, name, args...)
 }

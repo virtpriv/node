@@ -443,6 +443,7 @@ func (e *StopError) Lines() []string {
 		out = append(out, RefusedStartText(e.StartErr))
 	}
 	var run string
+	facts, isFacts := errors.AsType[factsFailed](e.Err)
 	switch {
 	case e.NotStarted:
 		if e.StartErr == nil {
@@ -465,8 +466,18 @@ func (e *StopError) Lines() []string {
 		} else {
 			out = append(out, "To continue the install, run the installer again.")
 		}
+	case isFacts:
+		// The shell indents every line.
+		report, _ := formatChecks("", "Checking this machine before finishing", facts.results)
+		out = append(out, strings.TrimRight(report, "\n"), "", "The install did not finish.")
+		if e.Again != "" {
+			run = "Once it is fixed, run:"
+		}
 	default:
 		out = append(out, "Failed: "+e.Error())
+		if e.Again != "" {
+			run = "To try again, run:"
+		}
 	}
 	if e.RootLoginOff {
 		out = append(out, RootLoginOffNotice)

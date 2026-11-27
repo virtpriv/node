@@ -2,12 +2,15 @@ package host
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/virtpriv/node/internal/logger"
 	"github.com/virtpriv/node/internal/paths"
@@ -173,6 +176,27 @@ net.mptcp.enabled = 0
 	return system.RunRootSilent("sysctl", "--system")
 }
 
+// nightlyValues are vpn's settings for Debian's nightly job and its
+// unattended-upgrade, in the order the two files hold them. Step 11 writes
+// them and CheckNightlyValues asks apt for them.
+var nightlyValues = []struct{ key, value string }{
+	{"APT::Periodic::Update-Package-Lists", "1"},
+	{"APT::Periodic::Unattended-Upgrade", "1"},
+	{"APT::Periodic::AutocleanInterval", "7"},
+	{"Unattended-Upgrade::Automatic-Reboot", "true"},
+	{"Unattended-Upgrade::Automatic-Reboot-Time", "now"},
+	{"Unattended-Upgrade::Remove-Unused-Kernel-Packages", "true"},
+	{"Unattended-Upgrade::OnlyOnACPower", "false"},
+	{"Unattended-Upgrade::Skip-Updates-On-Metered-Connections", "false"},
+}
+
+// vpnOrigins are the archives Debian's nightly job installs from.
+var vpnOrigins = []string{
+	"origin=Debian,codename=${distro_codename},label=Debian",
+	"origin=Debian,codename=${distro_codename},label=Debian-Security",
+	"origin=Debian,codename=${distro_codename}-security,label=Debian-Security",
+}
+
 // ConfigureUnattendedUpgrades writes vpn's rules for Debian's
 // unattended-upgrade, which every package update runs, and apt's hook for
 // the reboot check. The three origin lines are Debian's own, from the
@@ -192,33 +216,35 @@ net.mptcp.enabled = 0
 // Debian's new one saved beside it, and update an untouched one. Without
 // them a changed file holds its package back for good.
 func ConfigureUnattendedUpgrades() error {
-	autoConf := `APT::Periodic::Update-Package-Lists "1";
-APT::Periodic::Unattended-Upgrade "1";
-APT::Periodic::AutocleanInterval "7";
-`
+	var autoConf, upgradeConf strings.Builder
+	for _, v := range nightlyValues {
+		if strings.HasPrefix(v.key, "APT::Periodic::") {
+			fmt.Fprintf(&autoConf, "%s %q;\n", v.key, v.value)
+		}
+	}
 	if err := system.WriteFileRoot(paths.AutoUpgrades,
-		[]byte(autoConf), 0644); err != nil {
+		[]byte(autoConf.String()), 0644); err != nil {
 		return err
 	}
 
-	upgradeConf := `// Virtual Private Node installs Debian's updates by itself.
+	upgradeConf.WriteString(`// Virtual Private Node installs Debian's updates by itself.
 Unattended-Upgrade::Origins-Pattern {
-        "origin=Debian,codename=${distro_codename},label=Debian";
-        "origin=Debian,codename=${distro_codename},label=Debian-Security";
-        "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+        "` + strings.Join(vpnOrigins, `";
+        "`) + `";
 };
-Unattended-Upgrade::Automatic-Reboot "true";
-Unattended-Upgrade::Automatic-Reboot-Time "now";
-Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
-Unattended-Upgrade::OnlyOnACPower "false";
-Unattended-Upgrade::Skip-Updates-On-Metered-Connections "false";
-Dpkg::Options {
+`)
+	for _, v := range nightlyValues {
+		if strings.HasPrefix(v.key, "Unattended-Upgrade::") {
+			fmt.Fprintf(&upgradeConf, "%s %q;\n", v.key, v.value)
+		}
+	}
+	upgradeConf.WriteString(`Dpkg::Options {
         "--force-confdef";
         "--force-confold";
 };
-`
+`)
 	if err := system.WriteFileRoot(paths.UnattendedUpgrades,
-		[]byte(upgradeConf), 0644); err != nil {
+		[]byte(upgradeConf.String()), 0644); err != nil {
 		return err
 	}
 	return system.WriteFileRoot(paths.AptRebootCheck, []byte(aptRebootCheckHook), 0644)
@@ -268,6 +294,84 @@ func ConfigureFail2ban() error {
 		return err
 	}
 	return runFail2banCommand("systemctl", "restart", "fail2ban")
+}
+
+// fail2banValues are the jail's values fail2ban's server is asked for, as
+// fail2banJail sets them.
+var fail2banValues = []struct{ name, want string }{
+	{"maxretry", "5"}, {"findtime", "600"}, {"bantime", "600"},
+}
+
+// askFail2ban asks fail2ban's server. It is a variable so a test can stand
+// in for the server.
+var askFail2ban = func(args ...string) (string, error) {
+	return askTool(questionTimeout, "fail2ban-client", args...)
+}
+
+// CheckFail2banJail is the fact "fail2ban's SSH jail is on as vpn set it":
+// the running server lists the sshd jail, with vpn's values, banning through
+// nft on every port sshd listens on. Right after its restart the server opens
+// its socket before it has read its jails (2.5 s on an emulated VM), so the
+// whole question is asked again until it holds or its limit passes. Whether
+// fail2ban hears sshd is not asked (FIREWALL-001, decision 3).
+func CheckFail2banJail() error {
+	obs, err := observeSSHForFail2ban()
+	if err != nil {
+		return fmt.Errorf("observe SSH ports: %w", err)
+	}
+	until := time.Now().Add(questionTimeout)
+	for {
+		err = fail2banVerdict(obs.Ports)
+		if err == nil || time.Now().After(until) {
+			return err
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+func fail2banVerdict(ports []int) error {
+	const cannot = "cannot read fail2ban's sshd jail: %w"
+	// "Jail list:" then the jails, comma separated, empty when none is on.
+	status, err := askFail2ban("status")
+	if err != nil {
+		return fmt.Errorf(cannot, err)
+	}
+	_, jails, _ := strings.Cut(status, "Jail list:")
+	names := strings.FieldsFunc(jails, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' })
+	if !slices.Contains(names, "sshd") {
+		return errors.New("found fail2ban without its sshd jail, so logins are not rate limited. Look in /etc/fail2ban for a file that turns the jail off")
+	}
+	var f findings
+	for _, v := range fail2banValues {
+		got, err := askFail2ban("get", "sshd", v.name)
+		if err != nil {
+			return fmt.Errorf(cannot, err)
+		}
+		if got != v.want {
+			f.add("found %s %s in fail2ban's sshd jail, which vpn sets to %s", v.name, got, v.want)
+		}
+	}
+	actions, err := askFail2ban("get", "sshd", "actions")
+	if err != nil {
+		return fmt.Errorf(cannot, err)
+	}
+	// The first line is a heading, the actions follow it.
+	if names := strings.Split(actions, "\n")[1:]; !slices.Equal(names, []string{"nftables"}) {
+		f.add("found the ban actions %s in fail2ban's sshd jail, where vpn sets nftables", strings.Join(names, ", "))
+	} else {
+		got, err := askFail2ban("get", "sshd", "action", "nftables", "port")
+		if err != nil {
+			return fmt.Errorf(cannot, err)
+		}
+		want := make([]string, len(ports))
+		for i, p := range ports {
+			want[i] = strconv.Itoa(p)
+		}
+		if have := strings.Split(got, ","); !slices.Equal(have, want) {
+			f.add("found fail2ban's sshd jail banning on port %s, where sshd listens on %s", got, strings.Join(want, ","))
+		}
+	}
+	return f.err("remove the setting that changes", "so logins over SSH are rate limited")
 }
 
 // fail2banJail names the ban action InstallFail2ban guarantees and lists the

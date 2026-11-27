@@ -12,7 +12,12 @@ func withInitialFirewallTestDeps(t *testing.T) {
 	oldRead := readUFWDefaultForFirewall
 	oldWrite := writeUFWDefaultForFirewall
 	oldRun := runInitialFirewallCommand
+	oldAdded := askAddedRules
+	askAddedRules = func() (string, error) {
+		return "Added user rules (see 'ufw status' for running firewall):\n(None)\n", nil
+	}
 	t.Cleanup(func() {
+		askAddedRules = oldAdded
 		observeSSHForFirewall = oldObserve
 		readUFWDefaultForFirewall = oldRead
 		writeUFWDefaultForFirewall = oldWrite

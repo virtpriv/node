@@ -9,8 +9,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/virtpriv/node/internal/system"
 )
 
 // SSHObservation is an effective configuration snapshot for initial SSH setup.
@@ -26,7 +24,7 @@ type SSHObservation struct {
 // Preflight and firewall callers refuse on error. Owner password access is
 // established separately by the installer's SSH hardening step.
 func ObserveInitialSSHState() (SSHObservation, error) {
-	out, err := system.RunRootOutput("sshd", "-T",
+	out, err := askTool(questionTimeout, "sshd", "-T",
 		"-C", "user=root,host=localhost,addr=127.0.0.1")
 	if err != nil {
 		return SSHObservation{}, fmt.Errorf(
@@ -44,8 +42,8 @@ func ObserveInitialSSHState() (SSHObservation, error) {
 // explicit port makes sshd listen there even when it differs
 // from the Port directive. The union direction is fail-safe
 // for a firewall allow-list: allowing a port sshd does not
-// listen on wastes a rule; missing one it does listen on is
-// the lockout.
+// listen on wastes a rule, and missing one it does listen on
+// is the lockout.
 func parseSSHObservation(sshdOutput string) (SSHObservation, error) {
 	portSet := map[int]bool{}
 	pwSeen := false
@@ -101,9 +99,9 @@ func portFromListenAddress(addr string) (int, bool) {
 		return 0, false
 	}
 	// Bare IPv6 without brackets has colons but no port
-	// separator we can trust; only accept a numeric suffix
-	// that follows either a bracket or a dotted/hostname
-	// form ("]:" or a single-colon value).
+	// separator we can trust. Only a numeric suffix after a
+	// bracket or in a dotted or host name form ("]:" or a
+	// single colon) is taken.
 	if strings.Count(addr, ":") > 1 && !strings.Contains(addr, "]:") {
 		return 0, false
 	}

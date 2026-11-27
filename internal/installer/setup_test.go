@@ -12,8 +12,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-
-	"github.com/virtpriv/node/internal/host"
 )
 
 type protectedTreeEntry struct {
@@ -80,7 +78,7 @@ func snapshotProtectedTree(t *testing.T, root string) []byte {
 
 func installStartupFixture(
 	t *testing.T, f *lifecycleFixture,
-	preflight func() (host.SSHObservation, error),
+	preflight func() error,
 ) (*int, *int) {
 	t.Helper()
 	preflightCalls := 0
@@ -93,7 +91,7 @@ func installStartupFixture(
 	deps.lookup = f.lookup
 	deps.inhibitShutdown = func(string) (func(), error) { return func() {}, nil }
 	deps.systemBusRunning = func() bool { return true }
-	deps.runPreflight = func() (host.SSHObservation, error) {
+	deps.runPreflight = func() error {
 		preflightCalls++
 		return preflight()
 	}
@@ -163,8 +161,8 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 		root := filepath.Dir(f.fs.varLibVPN)
 		before := snapshotProtectedTree(t, root)
 		preflightCalls, initializeCalls := installStartupFixture(
-			t, f, func() (host.SSHObservation, error) {
-				return host.SSHObservation{}, errors.New("unexpected preflight")
+			t, f, func() error {
+				return errors.New("unexpected preflight")
 			})
 
 		output, err := captureRunInstallOutput(t, func() error {
@@ -223,8 +221,8 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 			root := filepath.Dir(f.fs.varLibVPN)
 			before := snapshotProtectedTree(t, root)
 			preflightCalls, initializeCalls := installStartupFixture(
-				t, f, func() (host.SSHObservation, error) {
-					return host.SSHObservation{}, errors.New("unexpected preflight")
+				t, f, func() error {
+					return errors.New("unexpected preflight")
 				})
 
 			if err := RunInstall(InstallOptions{}, unexpectedInstallFrontend(t)); err == nil {
@@ -248,8 +246,8 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 		root := filepath.Dir(f.fs.varLibVPN)
 		before := snapshotProtectedTree(t, root)
 		preflightCalls, initializeCalls := installStartupFixture(
-			t, f, func() (host.SSHObservation, error) {
-				return host.SSHObservation{}, errors.New("unexpected preflight")
+			t, f, func() error {
+				return errors.New("unexpected preflight")
 			})
 		withDeps := newInstallStartupDependencies
 		newInstallStartupDependencies = func() installStartupDependencies {
@@ -291,8 +289,8 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 		root := filepath.Dir(f.fs.varLibVPN)
 		before := snapshotProtectedTree(t, root)
 		preflightCalls, initializeCalls := installStartupFixture(
-			t, f, func() (host.SSHObservation, error) {
-				return host.SSHObservation{}, errors.New("unexpected preflight")
+			t, f, func() error {
+				return errors.New("unexpected preflight")
 			})
 		withDeps := newInstallStartupDependencies
 		newInstallStartupDependencies = func() installStartupDependencies {
@@ -323,8 +321,8 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 		root := filepath.Dir(f.fs.varLibVPN)
 		before := snapshotProtectedTree(t, root)
 		preflightCalls, initializeCalls := installStartupFixture(
-			t, f, func() (host.SSHObservation, error) {
-				return host.SSHObservation{}, checkArchitecture("arm64")
+			t, f, func() error {
+				return checkArchitecture("arm64")
 			})
 
 		err := RunInstall(InstallOptions{}, unexpectedInstallFrontend(t))
