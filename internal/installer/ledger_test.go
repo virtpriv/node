@@ -186,7 +186,7 @@ func TestLedgerCompletionRequiresBoundedBaseSteps(t *testing.T) {
 // must resume, and a record in the earlier order is refused, not reinterpreted.
 func TestLedgerFollowsThePackageUpgradeBehindTor(t *testing.T) {
 	beforeUpgrade := []string{"binary.install", "apt.base", "firewall", "host.prep", "identity.access",
-		"ipv6.disable", "mptcp.disable", "tor.configure", "tor.gate", "apt.tor"}
+		"ipv6.disable", "tor.configure", "tor.gate", "apt.tor"}
 	record := func(keys ...string) *installLedger {
 		t.Helper()
 		l := newLedger()

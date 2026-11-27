@@ -50,7 +50,7 @@ func compareDebianVersions(a, op, b string) (bool, error) {
 
 func (h rebootHost) path(p string) string { return filepath.Join(h.root, p) }
 
-// CheckReboot is the reboot check of install step 11 and Update Packages,
+// CheckReboot is the reboot check of install step 10 and Update Packages,
 // which also runs from apt's hook after every package change. It raises the
 // flag when the running kernel is older than the newest one installed, or
 // when one of rebootCheckUnits runs a program or library file that an update

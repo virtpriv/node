@@ -313,7 +313,7 @@ func TestAptSourcesDebianImagesPass(t *testing.T) {
 	t.Run("Debian's folder written with a slash", func(t *testing.T) {
 		m := newFakeApt(t)
 		m.debianImage()
-		m.setting("/etc/apt/apt.conf.d/10slash", `Dir::Etc::sourceparts "/etc/apt/sources.list.d/";`)
+		m.setting("/etc/apt/apt.conf.d/10slash", `Dir::Etc::trustedparts "/etc/apt/trusted.gpg.d/";`)
 		wantPassed(t, m.baseline().Sources)
 	})
 }
@@ -502,6 +502,30 @@ func TestAptSourcesRefusesMovedFolders(t *testing.T) {
 	}
 }
 
+// vpn's own settings file points apt at vpn's folder of sources, so only that
+// file may say where apt reads them. A file of the machine's that names the
+// place is refused whatever it names. One that sorts after vpn's would win.
+func TestAptSourcesRefusesAMachineFileThatNamesTheSourcesFolder(t *testing.T) {
+	for name, tc := range map[string]struct{ lines, list, parts string }{
+		"vpn's own values": {
+			lines: "Dir::Etc::sourcelist \"/dev/null\";\nDir::Etc::sourceparts \"" + paths.AptSourcesDir + "\";\n",
+			list:  "/dev/null", parts: paths.AptSourcesDir + "/",
+		},
+		"Debian's own folder": {
+			lines: "Dir::Etc::sourceparts \"/etc/apt/sources.list.d\";\n",
+			list:  aptDefaultFolders["Dir::Etc::sourcelist"], parts: aptDefaultFolders["Dir::Etc::sourceparts"],
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := newFakeApt(t)
+			m.debianImage()
+			m.file("/etc/apt/apt.conf.d/zz-own", tc.lines)
+			m.folders["Dir::Etc::sourcelist"], m.folders["Dir::Etc::sourceparts"] = tc.list, tc.parts
+			wantRefused(t, m.baseline().Sources, "/etc/apt/apt.conf.d/zz-own")
+		})
+	}
+}
+
 func TestAptSourcesRefusesIncludes(t *testing.T) {
 	m := newFakeApt(t)
 	m.debianImage()
@@ -540,8 +564,8 @@ func TestAptChecksReportUnreadable(t *testing.T) {
 func TestAptUpdatesPassOnDebiansImages(t *testing.T) {
 	m := newFakeApt(t)
 	m.debianImage()
-	// Debian's own unattended-upgrades files, which step 11 replaces, may
-	// stop the nightly job before it does.
+	// Debian's own unattended-upgrades files may stop the nightly job. vpn's
+	// later file clears what they set for it, so that is not judged.
 	m.file(paths.AutoUpgrades, "APT::Periodic::Update-Package-Lists \"0\";\nAPT::Periodic::Unattended-Upgrade \"0\";\n")
 	m.file(paths.UnattendedUpgrades, "Unattended-Upgrade::Package-Blacklist {\n    \"linux-\";\n};\n")
 	m.file("/etc/apt/apt.conf.d/50other", "// Unattended-Upgrade::Package-Blacklist { \"linux-\"; };\n/*\nAPT::Periodic::Enable \"0\";\n*/\n")
@@ -642,6 +666,14 @@ func TestAptProxyRefusesProxySettings(t *testing.T) {
 		m.dump = []string{`Acquire::https::Proxy::deb.debian.org "DIRECT";`}
 		wantRefused(t, m.baseline().Proxy, "Acquire::https::Proxy::deb.debian.org")
 	})
+	// Debian's two nightly files are the machine's own. Only what they set
+	// for the nightly job is left to vpn's later file.
+	t.Run("in one of Debian's two nightly files", func(t *testing.T) {
+		m := newFakeApt(t)
+		m.debianImage()
+		m.file(paths.UnattendedUpgrades, "Acquire::http::Proxy \"http://10.0.0.1:3128\";\n")
+		wantRefused(t, m.baseline().Proxy, paths.UnattendedUpgrades)
+	})
 	t.Run("no_proxy for every service", func(t *testing.T) {
 		m := newFakeApt(t)
 		m.debianImage()
@@ -650,22 +682,31 @@ func TestAptProxyRefusesProxySettings(t *testing.T) {
 	})
 }
 
-// ── Step 10 ──────────────────────────────────────────────
+// ── Step 9 ───────────────────────────────────────────────
 
-// stepTenMachine is an installer image in the middle of an install, with
+// stepNineMachine is an installer image in the middle of an install, with
 // apt-transport-tor installed.
-func stepTenMachine(t *testing.T) *fakeAptMachine {
+func stepNineMachine(t *testing.T) *fakeAptMachine {
 	m := newFakeApt(t)
 	m.installerImage()
 	m.file(aptTorMethod, "method")
+	// Debian's apt package ships the folder.
+	if err := os.MkdirAll(m.path(aptFolderSettings), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	return m
 }
 
-// afterStepTen makes the stand-in apt list vpn's file, as Debian's apt
-// does once it is written.
-func (m *fakeAptMachine) afterStepTen(sources string) {
+// afterTheSwitch makes the stand-in apt read vpn's folder, as Debian's apt
+// does from the moment vpn's settings file is written. It answers with vpn's
+// two places and lists vpn's sources file.
+func (m *fakeAptMachine) afterTheSwitch() {
+	sources, err := os.ReadFile(m.path(paths.AptSources))
+	if err != nil {
+		m.t.Fatalf("apt was pointed at vpn's folder before vpn's sources were in it: %v", err)
+	}
 	m.targets = nil
-	_, rest, _ := strings.Cut(sources, "Components:")
+	_, rest, _ := strings.Cut(string(sources), "Components:")
 	line, _, _ := strings.Cut(rest, "\n")
 	for _, c := range strings.Fields(line) {
 		m.targets = append(m.targets,
@@ -674,6 +715,7 @@ func (m *fakeAptMachine) afterStepTen(sources string) {
 			fakeTarget{entry: paths.AptSources + ":2", uri: "tor+https://deb.debian.org/debian-security/", suite: "trixie-security", component: c, of: "deb"})
 	}
 	m.dump = []string{`Dir::Bin::methods::http "false";`, `Dir::Bin::methods::https "false";`, `Acquire::tor::Proxy "socks5h://apt-transport-tor@127.0.0.1:9050";`}
+	m.folders["Dir::Etc::sourcelist"], m.folders["Dir::Etc::sourceparts"] = "/dev/null", paths.AptSourcesDir+"/"
 }
 
 // writer writes as WriteFileRoot does, failing the failAt'th write like a
@@ -685,14 +727,11 @@ func (m *fakeAptMachine) writer(failAt int, after func(path string)) func(string
 		if n == failAt {
 			return errors.New("killed")
 		}
-		if err := os.MkdirAll(filepath.Dir(m.path(path)), 0o755); err != nil {
-			return err
-		}
 		if err := os.WriteFile(m.path(path), content, perm); err != nil {
 			return err
 		}
-		if path == paths.AptSources {
-			m.afterStepTen(string(content))
+		if path == paths.AptTor {
+			m.afterTheSwitch()
 		}
 		if after != nil {
 			after(path)
@@ -701,55 +740,64 @@ func (m *fakeAptMachine) writer(failAt int, after func(path string)) func(string
 	}
 }
 
-func (m *fakeAptMachine) stepTen(write func(string, []byte, os.FileMode) error) error {
+func (m *fakeAptMachine) stepNine(write func(string, []byte, os.FileMode) error) error {
 	return aptHost{root: m.root, run: m.run}.configureAptTor(write)
 }
 
-func TestStepTenRefusesWithoutTorMethod(t *testing.T) {
+func TestStepNineRefusesWithoutTorMethod(t *testing.T) {
 	m := newFakeApt(t)
 	m.installerImage()
-	err := m.stepTen(func(path string, _ []byte, _ os.FileMode) error {
+	err := m.stepNine(func(path string, _ []byte, _ os.FileMode) error {
 		t.Fatalf("the step wrote %s before it failed", path)
 		return nil
 	})
 	wantRefused(t, err, aptTorMethod)
 }
 
-func TestStepTenFinishesAfterAKill(t *testing.T) {
+// vpn's settings file is the step's last write and its one switch. A kill
+// before it leaves apt reading the machine's sources, so the next run still
+// finds the machine's components. The machine's own files stay as they were.
+func TestStepNineFinishesAfterAKill(t *testing.T) {
 	for failAt := 1; failAt <= 2; failAt++ {
 		t.Run(fmt.Sprintf("killed at write %d", failAt), func(t *testing.T) {
-			m := stepTenMachine(t)
-			if err := m.stepTen(m.writer(failAt, nil)); err == nil {
+			m := stepNineMachine(t)
+			image, err := os.ReadFile(m.path(aptFileSources))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := m.stepNine(m.writer(failAt, nil)); err == nil {
 				t.Fatal("the kill did not stop the step")
 			}
-			if failAt == 2 {
-				if _, err := os.Stat(m.path(paths.AptTor)); err != nil {
-					t.Fatal("apt's plain methods are not off before vpn's sources are written")
-				}
+			if _, err := os.Stat(m.path(paths.AptTor)); err == nil {
+				t.Fatal("apt was switched before the step's last write")
 			}
-			wantPassed(t, m.stepTen(m.writer(0, nil)))
-			for _, p := range []string{paths.AptTor, paths.AptSources, "/etc/apt/sources.list.disabled"} {
-				if _, err := os.Stat(m.path(p)); err != nil {
-					t.Fatalf("missing after the step: %v", err)
-				}
+			wantPassed(t, m.stepNine(m.writer(0, nil)))
+			sources, err := os.ReadFile(m.path(paths.AptSources))
+			if err != nil {
+				t.Fatalf("missing after the step: %v", err)
 			}
-			if _, err := os.Stat(m.path(aptFileSources)); err == nil {
-				t.Fatal("the image's sources.list is still read by apt")
+			if !strings.Contains(string(sources), "Components: main non-free-firmware\n") {
+				t.Fatalf("the run after the kill lost the machine's components:\n%s", sources)
 			}
+			if _, err := os.Stat(m.path(paths.AptTor)); err != nil {
+				t.Fatalf("missing after the step: %v", err)
+			}
+			if after, err := os.ReadFile(m.path(aptFileSources)); err != nil || string(after) != string(image) {
+				t.Fatalf("the image's sources.list did not stay as it was: %v", err)
+			}
+			// A resumed install asks the start checks again, now of vpn's places.
+			wantPassed(t, m.baseline().Sources)
+			// apt reads vpn's folder alone now, so the checks judge that folder alone.
+			bad := "deb [trusted=yes] http://deb.debian.org/debian trixie main\n"
+			m.file("/etc/apt/sources.list.d/added.list", bad)
+			wantPassed(t, m.baseline().Sources)
+			m.file(paths.AptSourcesDir+"/added.list", bad)
+			wantRefused(t, m.baseline().Sources, paths.AptSourcesDir+"/added.list")
 		})
 	}
-	t.Run("no sources.list at all", func(t *testing.T) {
-		m := newFakeApt(t)
-		m.debianImage()
-		m.file(aptTorMethod, "method")
-		wantPassed(t, m.stepTen(m.writer(0, nil)))
-		if _, err := os.Stat(m.path("/etc/apt/sources.list.d/debian.sources.disabled")); err != nil {
-			t.Fatalf("the image's file was not switched off: %v", err)
-		}
-	})
 }
 
-func TestStepTenRefusesARouteOutsideTor(t *testing.T) {
+func TestStepNineRefusesARouteOutsideTor(t *testing.T) {
 	for name, line := range map[string]string{
 		"a plain method still on":           `Dir::Bin::Methods::https "/usr/lib/apt/methods/https";`,
 		"another proxy":                     `Acquire::tor::Proxy::deb.debian.org "DIRECT";`,
@@ -757,9 +805,9 @@ func TestStepTenRefusesARouteOutsideTor(t *testing.T) {
 		"the plain program for Tor sources": `Dir::Bin::Methods::tor+https "/usr/lib/apt/methods/https";`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			m := stepTenMachine(t)
-			err := m.stepTen(m.writer(0, func(path string) {
-				if path == paths.AptSources {
+			m := stepNineMachine(t)
+			err := m.stepNine(m.writer(0, func(path string) {
+				if path == paths.AptTor {
 					m.setting("/etc/apt/apt.conf.d/zz-late", line)
 				}
 			}))
@@ -767,9 +815,9 @@ func TestStepTenRefusesARouteOutsideTor(t *testing.T) {
 		})
 	}
 	t.Run("an image source still listed", func(t *testing.T) {
-		m := stepTenMachine(t)
-		err := m.stepTen(m.writer(0, func(path string) {
-			if path == paths.AptSources {
+		m := stepNineMachine(t)
+		err := m.stepNine(m.writer(0, func(path string) {
+			if path == paths.AptTor {
 				m.targets = append(m.targets, fakeTarget{entry: "/etc/apt/sources.list.d/late.list:1", uri: "http://deb.debian.org/debian/", suite: "trixie", component: "main", of: "deb"})
 			}
 		}))
@@ -797,7 +845,7 @@ func TestAptUpdatesRefusesAnotherNightlyStart(t *testing.T) {
 	}
 }
 
-// apt's answer after vpn's step 11 on Debian 13.8 (a booted VM).
+// apt's answer after vpn's step 10 on Debian 13.8 (a booted VM).
 var vpnNightlyDump = []string{
 	`APT::Periodic "";`,
 	`APT::Periodic::Update-Package-Lists "1";`,

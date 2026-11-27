@@ -75,20 +75,26 @@ func productionLifecycleFS() lifecycleFS {
 			{path: "/var", mode: 0o755},
 			{path: "/var/lib", mode: 0o755},
 		},
-		// What this installer writes, then what v0.6.x left on a machine
+		// What this installer creates, then what v0.6.x left on a machine
 		// under its earlier name, rlvpn. A machine that holds one of them
 		// without a valid install record is refused, never migrated. The
 		// v0.6.x entries go in a later release.
+		//
+		// A path joins the list when the install creates it and it cannot
+		// exist on a fresh machine. So the vpn program and its log stay off
+		// it, since both exist before a fresh install starts, and so do
+		// Debian's own files, the one vpn changes among them.
 		unmarkedPaths: []string{
 			paths.VarLibVPN,
 			paths.ConfigDir,
+			paths.AdminHome,
 			paths.SSHDDropIn,
 			paths.AdminSudoers,
 			paths.AptTor,
-			paths.AptSources,
+			paths.AptSourcesDir,
+			paths.AptNightly,
 			paths.AptRebootCheck,
 			paths.DisableIPv6Conf,
-			paths.DisableMPTCPConf,
 			paths.TorRestartDropIn,
 			paths.JournaldDropIn,
 			paths.LogRotate,

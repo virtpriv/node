@@ -107,14 +107,22 @@ const (
 	// never deletes, adopts, or rewrites it.
 	OldSSHDDropIn = "/etc/ssh/sshd_config.d/00-rlvpn-hardening.conf"
 
-	Fail2banJail       = "/etc/fail2ban/jail.local"
+	Fail2banJail = "/etc/fail2ban/jail.local"
+	// AutoUpgrades and UnattendedUpgrades are the two settings files of
+	// Debian's unattended-upgrades package. vpn reads them and never writes
+	// them.
 	AutoUpgrades       = "/etc/apt/apt.conf.d/20auto-upgrades"
 	UnattendedUpgrades = "/etc/apt/apt.conf.d/50unattended-upgrades"
 	AptTor             = "/etc/apt/apt.conf.d/99-vpn-apt-tor"
-	AptSources         = "/etc/apt/sources.list.d/vpn-debian.sources"
-	AptRebootCheck     = "/etc/apt/apt.conf.d/99-vpn-reboot-check"
-	DisableIPv6Conf    = "/etc/sysctl.d/99-disable-ipv6.conf"
-	DisableMPTCPConf   = "/etc/sysctl.d/99-disable-mptcp.conf"
+	// AptSourcesDir is vpn's own folder of apt sources. AptTor points apt at
+	// it, and the machine's own source files stay as they were.
+	AptSourcesDir = "/etc/apt/vpn.sources.d"
+	AptSources    = AptSourcesDir + "/vpn-debian.sources"
+	// AptNightly holds vpn's values for Debian's nightly job. It is read
+	// after Debian's two files.
+	AptNightly      = "/etc/apt/apt.conf.d/99-vpn-nightly"
+	AptRebootCheck  = "/etc/apt/apt.conf.d/99-vpn-reboot-check"
+	DisableIPv6Conf = "/etc/sysctl.d/99-disable-ipv6.conf"
 
 	// JournaldDropIn keeps the system journal on disk. Its name sorts after
 	// the machine's own journald files, so its setting wins.

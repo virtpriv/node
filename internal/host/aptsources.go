@@ -44,6 +44,7 @@ const (
 	aptFolderPins       = "/etc/apt/preferences.d"
 	aptFolderTrusted    = "/etc/apt/trusted.gpg.d"
 	aptFileSources      = "/etc/apt/sources.list"
+	aptNoSourcesFile    = "/dev/null"
 	aptFileSettings     = "/etc/apt/apt.conf"
 	aptFilePins         = "/etc/apt/preferences"
 	aptWeakSourceOption = "turns off apt's signature check"
@@ -51,7 +52,9 @@ const (
 
 // aptTorSettings is vpn's apt settings file. Plain http and https are off, so
 // any source outside Tor fails. The Tor proxy is apt's own default, written
-// down so it can be seen.
+// down so it can be seen. The last two lines point apt at vpn's own folder of
+// sources and at no single sources file, so apt reads vpn's sources alone and
+// the machine's own source files stay as they are.
 const aptTorSettings = `// Virtual Private Node sends apt through Tor only. Plain http and https are off.
 Dir::Bin::Methods::http "false";
 Dir::Bin::Methods::https "false";
@@ -59,14 +62,17 @@ Acquire::tor::Proxy "` + aptTorProxy + `";
 Acquire::http::Timeout "60";
 Acquire::https::Timeout "60";
 Acquire::Retries "3";
+// apt reads its sources in vpn's own folder. The machine's source files stay as they were.
+Dir::Etc::sourcelist "` + aptNoSourcesFile + `";
+Dir::Etc::sourceparts "` + paths.AptSourcesDir + `";
 `
 
 // vpnDebianSources is vpn's sources file. Backports are left out, since
 // Debian's security team does not cover them.
 func vpnDebianSources(components []string) string {
 	c := strings.Join(components, " ")
-	return `# Virtual Private Node's sources, through Tor only. The machine's own files are
-# kept beside this one, switched off with .disabled added to their names.
+	return `# Virtual Private Node's sources, through Tor only. apt reads this folder alone.
+# The machine's own source files stay as they were and are not read.
 Types: deb
 URIs: ` + aptDebianMain + `
 Suites: trixie trixie-updates
@@ -81,10 +87,24 @@ Signed-By: ` + debianKeyring + `
 `
 }
 
-// vpnAptSettingFiles are the apt settings files vpn writes, in steps 10 and
-// 11. The checks of the machine's own settings skip them. On a fresh machine
-// whatever they hold is replaced, and on a resumed install they are vpn's.
-var vpnAptSettingFiles = []string{paths.AptTor, paths.AutoUpgrades, paths.UnattendedUpgrades, paths.AptRebootCheck}
+// vpnAptSettingFiles are the apt settings files vpn writes, in steps 9 and
+// 10. The checks of the machine's own settings skip them. A fresh machine
+// that holds one is refused before these checks run, so here they are vpn's.
+var vpnAptSettingFiles = []string{paths.AptTor, paths.AptNightly, paths.AptRebootCheck}
+
+// debianNightlyFiles are the two settings files of Debian's
+// unattended-upgrades package. They are the machine's own and are read like
+// its other settings files, but for what they set for the nightly job. vpn's
+// own file is read after them and clears those settings before it sets its
+// own.
+var debianNightlyFiles = []string{paths.AutoUpgrades, paths.UnattendedUpgrades}
+
+// nightlySetting reports whether a setting's name, in lower case, is one of
+// the nightly job's or names all of them, as "#clear APT::Periodic" does.
+func nightlySetting(name string) bool {
+	return name == "apt::periodic" || name == "unattended-upgrade" ||
+		strings.HasPrefix(name, "apt::periodic::") || strings.HasPrefix(name, "unattended-upgrade::")
+}
 
 // AptBaseline is the preflight's three apt answers. A nil error passes.
 type AptBaseline struct {
@@ -96,9 +116,11 @@ func CheckAptBaseline() AptBaseline {
 	return productionAptHost().baseline()
 }
 
-// ConfigureAptTor is install step 10. It switches off apt's plain methods,
-// writes vpn's sources file over Tor, switches off the machine's own source
-// files and checks the result with apt. Each part can run again after a kill.
+// ConfigureAptTor is install step 9. It writes vpn's sources file over Tor
+// into vpn's own folder, then vpn's settings file, which switches off apt's
+// plain methods and points apt at that folder, and checks the result with
+// apt. The machine's own source files are not changed. Each part can run
+// again after a kill.
 func ConfigureAptTor() error {
 	return productionAptHost().configureAptTor(system.WriteFileRoot)
 }
@@ -154,7 +176,8 @@ func (f *findings) addFor(s aptSettingFiles, key, why string) {
 
 func (h aptHost) checkSources(settings aptSettingFiles, dump []aptSetting) error {
 	var f findings
-	if moved := h.checkAptFolders(settings, &f); moved {
+	places, moved := h.checkAptFolders(settings, &f)
+	if moved {
 		// apt reads its sources elsewhere, so the checks below would read
 		// the wrong files.
 		return f.err("remove", aptFixDebian)
@@ -181,7 +204,7 @@ func (h aptHost) checkSources(settings aptSettingFiles, dump []aptSetting) error
 		}
 	}
 
-	entries, err := h.aptSourceEntries()
+	entries, err := h.aptSourceEntries(places)
 	if err != nil {
 		f.add("%v", err)
 		return f.err("remove", aptFixDebian)
@@ -231,10 +254,10 @@ func (h aptHost) checkSources(settings aptSettingFiles, dump []aptSetting) error
 }
 
 // aptDefaultFolders are the places Debian's apt reads its sources, keys and
-// settings, as apt-config shell resolves them. The checks read these places.
+// settings, as apt-config shell resolves them.
 var aptDefaultFolders = map[string]string{
-	"Dir::Etc::sourcelist":       "/etc/apt/sources.list",
-	"Dir::Etc::sourceparts":      "/etc/apt/sources.list.d/",
+	aptKeySourcesFile:            aptFileSources,
+	aptKeySourcesFolder:          aptFolderSources + "/",
 	"Dir::Etc::trustedparts":     "/etc/apt/trusted.gpg.d/",
 	"Dir::Etc::Trusted":          "",
 	"Dir::Etc::main":             "/etc/apt/apt.conf",
@@ -243,9 +266,30 @@ var aptDefaultFolders = map[string]string{
 	"Dir::Etc::preferencesparts": "/etc/apt/preferences.d/",
 }
 
+const (
+	aptKeySourcesFile   = "Dir::Etc::sourcelist"
+	aptKeySourcesFolder = "Dir::Etc::sourceparts"
+)
+
+// vpnSourcePlaces are apt's two answers once step 9 has written vpn's
+// settings file, no single sources file and vpn's own folder.
+var vpnSourcePlaces = map[string]string{
+	aptKeySourcesFile:   aptNoSourcesFile,
+	aptKeySourcesFolder: paths.AptSourcesDir + "/",
+}
+
+// aptSourcePlaces are the single file and the folder apt reads its sources
+// in. The checks read these places.
+type aptSourcePlaces struct{ file, folder string }
+
 // checkAptFolders refuses settings that move where apt reads its sources,
-// keys or settings, and reports whether any did.
-func (h aptHost) checkAptFolders(settings aptSettingFiles, f *findings) bool {
+// keys or settings, and reports whether any did. It returns the two places
+// apt reads its sources in.
+//
+// Each of those two may be Debian's own or vpn's own, and only vpn's
+// settings file may name it. A file of the machine's that names one is
+// refused whatever it names, since one read after vpn's file would win.
+func (h aptHost) checkAptFolders(settings aptSettingFiles, f *findings) (aptSourcePlaces, bool) {
 	keys := make([]string, 0, len(aptDefaultFolders))
 	for k := range aptDefaultFolders {
 		keys = append(keys, k)
@@ -262,17 +306,21 @@ func (h aptHost) checkAptFolders(settings aptSettingFiles, f *findings) bool {
 	out, err := h.run("apt-config", args...)
 	if err != nil {
 		f.add("cannot read apt's settings: %v", err)
-		return true
+		return aptSourcePlaces{}, true
 	}
-	got := map[string]string{}
+	names := map[string]string{}
 	for _, line := range strings.Split(out, "\n") {
 		if name, value, ok := strings.Cut(line, "="); ok {
-			got[name] = strings.Trim(value, "'")
+			names[name] = strings.Trim(value, "'")
 		}
 	}
+	got := map[string]string{}
 	moved := false
 	for i, k := range keys {
-		if got[fmt.Sprintf("F%d", i)] == aptDefaultFolders[k] {
+		got[k] = names[fmt.Sprintf("F%d", i)]
+		vpns, isSourcePlace := vpnSourcePlaces[k]
+		byMachine := isSourcePlace && len(settings.filesSetting(k)) > 0
+		if !byMachine && (got[k] == aptDefaultFolders[k] || isSourcePlace && got[k] == vpns) {
 			continue
 		}
 		moved = true
@@ -288,7 +336,10 @@ func (h aptHost) checkAptFolders(settings aptSettingFiles, f *findings) bool {
 			f.add("found %s in apt's settings, which %s", k, why)
 		}
 	}
-	return moved
+	return aptSourcePlaces{
+		file:   got[aptKeySourcesFile],
+		folder: strings.TrimSuffix(got[aptKeySourcesFolder], "/"),
+	}, moved
 }
 
 // weakeningSetting returns the name apt's list prints for a global setting
@@ -487,17 +538,19 @@ type aptSourceEntry struct {
 	trusted  string // the option as written, when it turns checks off
 }
 
-// aptSourceFiles lists the source files apt reads, sources.list and, in
-// sources.list.d, files ending in .list or .sources (apt 3.0.3 sourcelist.cc
-// line 503).
-func (h aptHost) aptSourceFiles() ([]string, error) {
+// aptSourceFiles lists the source files apt reads, its single sources file
+// and, in its sources folder, files ending in .list or .sources (apt 3.0.3
+// sourcelist.cc line 503). Before step 9 the two places are the machine's,
+// sources.list and sources.list.d. After it they are vpn's, no file and vpn's
+// folder.
+func (h aptHost) aptSourceFiles(places aptSourcePlaces) ([]string, error) {
 	var files []string
-	if ok, err := h.aptRegularFile(aptFileSources); err != nil {
+	if ok, err := h.aptRegularFile(places.file); err != nil {
 		return nil, err
 	} else if ok {
-		files = append(files, aptFileSources)
+		files = append(files, places.file)
 	}
-	parts, err := h.aptFolderFiles(aptFolderSources, "list", "sources")
+	parts, err := h.aptFolderFiles(places.folder, "list", "sources")
 	if err != nil {
 		return nil, err
 	}
@@ -506,8 +559,8 @@ func (h aptHost) aptSourceFiles() ([]string, error) {
 
 // aptSourceEntries scans every source file apt reads. A stanza with
 // "Enabled: no" and a commented line are skipped, as apt skips them.
-func (h aptHost) aptSourceEntries() ([]aptSourceEntry, error) {
-	files, err := h.aptSourceFiles()
+func (h aptHost) aptSourceEntries(places aptSourcePlaces) ([]aptSourceEntry, error) {
+	files, err := h.aptSourceFiles(places)
 	if err != nil {
 		return nil, err
 	}
@@ -692,7 +745,8 @@ func (h aptHost) aptDump() ([]aptSetting, error) {
 }
 
 // aptSettingFiles holds the setting names each of the machine's own settings
-// files sets, so a finding can name its file. vpn's own files are left out.
+// files sets, so a finding can name its file. vpn's own files are left out,
+// and so is what Debian's two nightly files set for the nightly job.
 type aptSettingFiles struct {
 	files    []string
 	keys     map[string][]string
@@ -734,6 +788,9 @@ func (h aptHost) aptSettings() (aptSettingFiles, error) {
 		keys, include, err := h.aptConfKeys(file)
 		if err != nil {
 			return s, err
+		}
+		if slices.Contains(debianNightlyFiles, file) {
+			keys = slices.DeleteFunc(keys, func(k string) bool { return nightlySetting(strings.ToLower(k)) })
 		}
 		s.files = append(s.files, file)
 		s.keys[file] = keys
@@ -899,7 +956,7 @@ func (h aptHost) checkUpdates(settings aptSettingFiles) error {
 		for _, k := range settings.keys[file] {
 			lk := strings.ToLower(k)
 			// "#clear APT::Periodic" names the whole tree, "#clear APT" its parent.
-			if lk == "apt" || lk == "apt::periodic" || lk == "unattended-upgrade" || strings.HasPrefix(lk, "apt::periodic::") || strings.HasPrefix(lk, "unattended-upgrade::") {
+			if lk == "apt" || nightlySetting(lk) {
 				f.add("found %s in %s, which stops or narrows the nightly updates", strings.TrimSuffix(k, "::"), file)
 			}
 		}
@@ -961,10 +1018,10 @@ func (h aptHost) checkUpdates(settings aptSettingFiles) error {
 }
 
 // CheckNightlyValues is the fact "Debian's nightly job runs with vpn's
-// values", asked of apt's merged settings right after step 11 writes them and
+// values", asked of apt's merged settings right after step 10 writes them and
 // when the install finishes. The start check reads the machine's files
-// instead, since Debian's own 20auto-upgrades can hold "0" before step 11
-// replaces it.
+// instead, since Debian's own 20auto-upgrades can hold "0" before step 10
+// writes vpn's file, which is read after it.
 func CheckNightlyValues() error {
 	h := productionAptHost()
 	settings, err := h.aptSettings()
@@ -1133,15 +1190,16 @@ func withoutBinary(key string) string {
 	return key
 }
 
-// ── Step 10 ──────────────────────────────────────────────
+// ── Step 9 ───────────────────────────────────────────────
 
 func (h aptHost) configureAptTor(write func(string, []byte, os.FileMode) error) error {
 	if _, err := os.Stat(h.path(aptTorMethod)); err != nil {
 		return fmt.Errorf("apt's Tor method is missing (%s)", aptTorMethod)
 	}
 	// The components the machine's Debian sources use, so those packages
-	// keep updating. Read before anything changes. A rerun reads vpn's
-	// file and gets the same.
+	// keep updating. Read before anything changes. A rerun after a kill
+	// before the settings file is written still reads the machine's sources.
+	// A rerun after it reads vpn's file and gets the same.
 	targets, err := h.aptTargets()
 	if err != nil {
 		return err
@@ -1159,49 +1217,34 @@ func (h aptHost) configureAptTor(write func(string, []byte, os.FileMode) error) 
 		components = []string{"main"}
 	}
 
-	// First, so a kill after it leaves apt closed, not open.
-	if err := write(paths.AptTor, []byte(aptTorSettings), 0o644); err != nil {
+	// vpn's folder and its sources file come first. apt does not read them
+	// yet.
+	folder := h.path(paths.AptSourcesDir)
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		return err
+	}
+	if err := os.Chmod(folder, 0o755); err != nil {
+		return err
+	}
+	if err := files.Sync(filepath.Dir(folder)); err != nil {
 		return err
 	}
 	if err := write(paths.AptSources, []byte(vpnDebianSources(components)), 0o644); err != nil {
 		return err
 	}
-	if err := h.switchOffMachineSources(); err != nil {
+	// The switch, in one write. Before it apt is as the earlier steps left
+	// it. After it apt's plain methods are off and it reads vpn's sources
+	// alone.
+	if err := write(paths.AptTor, []byte(aptTorSettings), 0o644); err != nil {
 		return err
 	}
 	return h.verifyAptTor()
 }
 
-// CheckAptThroughTor is the fact "apt reaches Debian through Tor only", step
-// 10's own check, asked again when the install finishes.
+// CheckAptThroughTor is the fact "apt reaches Debian through Tor only",
+// step 9's own check, asked again when the install finishes.
 func CheckAptThroughTor() error {
 	return productionAptHost().verifyAptTor()
-}
-
-// switchOffMachineSources adds .disabled to every source file apt reads but
-// vpn's. apt skips that suffix by its own default (Dir::Ignore-Files-Silently,
-// apt 3.0.3 init.cc line 175), and the owner keeps the original text.
-func (h aptHost) switchOffMachineSources() error {
-	sources, err := h.aptSourceFiles()
-	if err != nil {
-		return err
-	}
-	for _, file := range sources {
-		if file == paths.AptSources {
-			continue
-		}
-		off := h.path(file + ".disabled")
-		if _, err := os.Lstat(off); err == nil {
-			return fmt.Errorf("cannot switch off %s, %s.disabled already exists", file, file)
-		}
-		if err := os.Rename(h.path(file), off); err != nil {
-			return fmt.Errorf("switch off %s: %w", file, unwrapPath(err))
-		}
-		if err := files.Sync(filepath.Dir(off)); err != nil {
-			return fmt.Errorf("switch off %s: %w", file, err)
-		}
-	}
-	return nil
 }
 
 // verifyAptTor checks the step's result with apt's own answers. Only vpn's

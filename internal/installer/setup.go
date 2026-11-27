@@ -167,7 +167,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 	}
 
 	// Restarts wait until the run ends. Debian's update program restarts
-	// the machine when the restart flag is up, and step 11 runs it. Without
+	// the machine when the restart flag is up, and step 10 runs it. Without
 	// a system bus nothing can hold off a restart, so the hold is taken at
 	// the end of step 2, which installs and starts the bus. A run that would
 	// skip step 2 does not start without it.
@@ -475,8 +475,6 @@ func buildInstallSteps(dec *InstallDecisions, holdRestarts func() error) []Insta
 			})},
 		{Key: "ipv6.disable", Name: "Turning off IPv6",
 			Run: plain(host.DisableIPv6)},
-		{Key: "mptcp.disable", Name: "Turning off Multipath TCP",
-			Run: plain(host.DisableMPTCP)},
 		{Key: "tor.configure", Name: "Setting up Tor",
 			Run: plain(host.EnableAndRestartTor)},
 		// Hard gate. No step below that sends apt through Tor runs unless

@@ -269,10 +269,10 @@ func TestInteractiveResumeExecutesGateAndPublishesSkips(t *testing.T) {
 			skips++
 		}
 	}
-	if skips != 5 || len(calls) != 2 || calls["firewall"] != 1 || calls["mptcp.disable"] != 1 {
+	if skips != 5 || len(calls) != 2 || calls["firewall"] != 1 || calls["tor.configure"] != 1 {
 		t.Fatalf("resume skips=%d calls=%v", skips, calls)
 	}
-	if !mustReadLedger(t, path).done("mptcp.disable") {
+	if !mustReadLedger(t, path).done("tor.configure") {
 		t.Fatal("resume did not publish remaining progress")
 	}
 }

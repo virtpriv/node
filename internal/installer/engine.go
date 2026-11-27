@@ -278,7 +278,7 @@ func (r *stepRunner) record(key string) error {
 }
 
 // Log numbers a line by the whole list, so a rerun that skips steps still
-// logs "step 9/17".
+// logs "step 8/16".
 func (r *stepRunner) Log(k int, text string) {
 	logger.Install("step %d/%d %s", r.todo[k]+1, len(r.steps), text)
 }

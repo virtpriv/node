@@ -34,8 +34,8 @@ func testSteps(calls map[string]int) []InstallStep {
 			Run: plain(fn("identity.access"))},
 		{Key: "ipv6.disable", Name: "Disabling IPv6",
 			Run: plain(fn("ipv6.disable"))},
-		{Key: "mptcp.disable", Name: "Disabling MPTCP",
-			Run: plain(fn("mptcp.disable"))},
+		{Key: "tor.configure", Name: "Setting up Tor",
+			Run: plain(fn("tor.configure"))},
 	}
 }
 
@@ -92,7 +92,7 @@ func TestValidateSteps(t *testing.T) {
 func TestPlanScenarios(t *testing.T) {
 	all := []string{"binary.install", "apt.base", "firewall",
 		"host.prep", "identity.access", "ipv6.disable",
-		"mptcp.disable"}
+		"tor.configure"}
 
 	cases := []struct {
 		name    string
@@ -113,13 +113,13 @@ func TestPlanScenarios(t *testing.T) {
 			name: "resume after step 2: gate re-runs, rest forward",
 			done: []string{"binary.install", "apt.base"},
 			wantRun: []string{"firewall", "host.prep",
-				"identity.access", "ipv6.disable", "mptcp.disable"},
+				"identity.access", "ipv6.disable", "tor.configure"},
 		},
 		{
 			name: "resume after step 5: recorded steps stay done",
 			done: []string{"binary.install", "apt.base",
 				"firewall", "host.prep", "identity.access"},
-			wantRun: []string{"firewall", "ipv6.disable", "mptcp.disable"},
+			wantRun: []string{"firewall", "ipv6.disable", "tor.configure"},
 		},
 		{
 			name: "unknown ledger keys ignored",
@@ -127,7 +127,7 @@ func TestPlanScenarios(t *testing.T) {
 				"another.ghost"},
 			wantRun: []string{"apt.base", "firewall",
 				"host.prep", "identity.access", "ipv6.disable",
-				"mptcp.disable"},
+				"tor.configure"},
 		},
 	}
 
@@ -277,7 +277,7 @@ func TestRunInstallUnattendedFailureStops(t *testing.T) {
 	}
 	// Nothing after the failure ran.
 	for _, k := range []string{"host.prep", "identity.access",
-		"ipv6.disable", "mptcp.disable"} {
+		"ipv6.disable", "tor.configure"} {
 		if calls[k] != 0 {
 			t.Errorf("%s ran after the failure", k)
 		}
