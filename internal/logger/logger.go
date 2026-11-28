@@ -2,9 +2,10 @@
 
 // Package logger provides structured logging for the vpn application.
 //
-// Log file: paths.LogFile (created by the installer, owned by the admin user)
+// Log file: paths.LogFile. The vpn program creates it when it opens it, and
+// the install gives it to the admin user when it finishes.
 //
-// Log format:
+// Log format, one line for each entry:
 //
 //	[2026-02-21 14:30:05 UTC] [section] message
 //
@@ -20,8 +21,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/virtpriv/node/internal/paths"
 )
@@ -51,7 +55,45 @@ func Log(section, format string, args ...interface{}) {
 	fmt.Fprintf(out, "[%s] [%s] %s\n",
 		time.Now().UTC().Format("2006-01-02 15:04:05 UTC"),
 		section,
-		fmt.Sprintf(format, args...))
+		oneLine(fmt.Sprintf(format, args...)))
+}
+
+// oneLine keeps a message on one line, so every line of the log starts with
+// its time. Paragraphs become sentences. Any other line break, control
+// character or invisible format character becomes a space, as theme.PlainText
+// does for the screens, so a program's own output cannot control a terminal
+// that shows the log or disguise the order of what it shows.
+func oneLine(msg string) string {
+	var paras []string
+	for _, p := range strings.Split(msg, "\n\n") {
+		var lines []string
+		for _, l := range strings.Split(p, "\n") {
+			if l = strings.TrimSpace(strings.Map(unsafeToSpace, l)); l != "" {
+				lines = append(lines, l)
+			}
+		}
+		if len(lines) > 0 {
+			paras = append(paras, strings.Join(lines, " "))
+		}
+	}
+	for i, p := range paras {
+		if i > 0 {
+			r, n := utf8.DecodeRuneInString(p)
+			p = string(unicode.ToUpper(r)) + p[n:]
+		}
+		if i < len(paras)-1 && !strings.HasSuffix(p, ".") {
+			p += "."
+		}
+		paras[i] = p
+	}
+	return strings.Join(paras, " ")
+}
+
+func unsafeToSpace(r rune) rune {
+	if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) {
+		return ' '
+	}
+	return r
 }
 
 // SetOutput sends the log to w and returns where it went before. Tests use

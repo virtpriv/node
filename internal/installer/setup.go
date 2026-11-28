@@ -113,6 +113,8 @@ var newInstallStartupDependencies = productionInstallStartupDependencies
 
 // RunInstall is the `sudo vpn install` entry point.
 func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
+	// Registered first, so it runs last and logs the error as the shell gets it.
+	defer func() { logEnd(retErr) }()
 	if os.Geteuid() != 0 {
 		return &StopError{NotStarted: true, StartErr: errors.New("the installer must run as root"),
 			Again: againCommand(opts.Unattended, nil)}
@@ -252,10 +254,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 		return &StopError{StepName: res.StepName, StepNum: res.StepNum, Total: res.Total, Err: res.Err,
 			RootLoginMayBeOff: rootLoginMayBeOff(res.Err)}
 	case RunInterrupted:
-		// The log must not just stop. Record how far the install got and
-		// what running it again does.
 		if len(ledger.Steps) == 0 {
-			logger.Install("install did not start, run the installer again to start it")
 			return &StopError{NotStarted: true, StartErr: startErr}
 		}
 		stop := &StopError{Paused: true, Total: len(steps), StartErr: startErr}
@@ -268,10 +267,6 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) (retErr error) {
 			}
 		}
 		stop.Again = againCommand(opts.Unattended, ledger)
-		logger.Install(
-			"install PAUSED after step %d of %d (%s), "+
-				"run %s to continue with step %d",
-			stop.DoneNum, stop.Total, stop.DoneName, stop.Again, stop.StepNum)
 		return stop
 	}
 
@@ -332,6 +327,29 @@ func withRootLoginOff(err error, ledger *installLedger) error {
 		return err
 	}
 	return &StopError{Err: err, RootLoginOff: true}
+}
+
+// logEnd says in the log why a run ended without finishing, so the log does
+// not just stop when the run returns. A pause says how far the install got and
+// what running it again does. A failed step's own line already says why.
+func logEnd(err error) {
+	stop, ok := errors.AsType[*StopError](err)
+	switch {
+	case err == nil:
+	case !ok:
+		logger.Install("install FAILED: %v", err)
+	case stop.Paused:
+		logger.Install(
+			"install PAUSED after step %d of %d (%s), "+
+				"run %s to continue with step %d",
+			stop.DoneNum, stop.Total, stop.DoneName, stop.Again, stop.StepNum)
+	case stop.NotStarted && stop.StartErr != nil:
+		logger.Install("install did not start: %v", stop.StartErr)
+	case stop.NotStarted:
+		logger.Install("install did not start, run the installer again to start it")
+	case stop.StepName == "":
+		logger.Install("install FAILED: %v", stop.Err)
+	}
 }
 
 func validateBaseInstallSteps(steps []InstallStep) error {
