@@ -27,8 +27,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/virtpriv/node/internal/bytesize"
 	"github.com/virtpriv/node/internal/host"
@@ -224,25 +222,9 @@ func factFailures(results []PreflightResult) error {
 func logFailures(label string, results []PreflightResult) {
 	for _, r := range results {
 		if r.Err != nil {
-			logger.Install("%s: %s: %s", label, r.Name, oneLine(r.Err.Error()))
+			logger.Install("%s: %s: %v", label, r.Name, r.Err)
 		}
 	}
-}
-
-// oneLine joins a message's paragraphs as sentences.
-func oneLine(msg string) string {
-	paras := strings.Split(msg, "\n\n")
-	for i, p := range paras {
-		if i > 0 && p != "" {
-			r, n := utf8.DecodeRuneInString(p)
-			p = string(unicode.ToUpper(r)) + p[n:]
-		}
-		if i < len(paras)-1 && !strings.HasSuffix(p, ".") {
-			p += "."
-		}
-		paras[i] = p
-	}
-	return strings.Join(paras, " ")
 }
 
 // detectContainer asks systemd which container the machine runs in. It is a
